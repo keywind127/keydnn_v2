@@ -36,6 +36,7 @@ Domain code is backend-agnostic and contains no NumPy or CUDA logic.
 Provides concrete implementations of domain contracts:
 
 - `Tensor` — NumPy-backed CPU tensor (with CUDA placeholder)
+- `Context` — backward propagation context for dynamic computation graphs
 - `Parameter` — trainable tensor with gradient semantics
 - `Module` — base class for neural network layers
 - `Linear` — fully connected (dense) layer implementation
@@ -63,6 +64,7 @@ The test suite is split into two categories:
 - Trainable `Parameter` class with gradient management
 - Module system with parameter registration
 - Fully connected `Linear` layer
+- Dynamic computation graph metadata via `Context`
 - Domain-level interfaces using `Protocol` (duck typing)
 - Comprehensive unit tests for contracts and behavior
 
@@ -70,7 +72,7 @@ The test suite is split into two categories:
 
 ## Roadmap (Planned)
 
-- Automatic differentiation (autograd)
+- Automatic differentiation (autograd execution engine)
 - Additional layers and activation functions
 - Optimizers (SGD, Adam)
 - CUDA-backed tensor operations
