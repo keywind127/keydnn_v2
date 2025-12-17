@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from typing import Optional
 
+from ..domain._parameter import IParameter
 from ._tensor import Tensor
 
 
-class Parameter(Tensor):
+class Parameter(Tensor, IParameter):
     """
     Trainable tensor wrapper.
 
