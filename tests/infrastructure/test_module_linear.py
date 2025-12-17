@@ -105,8 +105,7 @@ class TestLinearInfrastructure(TestCase):
         lin.weight.fill(0.0)
         lin.bias.fill(0.0)
 
-        x_np = np.array([[1.0, 2.0, 3.0],
-                         [4.0, 5.0, 6.0]], dtype=np.float32)
+        x_np = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=np.float32)
         x = Tensor(data=x_np, device=Device("cpu"))
 
         y = lin.forward(x)
@@ -114,6 +113,22 @@ class TestLinearInfrastructure(TestCase):
         self.assertEqual(y.shape, (2, 4))
         y_np = y.to_numpy()
         self.assertTrue(np.all(y_np == 0.0))
+
+    def test_linear_parameters_count(self):
+        lin_bias = Linear(3, 4, bias=True, device=Device("cpu"))
+        self.assertEqual(len(list(lin_bias.parameters())), 2)
+
+        lin_nobias = Linear(3, 4, bias=False, device=Device("cpu"))
+        self.assertEqual(len(list(lin_nobias.parameters())), 1)
+
+    def test_linear_forward_shape_validation(self):
+        lin = Linear(3, 4, device=Device("cpu"))
+
+        with self.assertRaises(ValueError):
+            lin.forward(Tensor((3,), Device("cpu")))  # not 2D
+
+        with self.assertRaises(ValueError):
+            lin.forward(Tensor((2, 5), Device("cpu")))  # feature mismatch
 
 
 if __name__ == "__main__":

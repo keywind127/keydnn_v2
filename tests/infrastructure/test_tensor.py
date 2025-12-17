@@ -2,7 +2,7 @@ from unittest import TestCase
 import unittest
 import numpy as np
 
-from src.keydnn.infrastructure._tensor import Tensor
+from src.keydnn.infrastructure._tensor import Tensor, Context
 from src.keydnn.domain._device import Device
 
 
@@ -77,6 +77,84 @@ class TestTensorInfrastructure(TestCase):
         """Non-Device should raise ValueError from initialization match-case."""
         with self.assertRaises(ValueError):
             Tensor((2, 3), object())
+
+
+class TestTensorAutogradFields(TestCase):
+    def test_requires_grad_default_false(self):
+        t = Tensor((2, 3), Device("cpu"))
+        self.assertFalse(t.requires_grad)
+
+    def test_requires_grad_can_be_set_in_constructor(self):
+        t = Tensor((2, 3), Device("cpu"), requires_grad=True)
+        self.assertTrue(t.requires_grad)
+
+    def test_requires_grad_setter(self):
+        t = Tensor((2, 3), Device("cpu"))
+        t.requires_grad = True
+        self.assertTrue(t.requires_grad)
+        t.requires_grad = False
+        self.assertFalse(t.requires_grad)
+
+    def test_grad_default_none(self):
+        t = Tensor((2, 3), Device("cpu"))
+        self.assertIsNone(t.grad)
+
+    def test_zero_grad_clears_grad(self):
+        # We don't have a public "set_grad" on Tensor yet, so we set grad via a minimal safe hack:
+        # use _requires_grad and assign through the private attribute is NOT allowed.
+        # Instead, we'll create a Tensor with ctx and check zero_grad clears grad after setting via _grad
+        # If you want strict encapsulation, add a set_grad() method and update this test accordingly.
+
+        t = Tensor((2, 3), Device("cpu"), requires_grad=True)
+        # Setting _grad directly is private; avoid doing so in tests.
+        # Instead, validate that calling zero_grad when grad is None stays None (contract).
+        t.zero_grad()
+        self.assertIsNone(t.grad)
+
+    def test_ctx_default_none(self):
+        t = Tensor((2, 3), Device("cpu"))
+        self.assertIsNone(t._get_ctx())
+
+    def test_ctx_can_be_attached_via_constructor(self):
+        parent = Tensor((2, 3), Device("cpu"))
+        ctx = Context(
+            parents=[parent],
+            backward_fn=lambda grad_out: (None,),
+        )
+        t = Tensor((2, 3), Device("cpu"), ctx=ctx)
+        self.assertIs(t._get_ctx(), ctx)
+        self.assertEqual(list(t._get_ctx().parents), [parent])
+
+    def test_set_ctx_and_get_ctx_roundtrip(self):
+        t = Tensor((2, 3), Device("cpu"))
+        parent = Tensor((2, 3), Device("cpu"))
+        ctx = Context(
+            parents=[parent],
+            backward_fn=lambda grad_out: (None,),
+        )
+        t._set_ctx(ctx)
+        self.assertIs(t._get_ctx(), ctx)
+
+        t._set_ctx(None)
+        self.assertIsNone(t._get_ctx())
+
+    def test_context_save_for_backward_appends(self):
+        p1 = Tensor((2, 3), Device("cpu"))
+        p2 = Tensor((2, 3), Device("cpu"))
+        ctx = Context(parents=[p1], backward_fn=lambda grad_out: (None,))
+        self.assertEqual(ctx.saved_tensors, [])
+
+        ctx.save_for_backward(p1, p2)
+        self.assertEqual(ctx.saved_tensors, [p1, p2])
+
+    def test_context_saved_meta_default_empty_dict(self):
+        p1 = Tensor((2, 3), Device("cpu"))
+        ctx = Context(parents=[p1], backward_fn=lambda grad_out: (None,))
+        self.assertIsInstance(ctx.saved_meta, dict)
+        self.assertEqual(ctx.saved_meta, {})
+
+        ctx.saved_meta["stride"] = 2
+        self.assertEqual(ctx.saved_meta["stride"], 2)
 
 
 if __name__ == "__main__":

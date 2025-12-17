@@ -1,7 +1,29 @@
+from dataclasses import dataclass, field
+from typing import Any, Callable, Optional, Sequence
+
 import numpy as np
 
 from ..domain._tensor import ITensor
 from ..domain._device import Device
+
+
+@dataclass
+class Context:
+    """
+    Backward context attached to an output Tensor.
+
+    - parents: input/parameter tensors used to compute this output
+    - backward_fn: computes grads for parents given grad_out
+    - saved_tensors/meta: anything needed for backward (e.g., indices, shapes)
+    """
+
+    parents: Sequence["Tensor"]
+    backward_fn: Callable[["Tensor"], Sequence[Optional["Tensor"]]]
+    saved_tensors: list["Tensor"] = field(default_factory=list)
+    saved_meta: dict[str, Any] = field(default_factory=dict)
+
+    def save_for_backward(self, *tensors: "Tensor") -> None:
+        self.saved_tensors.extend(tensors)
 
 
 class Tensor(ITensor):
@@ -11,15 +33,26 @@ class Tensor(ITensor):
             case Device() if self._device.is_cpu():
                 self._data = np.zeros(self._shape, dtype=np.float32)
             case Device() if self._device.is_cuda():
-                # Placeholder for CUDA tensor initialization
                 self._data = f"CUDA Tensor on device {self._device.index} with shape {self._shape}"
             case _:
                 raise ValueError("Unsupported device type")
 
-    def __init__(self, shape: tuple[int, ...], device: Device) -> None:
+    def __init__(
+        self,
+        shape: tuple[int, ...],
+        device: Device,
+        *,
+        requires_grad: bool = False,
+        ctx: Optional[Context] = None,
+    ) -> None:
         self._shape = shape
         self._device = device
         self.__initialize_data()
+
+        # --- autograd fields (optional) ---
+        self._requires_grad: bool = bool(requires_grad)
+        self._grad: Optional["Tensor"] = None
+        self._ctx: Optional[Context] = ctx
 
     @property
     def shape(self) -> tuple[int, ...]:
@@ -29,30 +62,40 @@ class Tensor(ITensor):
     def device(self) -> Device:
         return self._device
 
+    @property
+    def requires_grad(self) -> bool:
+        return self._requires_grad
+
+    @requires_grad.setter
+    def requires_grad(self, value: bool) -> None:
+        self._requires_grad = bool(value)
+
+    @property
+    def grad(self) -> Optional["Tensor"]:
+        return self._grad
+
+    def zero_grad(self) -> None:
+        self._grad = None
+
+    def _set_ctx(self, ctx: Optional[Context]) -> None:
+        """Internal hook: attach/detach backward context."""
+        self._ctx = ctx
+
+    def _get_ctx(self) -> Optional[Context]:
+        """Internal hook: access backward context (engine will use this)."""
+        return self._ctx
+
     def to_numpy(self) -> np.ndarray:
-        """
-        Return the underlying CPU ndarray.
-        CPU-only for now (until CUDA storage is implemented).
-        """
         if not self._device.is_cpu():
             raise RuntimeError("to_numpy() is only available for CPU tensors.")
-        # If you want stricter encapsulation: return self._data.copy()
         return self._data
 
     def fill(self, value: float) -> None:
-        """
-        Fill tensor with a scalar value.
-        CPU-only for now.
-        """
         if not self._device.is_cpu():
             raise RuntimeError("fill() is only available for CPU tensors.")
         self._data.fill(value)
 
     def debug_storage_repr(self) -> str:
-        """
-        A stable string representation of storage for testing/debugging.
-        (Useful now because CUDA is a placeholder string.)
-        """
         if self._device.is_cpu():
             arr: np.ndarray = self._data
             return f"CPU ndarray shape={arr.shape} dtype={arr.dtype}"

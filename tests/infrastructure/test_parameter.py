@@ -135,6 +135,16 @@ class TestParameterInfrastructure(TestCase):
         p.zero_grad()
         self.assertIsNone(p.grad)
 
+    def test_parameter_requires_grad_can_be_disabled(self):
+        p = Parameter((2, 2), Device("cpu"), requires_grad=False)
+        self.assertFalse(p.requires_grad)
+
+    def test_parameter_zero_grad_contract(self):
+        p = Parameter((2, 2), Device("cpu"))
+        # grad is optional and might be None initially; zero_grad should always be safe
+        p.zero_grad()
+        self.assertIsNone(p.grad)
+
 
 if __name__ == "__main__":
     unittest.main()
