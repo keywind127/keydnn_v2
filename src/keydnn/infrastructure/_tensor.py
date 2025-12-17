@@ -1,10 +1,10 @@
 import numpy as np
 
-from ..domain._tensor import _Tensor
+from ..domain._tensor import ITensor
 from ..domain._device import Device
 
 
-class Tensor(_Tensor):
+class Tensor(ITensor):
 
     def __initialize_data(self) -> None:
         match self._device:
