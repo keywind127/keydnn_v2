@@ -100,3 +100,13 @@ class Tensor(ITensor):
             arr: np.ndarray = self._data
             return f"CPU ndarray shape={arr.shape} dtype={arr.dtype}"
         return str(self._data)
+
+    def copy_from_numpy(self, arr: np.ndarray) -> None:
+        if not self._device.is_cpu():
+            raise RuntimeError("copy_from_numpy() is only available for CPU tensors.")
+        arr = np.asarray(arr, dtype=np.float32)
+        if arr.shape != self._shape:
+            raise ValueError(
+                f"Shape mismatch: tensor {self._shape} vs array {arr.shape}"
+            )
+        self._data[...] = arr

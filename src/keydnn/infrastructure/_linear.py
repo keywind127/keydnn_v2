@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Optional
+from typing import Optional, Sequence
 
 import numpy as np
 
@@ -8,7 +8,7 @@ from ..domain._device import Device
 from ..domain._tensor import ITensor
 from ._module import Module
 from ._parameter import Parameter
-from ._tensor import Tensor
+from ._tensor import Tensor, Context
 
 
 class Linear(Module):
@@ -69,54 +69,111 @@ class Linear(Module):
             self.bias = None
 
     def forward(self, x: ITensor) -> Tensor:
-        """
-        CPU implementation via NumPy (using to_numpy()).
-
-        Notes:
-        - Requires x to be CPU if your Tensor.to_numpy() is CPU-only.
-        - Produces an infrastructure Tensor output.
-        """
-        # Basic shape validation (expects x shape: (batch, in_features))
+        # --- validate input shape ---
         x_shape = x.shape
         if len(x_shape) != 2:
             raise ValueError(
-                f"Linear expects a 2D input (batch, in_features), got {x_shape}"
+                f"Linear expects 2D input (batch, in_features), got {x_shape}"
             )
         if x_shape[1] != self.in_features:
             raise ValueError(
-                f"Linear expects input feature dim {self.in_features}, got {x_shape[1]}"
+                f"Linear expects in_features={self.in_features}, got {x_shape[1]}"
             )
 
-        # NumPy compute path (CPU-only for now)
-        x_np = x.to_numpy()  # should raise on CUDA per your current Tensor contract
+        # --- CPU compute ---
+        x_np = x.to_numpy()
         w_np = self.weight.to_numpy()
-
-        y_np = x_np @ w_np.T  # (batch, out_features)
-
+        y_np = x_np @ w_np.T
         if self.bias is not None:
-            b_np = self.bias.to_numpy()
-            y_np = y_np + b_np  # broadcast over batch
+            y_np = y_np + self.bias.to_numpy()
 
-        # Create output Tensor (prefer data-based construction)
+        # --- build output tensor ---
         try:
-            return Tensor(data=y_np.astype(np.float32), device=self.device)
+            out = Tensor(data=y_np.astype(np.float32), device=self.device)
         except TypeError:
-            # Fallback: shape-only construction, then attempt to populate via a public method if available
             out = Tensor(y_np.shape, self.device)
-
             if hasattr(out, "from_numpy") and callable(getattr(out, "from_numpy")):
                 out.from_numpy(y_np.astype(np.float32))
-                return out
-
-            if hasattr(out, "copy_from_numpy") and callable(
+            elif hasattr(out, "copy_from_numpy") and callable(
                 getattr(out, "copy_from_numpy")
             ):
                 out.copy_from_numpy(y_np.astype(np.float32))
-                return out
+            else:
+                raise RuntimeError(
+                    "No public way to load NumPy data into Tensor. "
+                    "Add Tensor(data=...) or from_numpy()/copy_from_numpy()."
+                )
 
-            # No public way to set array yet -> fail loudly & clearly
-            raise RuntimeError(
-                "Tensor constructor does not accept data=..., and no public method "
-                "exists to load NumPy data into a Tensor. "
-                "Add Tensor(data=..., device=...) support or a public from_numpy()/copy_from_numpy()."
+        # --- autograd wiring (Context) ---
+        # We only attach ctx if something requires grad.
+        x_req = getattr(x, "requires_grad", False)
+        w_req = self.weight.requires_grad
+        b_req = self.bias is not None and self.bias.requires_grad
+
+        if x_req or w_req or b_req:
+            # IMPORTANT: parents should be actual Tensors so the engine can walk the graph.
+            if not isinstance(x, Tensor):
+                raise TypeError(
+                    "Linear.forward(): to attach autograd Context, x must be an infrastructure Tensor "
+                    "(so it can hold grad/ctx). Got ITensor without ctx."
+                )
+
+            # Save what we need for backward
+            # (Saving x and weight is sufficient for Linear backward.)
+            def backward_fn(grad_out: Tensor) -> Sequence[Optional[Tensor]]:
+                # grad_out: (batch, out_features)
+                go = grad_out.to_numpy()
+                x_saved, w_saved = ctx.saved_tensors
+                x_arr = x_saved.to_numpy()  # (batch, in_features)
+                w_arr = w_saved.to_numpy()  # (out_features, in_features)
+
+                grad_x = None
+                grad_w = None
+                grad_b = None
+
+                def _make_grad(device: Device, arr: np.ndarray) -> Tensor:
+                    """Create a Tensor by shape, then load NumPy into it via public API."""
+                    t = Tensor(arr.shape, device)
+                    if hasattr(t, "copy_from_numpy") and callable(
+                        getattr(t, "copy_from_numpy")
+                    ):
+                        t.copy_from_numpy(arr.astype(np.float32, copy=False))
+                        return t
+                    if hasattr(t, "from_numpy") and callable(getattr(t, "from_numpy")):
+                        t.from_numpy(arr.astype(np.float32, copy=False))
+                        return t
+                    raise RuntimeError(
+                        "No public way to load NumPy data into Tensor for gradients. "
+                        "Need copy_from_numpy() or from_numpy()."
+                    )
+
+                # dL/dx = dL/dy @ W
+                if x_saved.requires_grad:
+                    gx = go @ w_arr  # (batch, in_features)
+                    grad_x = _make_grad(x_saved.device, gx)
+
+                # dL/dW = (dL/dy)^T @ x
+                if w_saved.requires_grad:
+                    gw = go.T @ x_arr  # (out_features, in_features)
+                    grad_w = _make_grad(w_saved.device, gw)
+
+                # dL/db = sum over batch
+                if self.bias is not None and self.bias.requires_grad:
+                    gb = go.sum(axis=0)  # (out_features,)
+                    grad_b = _make_grad(self.bias.device, gb)
+
+                # parents order must match ctx.parents order below
+                if self.bias is None:
+                    return (grad_x, grad_w)
+                return (grad_x, grad_w, grad_b)
+
+            parents = (
+                [x, self.weight] if self.bias is None else [x, self.weight, self.bias]
             )
+            ctx = Context(parents=parents, backward_fn=backward_fn)
+            ctx.save_for_backward(x, self.weight)
+
+            out.requires_grad = True
+            out._set_ctx(ctx)  # uses your internal hook
+
+        return out
