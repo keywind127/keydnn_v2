@@ -901,3 +901,22 @@ class Tensor(ITensor):
             out._set_ctx(ctx)
 
         return out
+
+    def copy_from(self, other: "Tensor") -> None:
+        """
+        Copy data from another tensor into this tensor (in-place).
+
+        Notes
+        -----
+        This method encapsulates backend-specific copying (CPU->CPU, CUDA->CUDA).
+        """
+        if self.device != other.device:
+            self._raise_device_not_supported("copy_from_cross_device")  # for now
+        if self.shape != other.shape:
+            raise ValueError(f"Shape mismatch: {self.shape} vs {other.shape}")
+
+        if self.device.is_cpu():
+            self._data[...] = other.to_numpy()
+            return
+
+        self._raise_device_not_supported("copy_from")

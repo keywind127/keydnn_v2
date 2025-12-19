@@ -10,7 +10,7 @@ Design notes
 - Parameters with `grad is None` are skipped to support partial graphs and
   frozen weights.
 - Updates are applied by writing directly into parameter storage via
-  `copy_from_numpy`, keeping the optimizer independent from any autograd
+  `copy_from`, keeping the optimizer independent from any autograd
   execution engine details.
 - Current implementations target the NumPy CPU backend. CUDA support may be
   added once tensor kernels and device-aware gradient storage are available.
@@ -141,7 +141,7 @@ class SGD:
             updated = p - (self.lr * g)
 
             # Write back to parameter storage (CPU-only)
-            p.copy_from_numpy(updated.to_numpy())
+            p.copy_from(updated)
 
 
 @dataclass
@@ -324,4 +324,8 @@ class Adam:
             new_p = p_np - update
 
             # Write back to parameter storage (CPU-only)
-            p.copy_from_numpy(new_p)
+            tmp = Parameter(
+                shape=p.shape, device=p.device, requires_grad=False
+            )  # or Tensor
+            tmp.copy_from_numpy(new_p)
+            p.copy_from(tmp)
