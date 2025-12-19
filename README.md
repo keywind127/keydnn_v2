@@ -40,6 +40,7 @@ Provides concrete implementations of domain contracts:
 - `Parameter` — trainable tensor with gradient semantics
 - `Module` — base class for neural network layers
 - `Linear` — fully connected (dense) layer implementation
+- Activation functions (ReLU, Sigmoid)
 
 Infrastructure code is free to evolve independently as long as it satisfies domain interfaces.
 
@@ -59,7 +60,7 @@ The test suite is split into two categories:
 
 ## Implemented Features
 
-- Tensor abstraction with CPU (NumPy) backend
+- Tensor abstraction with CPU (NumPy) backend and arithmetic operator overloading
 - Device abstraction (`cpu`, `cuda:<index>`)
 - Trainable `Parameter` class with gradient management
 - Module system with parameter registration
@@ -73,7 +74,7 @@ The test suite is split into two categories:
 ## Roadmap (Planned)
 
 - Automatic differentiation (autograd execution engine)
-- Additional layers and activation functions
+- Additional layers and activation functions (beyond core ReLU/Sigmoid)
 - Optimizers (SGD, Adam)
 - CUDA-backed tensor operations
 - Model composition utilities (e.g., Sequential)
