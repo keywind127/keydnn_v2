@@ -42,6 +42,7 @@ Provides concrete implementations of domain contracts:
 - `Linear` — fully connected (dense) layer implementation
 - Activation functions (ReLU, Sigmoid, Softmax)
 - Loss functions (SSE, MSE, Binary Cross Entropy, Categorical Cross Entropy)
+- Optimizers (SGD, Adam)
 
 Infrastructure code is free to evolve independently as long as it satisfies domain interfaces.
 
@@ -79,7 +80,6 @@ The test suite is split into two categories:
 
 - Automatic differentiation (autograd execution engine)
 - Additional layers and activation functions (beyond core ReLU/Sigmoid)
-- Optimizers (SGD, Adam)
 - CUDA-backed tensor operations
 - Model composition utilities (e.g., Sequential)
 
