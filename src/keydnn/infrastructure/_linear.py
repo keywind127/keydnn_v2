@@ -1,3 +1,35 @@
+"""
+Linear (fully-connected) layer implementation.
+
+This module defines an infrastructure-level `Linear` layer that implements the
+domain-level `IModule` contract via the `Module` base class.
+
+The layer computes an affine transformation:
+
+    y = x @ W^T + b
+
+where:
+- x has shape (batch, in_features)
+- W has shape (out_features, in_features)
+- b has shape (out_features,) or is omitted if bias=False
+
+Autograd integration
+--------------------
+If any of the participating tensors require gradients, `Linear.forward` attaches
+a `Context` to the output tensor. The context stores parents and a `backward_fn`
+that computes gradients for:
+- input x
+- weight W
+- bias b (if present)
+
+Important limitations
+---------------------
+- This implementation currently supports CPU execution only (NumPy backend).
+- Broadcasting is not used; shapes must match the expected 2D input format.
+- For autograd wiring, the input `x` must be an infrastructure `Tensor`
+  (not just an `ITensor`) so that it can carry `ctx` and `grad` state.
+"""
+
 from __future__ import annotations
 
 from typing import Optional, Sequence
@@ -13,11 +45,45 @@ from ._tensor import Tensor, Context
 
 class Linear(Module):
     """
-    Fully connected (dense) layer: y = x @ W^T + b
+    Fully connected (dense) layer: y = x @ W^T + b.
 
-    Parameters:
-    - weight: (out_features, in_features)
-    - bias:   (out_features,) or None
+    Parameters are stored as trainable `Parameter` instances:
+    - weight: shape (out_features, in_features)
+    - bias:   shape (out_features,) or None
+
+    Parameters
+    ----------
+    in_features : int
+        Number of input features per example.
+    out_features : int
+        Number of output features per example.
+    bias : bool, optional
+        If True, include a learnable bias term. Defaults to True.
+    device : Optional[Device], optional
+        Device placement. Defaults to CPU if not provided.
+
+    Attributes
+    ----------
+    in_features : int
+        Number of input features.
+    out_features : int
+        Number of output features.
+    device : Device
+        Device placement for parameters and outputs.
+    weight : Parameter
+        Trainable weight matrix of shape (out_features, in_features).
+    bias : Optional[Parameter]
+        Trainable bias vector of shape (out_features,), or None if disabled.
+
+    Raises
+    ------
+    ValueError
+        If `in_features` or `out_features` is not a positive integer.
+
+    Notes
+    -----
+    Weight initialization uses a small random normal distribution (scaled by 0.01).
+    Bias initialization uses zeros.
     """
 
     def __init__(
@@ -27,6 +93,25 @@ class Linear(Module):
         bias: bool = True,
         device: Optional[Device] = None,
     ) -> None:
+        """
+        Initialize a Linear layer and register its parameters.
+
+        Parameters
+        ----------
+        in_features : int
+            Number of input features per example.
+        out_features : int
+            Number of output features per example.
+        bias : bool, optional
+            If True, include a learnable bias term.
+        device : Optional[Device], optional
+            Device placement. Defaults to CPU if not provided.
+
+        Raises
+        ------
+        ValueError
+            If `in_features` or `out_features` is not positive.
+        """
         super().__init__()
         if in_features <= 0 or out_features <= 0:
             raise ValueError("in_features and out_features must be positive integers")
@@ -69,6 +154,35 @@ class Linear(Module):
             self.bias = None
 
     def forward(self, x: ITensor) -> Tensor:
+        """
+        Compute the forward pass of the Linear layer.
+
+        Given input `x` of shape (batch, in_features), compute:
+
+            y = x @ W^T + b
+
+        Parameters
+        ----------
+        x : ITensor
+            Input tensor of shape (batch, in_features).
+
+        Returns
+        -------
+        Tensor
+            Output tensor of shape (batch, out_features).
+
+        Raises
+        ------
+        ValueError
+            If the input is not 2D, or if its feature dimension does not match
+            `self.in_features`.
+        TypeError
+            If gradient wiring is needed and `x` is not an infrastructure `Tensor`
+            (because it cannot carry autograd context).
+        RuntimeError
+            If there is no public API available to load NumPy data into the output
+            tensor (depending on Tensor construction capabilities).
+        """
         # --- validate input shape ---
         x_shape = x.shape
         if len(x_shape) != 2:
@@ -121,6 +235,29 @@ class Linear(Module):
             # Save what we need for backward
             # (Saving x and weight is sufficient for Linear backward.)
             def backward_fn(grad_out: Tensor) -> Sequence[Optional[Tensor]]:
+                """
+                Compute gradients for the Linear operation.
+
+                Parameters
+                ----------
+                grad_out : Tensor
+                    Gradient of the loss with respect to the layer output `y`,
+                    with shape (batch, out_features).
+
+                Returns
+                -------
+                Sequence[Optional[Tensor]]
+                    Gradients with respect to each parent listed in `ctx.parents`,
+                    in the same order. Entries may be None for parents that do not
+                    require gradients.
+
+                Notes
+                -----
+                The computed gradients (without broadcasting) are:
+                - dL/dx = dL/dy @ W
+                - dL/dW = (dL/dy)^T @ x
+                - dL/db = sum(dL/dy over batch)
+                """
                 # grad_out: (batch, out_features)
                 go = grad_out.to_numpy()
                 x_saved, w_saved = ctx.saved_tensors
@@ -132,7 +269,27 @@ class Linear(Module):
                 grad_b = None
 
                 def _make_grad(device: Device, arr: np.ndarray) -> Tensor:
-                    """Create a Tensor by shape, then load NumPy into it via public API."""
+                    """
+                    Create a gradient Tensor from a NumPy array using public APIs.
+
+                    Parameters
+                    ----------
+                    device : Device
+                        Target device for the gradient tensor.
+                    arr : np.ndarray
+                        Gradient values to load.
+
+                    Returns
+                    -------
+                    Tensor
+                        A newly created tensor holding the given gradient values.
+
+                    Raises
+                    ------
+                    RuntimeError
+                        If the Tensor class lacks a public method to load NumPy
+                        data (copy_from_numpy/from_numpy).
+                    """
                     t = Tensor(arr.shape, device)
                     if hasattr(t, "copy_from_numpy") and callable(
                         getattr(t, "copy_from_numpy")
