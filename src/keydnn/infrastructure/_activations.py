@@ -1,84 +1,89 @@
-from ..domain._function import Function
-from ._tensor import Tensor
-from ._function import exp
+from ._tensor import Tensor, Context
+from ._module import Module
+
+from ._function import SigmoidFn, ReLUFn, LeakyReLUFn, TanhFn
 
 
-class Sigmoid(Function):
-
-    @staticmethod
-    def forward(ctx, x: Tensor) -> Tensor:
-        out = 1 / (1 + exp(-x))
-        ctx.save_for_backward(out)
-        return out
-
-    @staticmethod
-    def backward(ctx, grad_out: Tensor) -> Tensor:
-        (out,) = ctx.saved_tensors
-        return grad_out * out * (1 - out)
-
-
-class ReLU(Function):
-
-    @staticmethod
-    def forward(ctx, x: Tensor) -> Tensor:
-        mask = x > 0
-        ctx.save_for_backward(mask)
-        return x * mask
-
-    @staticmethod
-    def backward(ctx, grad_out: Tensor) -> Tensor:
-        (mask,) = ctx.saved_tensors
-        return grad_out * mask
-
-
-class LeakyReLU(Function):
+class Sigmoid(Module):
     """
-    Leaky ReLU activation function.
-
-    f(x) = x               if x > 0
-         = alpha * x       otherwise
+    Sigmoid activation module.
     """
 
-    @staticmethod
-    def forward(ctx, x: Tensor, alpha: float = 0.01) -> Tensor:
-        pos_mask = x > 0
-        neg_mask = 1 - pos_mask
+    def forward(self, x: Tensor) -> Tensor:
+        ctx = Context(
+            parents=(x,),
+            backward_fn=lambda grad_out: (SigmoidFn.backward(ctx, grad_out),),
+        )
+        out = SigmoidFn.forward(ctx, x)
 
-        out = x * pos_mask + x * neg_mask * alpha
-
-        # Save masks and alpha for backward
-        ctx.save_for_backward(pos_mask, neg_mask)
-        ctx.saved_meta["alpha"] = alpha
+        if x.requires_grad:
+            out.requires_grad = True
+            out._set_ctx(ctx)
 
         return out
 
-    @staticmethod
-    def backward(ctx, grad_out: Tensor) -> Tensor:
-        pos_mask, neg_mask = ctx.saved_tensors
-        alpha = ctx.saved_meta["alpha"]
 
-        grad_x = grad_out * (pos_mask + neg_mask * alpha)
-        return grad_x
-
-
-class Tanh(Function):
+class ReLU(Module):
     """
-    Hyperbolic tangent activation function.
+    ReLU activation module.
     """
 
-    @staticmethod
-    def forward(ctx, x: Tensor) -> Tensor:
-        # Using exp-based definition (since exp is already implemented)
-        e_pos = exp(x)
-        e_neg = exp(-x)
+    def forward(self, x: Tensor) -> Tensor:
+        ctx = Context(
+            parents=(x,),
+            backward_fn=lambda grad_out: (ReLUFn.backward(ctx, grad_out),),
+        )
+        out = ReLUFn.forward(ctx, x)
 
-        out = (e_pos - e_neg) / (e_pos + e_neg)
+        if x.requires_grad:
+            out.requires_grad = True
+            out._set_ctx(ctx)
 
-        # Save output for backward: d/dx = 1 - tanh(x)^2
-        ctx.save_for_backward(out)
         return out
 
-    @staticmethod
-    def backward(ctx, grad_out: Tensor) -> Tensor:
-        (out,) = ctx.saved_tensors
-        return grad_out * (1 - out * out)
+
+class LeakyReLU(Module):
+    """
+    Leaky ReLU activation module.
+
+    Parameters
+    ----------
+    alpha : float, default=0.01
+        Slope for negative inputs.
+    """
+
+    def __init__(self, alpha: float = 0.01) -> None:
+        super().__init__()
+        self.alpha = float(alpha)
+
+    def forward(self, x: Tensor) -> Tensor:
+        ctx = Context(
+            parents=(x,),
+            backward_fn=lambda grad_out: (LeakyReLUFn.backward(ctx, grad_out),),
+        )
+        out = LeakyReLUFn.forward(ctx, x, alpha=self.alpha)
+
+        if x.requires_grad:
+            out.requires_grad = True
+            out._set_ctx(ctx)
+
+        return out
+
+
+class Tanh(Module):
+    """
+    Hyperbolic tangent activation module.
+    """
+
+    def forward(self, x: Tensor) -> Tensor:
+        ctx = Context(
+            parents=(x,),
+            backward_fn=lambda grad_out: (TanhFn.backward(ctx, grad_out),),
+        )
+        out = TanhFn.forward(ctx, x)
+
+        if x.requires_grad:
+            out.requires_grad = True
+            out._set_ctx(ctx)
+
+        return out

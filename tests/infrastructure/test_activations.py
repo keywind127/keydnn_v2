@@ -1,14 +1,9 @@
 import unittest
 import numpy as np
 
-from src.keydnn.domain._device import Device
-from src.keydnn.infrastructure._tensor import Tensor, Context
-from src.keydnn.infrastructure._activations import (
-    Sigmoid,
-    ReLU,
-    LeakyReLU,
-    Tanh,
-)
+from keydnn.domain._device import Device
+from keydnn.infrastructure._tensor import Tensor
+from keydnn.infrastructure._activations import Sigmoid, ReLU, LeakyReLU, Tanh
 
 
 def make_cpu_tensor(arr: np.ndarray, *, requires_grad: bool = False) -> Tensor:
@@ -24,248 +19,212 @@ def ones_like(t: Tensor) -> Tensor:
     return g
 
 
-class TestReLU(unittest.TestCase):
+class _ModuleActivationAsserts:
+    def assert_ctx_attached(self, out: Tensor, x: Tensor) -> None:
+        ctx = out._get_ctx()
+        self.assertIsNotNone(ctx, "Expected Context to be attached to output Tensor.")
+        assert ctx is not None
+        self.assertEqual(len(ctx.parents), 1)
+        self.assertIs(ctx.parents[0], x)
+        self.assertTrue(callable(ctx.backward_fn))
 
-    def test_relu_forward_values(self) -> None:
+    def assert_ctx_not_attached(self, out: Tensor) -> None:
+        self.assertIsNone(out._get_ctx(), "Did not expect Context to be attached.")
+
+
+class TestSigmoidModule(unittest.TestCase, _ModuleActivationAsserts):
+
+    def test_forward_matches_numpy(self) -> None:
+        mod = Sigmoid()
         x_np = np.array([[-2.0, -0.5, 0.0, 0.5, 3.0]], dtype=np.float32)
-        x = make_cpu_tensor(x_np, requires_grad=True)
+        x = make_cpu_tensor(x_np, requires_grad=False)
 
-        # ctx only needs save_for_backward for these tests
-        ctx = Context(parents=(x,), backward_fn=lambda grad_out: ())
-        y = ReLU.forward(ctx, x)
-
-        expected = np.maximum(0.0, x_np)
-        np.testing.assert_allclose(y.to_numpy(), expected, rtol=0, atol=0)
-
-        # Ensure backward saved something (mask)
-        self.assertEqual(len(ctx.saved_tensors), 1)
-
-    def test_relu_backward_mask(self) -> None:
-        x_np = np.array([[-2.0, -0.5, 0.0, 0.5, 3.0]], dtype=np.float32)
-        x = make_cpu_tensor(x_np, requires_grad=True)
-
-        ctx = Context(parents=(x,), backward_fn=lambda grad_out: ())
-        _ = ReLU.forward(ctx, x)
-
-        grad_out = make_cpu_tensor(np.ones_like(x_np), requires_grad=False)
-        grad_x = ReLU.backward(ctx, grad_out)
-
-        # derivative: 1 where x > 0 else 0 (note: x == 0 -> 0 in your implementation)
-        expected = (x_np > 0).astype(np.float32)
-        np.testing.assert_allclose(grad_x.to_numpy(), expected, rtol=0, atol=0)
-
-
-class TestSigmoid(unittest.TestCase):
-
-    def test_sigmoid_forward_values(self) -> None:
-        x_np = np.array([[-2.0, -0.5, 0.0, 0.5, 3.0]], dtype=np.float32)
-        x = make_cpu_tensor(x_np, requires_grad=True)
-
-        ctx = Context(parents=(x,), backward_fn=lambda grad_out: ())
-        y = Sigmoid.forward(ctx, x)
+        y = mod.forward(x)
 
         expected = 1.0 / (1.0 + np.exp(-x_np))
         np.testing.assert_allclose(y.to_numpy(), expected, rtol=1e-6, atol=1e-6)
 
-        # Ensure backward saved something (out)
-        self.assertEqual(len(ctx.saved_tensors), 1)
+        self.assertFalse(y.requires_grad)
+        self.assert_ctx_not_attached(y)
 
-    def test_sigmoid_backward_formula(self) -> None:
-        x_np = np.array([[-2.0, -0.5, 0.0, 0.5, 3.0]], dtype=np.float32)
+    def test_requires_grad_attaches_ctx_and_backward(self) -> None:
+        mod = Sigmoid()
+        x_np = np.array([[0.2, -0.7], [1.3, -2.1]], dtype=np.float32)
         x = make_cpu_tensor(x_np, requires_grad=True)
 
-        ctx = Context(parents=(x,), backward_fn=lambda grad_out: ())
-        y = Sigmoid.forward(ctx, x)
+        y = mod.forward(x)
 
-        grad_out = make_cpu_tensor(np.ones_like(x_np), requires_grad=False)
-        grad_x = Sigmoid.backward(ctx, grad_out)
+        self.assertTrue(y.requires_grad)
+        self.assert_ctx_attached(y, x)
+
+        ctx = y._get_ctx()
+        assert ctx is not None
+
+        # SigmoidFn saves output only
+        self.assertEqual(len(ctx.saved_tensors), 1)
+        saved_out = ctx.saved_tensors[0]
+        self.assertEqual(saved_out.shape, y.shape)
+
+        grad_out = ones_like(y)
+        grads = ctx.backward_fn(grad_out)
+
+        self.assertEqual(len(grads), 1)
+        grad_x = grads[0]
+        self.assertIsNotNone(grad_x)
+        assert grad_x is not None
+        self.assertEqual(grad_x.shape, x.shape)
 
         y_np = y.to_numpy()
-        expected = y_np * (1.0 - y_np)  # since grad_out is all ones
-        np.testing.assert_allclose(grad_x.to_numpy(), expected, rtol=1e-6, atol=1e-6)
-
-    def test_sigmoid_backward_finite_difference(self) -> None:
-        """
-        Optional: numeric gradient check on a small tensor.
-        Checks d/dx sum(sigmoid(x)) == sigmoid(x)*(1-sigmoid(x)).
-        """
-        x_np = np.array([[0.2, -0.7], [1.3, -2.1]], dtype=np.float32)
-        x = make_cpu_tensor(x_np, requires_grad=True)
-
-        ctx = Context(parents=(x,), backward_fn=lambda grad_out: ())
-        y = Sigmoid.forward(ctx, x)
-
-        # analytic grad for sum(y): grad_out is ones
-        grad_out = ones_like(y)
-        grad_x = Sigmoid.backward(ctx, grad_out).to_numpy()
-
-        # numeric grad via central differences
-        eps = 1e-3
-        num_grad = np.zeros_like(x_np, dtype=np.float32)
-
-        def f(x_arr: np.ndarray) -> float:
-            # sum(sigmoid(x)) using numpy for scalar function
-            s = 1.0 / (1.0 + np.exp(-x_arr))
-            return float(np.sum(s))
-
-        for i in range(x_np.shape[0]):
-            for j in range(x_np.shape[1]):
-                x_pos = x_np.copy()
-                x_neg = x_np.copy()
-                x_pos[i, j] += eps
-                x_neg[i, j] -= eps
-                num_grad[i, j] = (f(x_pos) - f(x_neg)) / (2.0 * eps)
-
-        np.testing.assert_allclose(grad_x, num_grad, rtol=1e-2, atol=1e-2)
+        expected_grad = y_np * (1.0 - y_np)
+        np.testing.assert_allclose(
+            grad_x.to_numpy(), expected_grad, rtol=1e-6, atol=1e-6
+        )
 
 
-class TestTanh(unittest.TestCase):
+class TestReLUModule(unittest.TestCase, _ModuleActivationAsserts):
 
-    def test_tanh_forward_values(self) -> None:
+    def test_forward_matches_numpy(self) -> None:
+        mod = ReLU()
+        x_np = np.array([[-2.0, -0.5, 0.0, 0.5, 3.0]], dtype=np.float32)
+        x = make_cpu_tensor(x_np, requires_grad=False)
+
+        y = mod.forward(x)
+
+        expected = np.maximum(0.0, x_np)
+        np.testing.assert_allclose(y.to_numpy(), expected, rtol=0, atol=0)
+
+        self.assertFalse(y.requires_grad)
+        self.assert_ctx_not_attached(y)
+
+    def test_requires_grad_attaches_ctx_and_backward(self) -> None:
+        mod = ReLU()
         x_np = np.array([[-2.0, -0.5, 0.0, 0.5, 3.0]], dtype=np.float32)
         x = make_cpu_tensor(x_np, requires_grad=True)
 
-        ctx = Context(parents=(x,), backward_fn=lambda grad_out: ())
-        y = Tanh.forward(ctx, x)
+        y = mod.forward(x)
 
-        expected = np.tanh(x_np)
-        np.testing.assert_allclose(y.to_numpy(), expected, rtol=1e-6, atol=1e-6)
+        self.assertTrue(y.requires_grad)
+        self.assert_ctx_attached(y, x)
 
-        # Forward should save output for backward
+        ctx = y._get_ctx()
+        assert ctx is not None
+
+        # ReLUFn saves mask only
         self.assertEqual(len(ctx.saved_tensors), 1)
+        mask = ctx.saved_tensors[0]
+        self.assertEqual(mask.shape, x.shape)
 
-    def test_tanh_backward_formula(self) -> None:
-        """
-        Checks: d/dx tanh(x) = 1 - tanh(x)^2
-        With grad_out = 1, grad_x = 1 - out^2.
-        """
+        grad_out = ones_like(y)
+        grads = ctx.backward_fn(grad_out)
+
+        self.assertEqual(len(grads), 1)
+        grad_x = grads[0]
+        self.assertIsNotNone(grad_x)
+        assert grad_x is not None
+
+        expected_grad = (x_np > 0).astype(np.float32)  # x==0 -> 0 by design (x > 0)
+        np.testing.assert_allclose(grad_x.to_numpy(), expected_grad, rtol=0, atol=0)
+
+
+class TestLeakyReLUModule(unittest.TestCase, _ModuleActivationAsserts):
+
+    def test_forward_matches_numpy_default_alpha(self) -> None:
+        mod = LeakyReLU()  # alpha=0.01
         x_np = np.array([[-2.0, -0.5, 0.0, 0.5, 3.0]], dtype=np.float32)
-        x = make_cpu_tensor(x_np, requires_grad=True)
+        x = make_cpu_tensor(x_np, requires_grad=False)
 
-        ctx = Context(parents=(x,), backward_fn=lambda grad_out: ())
-        out = Tanh.forward(ctx, x)
-
-        grad_out = ones_like(out)
-        grad_x = Tanh.backward(ctx, grad_out)
-
-        out_np = out.to_numpy()
-        expected = 1.0 - out_np * out_np
-        np.testing.assert_allclose(grad_x.to_numpy(), expected, rtol=1e-6, atol=1e-6)
-
-    def test_tanh_backward_finite_difference(self) -> None:
-        """
-        Numeric gradient check on sum(tanh(x)).
-        grad should match 1 - tanh(x)^2.
-        """
-        x_np = np.array([[0.2, -0.7], [1.3, -2.1]], dtype=np.float32)
-        x = make_cpu_tensor(x_np, requires_grad=True)
-
-        ctx = Context(parents=(x,), backward_fn=lambda grad_out: ())
-        out = Tanh.forward(ctx, x)
-
-        # analytic grad for sum(out): grad_out is ones
-        grad_out = ones_like(out)
-        grad_x = Tanh.backward(ctx, grad_out).to_numpy()
-
-        # numeric grad via central differences
-        eps = 1e-3
-        num_grad = np.zeros_like(x_np, dtype=np.float32)
-
-        def f(x_arr: np.ndarray) -> float:
-            return float(np.sum(np.tanh(x_arr)))
-
-        for i in range(x_np.shape[0]):
-            for j in range(x_np.shape[1]):
-                x_pos = x_np.copy()
-                x_neg = x_np.copy()
-                x_pos[i, j] += eps
-                x_neg[i, j] -= eps
-                num_grad[i, j] = (f(x_pos) - f(x_neg)) / (2.0 * eps)
-
-        np.testing.assert_allclose(grad_x, num_grad, rtol=1e-2, atol=1e-2)
-
-
-class TestLeakyReLU(unittest.TestCase):
-
-    def test_leaky_relu_forward_values_default_alpha(self) -> None:
-        x_np = np.array([[-2.0, -0.5, 0.0, 0.5, 3.0]], dtype=np.float32)
-        x = make_cpu_tensor(x_np, requires_grad=True)
-
-        ctx = Context(parents=(x,), backward_fn=lambda grad_out: ())
-        y = LeakyReLU.forward(ctx, x)  # default alpha=0.01
+        y = mod.forward(x)
 
         alpha = 0.01
         expected = np.where(x_np > 0, x_np, alpha * x_np)
         np.testing.assert_allclose(y.to_numpy(), expected, rtol=1e-6, atol=1e-6)
 
-        # Forward should save pos_mask and neg_mask
-        self.assertEqual(len(ctx.saved_tensors), 2)
-        self.assertIn("alpha", ctx.saved_meta)
+        self.assertFalse(y.requires_grad)
+        self.assert_ctx_not_attached(y)
 
-    def test_leaky_relu_forward_values_custom_alpha(self) -> None:
-        x_np = np.array([[-2.0, -0.5, 0.0, 0.5, 3.0]], dtype=np.float32)
-        x = make_cpu_tensor(x_np, requires_grad=True)
-
-        alpha = 0.2
-        ctx = Context(parents=(x,), backward_fn=lambda grad_out: ())
-        y = LeakyReLU.forward(ctx, x, alpha=alpha)
-
-        expected = np.where(x_np > 0, x_np, alpha * x_np)
-        np.testing.assert_allclose(y.to_numpy(), expected, rtol=1e-6, atol=1e-6)
-        self.assertEqual(ctx.saved_meta["alpha"], alpha)
-
-    def test_leaky_relu_backward_values(self) -> None:
-        """
-        Checks derivative:
-          1 for x > 0
-          alpha for x <= 0
-        """
-        x_np = np.array([[-2.0, -0.5, 0.0, 0.5, 3.0]], dtype=np.float32)
-        x = make_cpu_tensor(x_np, requires_grad=True)
-
+    def test_requires_grad_attaches_ctx_and_backward_custom_alpha(self) -> None:
         alpha = 0.1
-        ctx = Context(parents=(x,), backward_fn=lambda grad_out: ())
-        _ = LeakyReLU.forward(ctx, x, alpha=alpha)
+        mod = LeakyReLU(alpha=alpha)
 
-        grad_out_np = np.ones_like(x_np, dtype=np.float32)
-        grad_out = make_cpu_tensor(grad_out_np, requires_grad=False)
-        grad_x = LeakyReLU.backward(ctx, grad_out)
+        x_np = np.array([[-2.0, -0.5, 0.0, 0.5, 3.0]], dtype=np.float32)
+        x = make_cpu_tensor(x_np, requires_grad=True)
 
-        expected = np.where(x_np > 0, 1.0, alpha).astype(np.float32)
-        np.testing.assert_allclose(grad_x.to_numpy(), expected, rtol=0, atol=0)
+        y = mod.forward(x)
 
-    def test_leaky_relu_backward_finite_difference(self) -> None:
-        """
-        Numeric gradient check on sum(leaky_relu(x)).
-        """
+        self.assertTrue(y.requires_grad)
+        self.assert_ctx_attached(y, x)
+
+        ctx = y._get_ctx()
+        assert ctx is not None
+
+        # LeakyReLUFn saves pos_mask and neg_mask
+        self.assertEqual(len(ctx.saved_tensors), 2)
+        pos_mask, neg_mask = ctx.saved_tensors
+        self.assertEqual(pos_mask.shape, x.shape)
+        self.assertEqual(neg_mask.shape, x.shape)
+
+        self.assertIn("alpha", ctx.saved_meta)
+        self.assertAlmostEqual(float(ctx.saved_meta["alpha"]), alpha)
+
+        grad_out = ones_like(y)
+        grads = ctx.backward_fn(grad_out)
+
+        self.assertEqual(len(grads), 1)
+        grad_x = grads[0]
+        self.assertIsNotNone(grad_x)
+        assert grad_x is not None
+
+        expected_grad = np.where(x_np > 0, 1.0, alpha).astype(
+            np.float32
+        )  # x==0 -> alpha
+        np.testing.assert_allclose(grad_x.to_numpy(), expected_grad, rtol=0, atol=0)
+
+
+class TestTanhModule(unittest.TestCase, _ModuleActivationAsserts):
+
+    def test_forward_matches_numpy(self) -> None:
+        mod = Tanh()
+        x_np = np.array([[-2.0, -0.5, 0.0, 0.5, 3.0]], dtype=np.float32)
+        x = make_cpu_tensor(x_np, requires_grad=False)
+
+        y = mod.forward(x)
+
+        expected = np.tanh(x_np)
+        np.testing.assert_allclose(y.to_numpy(), expected, rtol=1e-6, atol=1e-6)
+
+        self.assertFalse(y.requires_grad)
+        self.assert_ctx_not_attached(y)
+
+    def test_requires_grad_attaches_ctx_and_backward(self) -> None:
+        mod = Tanh()
         x_np = np.array([[0.2, -0.7], [1.3, -2.1]], dtype=np.float32)
         x = make_cpu_tensor(x_np, requires_grad=True)
 
-        alpha = 0.05
-        ctx = Context(parents=(x,), backward_fn=lambda grad_out: ())
-        out = LeakyReLU.forward(ctx, x, alpha=alpha)
+        y = mod.forward(x)
 
-        grad_out = ones_like(out)
-        grad_x = LeakyReLU.backward(ctx, grad_out).to_numpy()
+        self.assertTrue(y.requires_grad)
+        self.assert_ctx_attached(y, x)
 
-        eps = 1e-3
-        num_grad = np.zeros_like(x_np, dtype=np.float32)
+        ctx = y._get_ctx()
+        assert ctx is not None
 
-        def leaky_relu_np(z: np.ndarray) -> np.ndarray:
-            return np.where(z > 0, z, alpha * z).astype(np.float32)
+        # TanhFn saves output only
+        self.assertEqual(len(ctx.saved_tensors), 1)
+        saved_out = ctx.saved_tensors[0]
+        self.assertEqual(saved_out.shape, y.shape)
 
-        def f(z: np.ndarray) -> float:
-            return float(np.sum(leaky_relu_np(z)))
+        grad_out = ones_like(y)
+        grads = ctx.backward_fn(grad_out)
 
-        for i in range(x_np.shape[0]):
-            for j in range(x_np.shape[1]):
-                z_pos = x_np.copy()
-                z_neg = x_np.copy()
-                z_pos[i, j] += eps
-                z_neg[i, j] -= eps
-                num_grad[i, j] = (f(z_pos) - f(z_neg)) / (2.0 * eps)
+        self.assertEqual(len(grads), 1)
+        grad_x = grads[0]
+        self.assertIsNotNone(grad_x)
+        assert grad_x is not None
 
-        np.testing.assert_allclose(grad_x, num_grad, rtol=1e-2, atol=1e-2)
+        expected_grad = 1.0 - np.tanh(x_np) ** 2
+        np.testing.assert_allclose(
+            grad_x.to_numpy(), expected_grad, rtol=1e-6, atol=1e-6
+        )
 
 
 if __name__ == "__main__":

@@ -3,7 +3,7 @@ import numpy as np
 
 from keydnn.domain._device import Device
 from keydnn.infrastructure._tensor import Tensor, Context
-from keydnn.infrastructure._function import Exp, exp
+from keydnn.infrastructure._function import ExpFn, exp
 
 
 def make_cpu_tensor(arr: np.ndarray, *, requires_grad: bool = False) -> Tensor:
@@ -57,7 +57,7 @@ class TestExpFunction(unittest.TestCase):
         x = make_cpu_tensor(x_np, requires_grad=True)
 
         ctx = Context(parents=(x,), backward_fn=lambda grad_out: ())
-        y = Exp.forward(ctx, x)
+        y = ExpFn.forward(ctx, x)
 
         expected = np.exp(x_np)
         np.testing.assert_allclose(y.to_numpy(), expected, rtol=1e-6, atol=1e-6)
@@ -67,12 +67,12 @@ class TestExpFunction(unittest.TestCase):
     def test_exp_forward_requires_grad_propagation(self) -> None:
         x = make_cpu_tensor(np.array([[0.5]], dtype=np.float32), requires_grad=False)
         ctx = Context(parents=(x,), backward_fn=lambda grad_out: ())
-        y = Exp.forward(ctx, x)
+        y = ExpFn.forward(ctx, x)
         self.assertFalse(y.requires_grad)
 
         x2 = make_cpu_tensor(np.array([[0.5]], dtype=np.float32), requires_grad=True)
         ctx2 = Context(parents=(x2,), backward_fn=lambda grad_out: ())
-        y2 = Exp.forward(ctx2, x2)
+        y2 = ExpFn.forward(ctx2, x2)
         self.assertTrue(y2.requires_grad)
 
     @unittest.skipUnless(HAS_TENSOR_MUL, "Tensor * Tensor not implemented yet")
@@ -84,10 +84,10 @@ class TestExpFunction(unittest.TestCase):
         x = make_cpu_tensor(x_np, requires_grad=True)
 
         ctx = Context(parents=(x,), backward_fn=lambda grad_out: ())
-        y = Exp.forward(ctx, x)
+        y = ExpFn.forward(ctx, x)
 
         grad_out = ones_like(y)
-        grad_x = Exp.backward(ctx, grad_out)
+        grad_x = ExpFn.backward(ctx, grad_out)
 
         expected = np.exp(x_np)
         np.testing.assert_allclose(grad_x.to_numpy(), expected, rtol=1e-6, atol=1e-6)
@@ -101,12 +101,12 @@ class TestExpFunction(unittest.TestCase):
         x = make_cpu_tensor(x_np, requires_grad=True)
 
         ctx = Context(parents=(x,), backward_fn=lambda grad_out: ())
-        _ = Exp.forward(ctx, x)
+        _ = ExpFn.forward(ctx, x)
 
         grad_out_np = np.array([[2.0, 3.0]], dtype=np.float32)
         grad_out = make_cpu_tensor(grad_out_np, requires_grad=False)
 
-        grad_x = Exp.backward(ctx, grad_out)
+        grad_x = ExpFn.backward(ctx, grad_out)
 
         expected = grad_out_np * np.exp(x_np)
         np.testing.assert_allclose(grad_x.to_numpy(), expected, rtol=1e-6, atol=1e-6)
