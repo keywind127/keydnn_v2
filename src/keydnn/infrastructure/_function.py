@@ -25,6 +25,8 @@ Notes
   ops (e.g., `exp`) to reuse autograd wiring.
 """
 
+from typing import Tuple
+
 import numpy as np
 
 from ..domain._function import Function
@@ -398,3 +400,131 @@ class TanhFn(Function):
         """
         (out,) = ctx.saved_tensors
         return grad_out * (1 - out * out)
+
+
+class SoftmaxFn(Function):
+    """
+    Softmax operation over a specified tensor dimension.
+
+    This function computes the softmax of the input tensor along the given
+    axis, producing a probability distribution that sums to 1 along that
+    dimension.
+
+    Notes
+    -----
+    - The implementation uses a numerically stable formulation by subtracting
+      the maximum value along the softmax axis prior to exponentiation.
+    - This operation is currently implemented using NumPy to avoid requiring
+      axis-aware reduction operations in the `Tensor` API.
+    - The backward pass is implemented as a Jacobian–vector product (JVP),
+      avoiding explicit construction of the full softmax Jacobian.
+    """
+
+    @staticmethod
+    def forward(ctx: Context, x: Tensor, *, axis: int = -1) -> Tensor:
+        """
+        Compute the softmax of the input tensor along a specified axis.
+
+        Parameters
+        ----------
+        ctx : Context
+            Autograd context used to store intermediate values for backward.
+        x : Tensor
+            Input tensor whose values will be normalized using softmax.
+        axis : int, optional
+            Dimension along which softmax is computed. Defaults to the last
+            dimension (`-1`).
+
+        Returns
+        -------
+        Tensor
+            A tensor of the same shape as `x`, where values along the specified
+            axis form a probability distribution (sum to 1).
+
+        Raises
+        ------
+        ValueError
+            If the specified axis is invalid for the input tensor shape.
+        RuntimeError
+            If called on a non-CPU tensor.
+
+        Notes
+        -----
+        - The returned tensor does not require gradients by default; gradient
+          tracking is handled by the enclosing `Module` wrapper when needed.
+        - The output tensor is saved in the context for use during the backward
+          pass.
+        """
+        if not x.device.is_cpu():
+            x._raise_device_not_supported("softmax")
+
+        x_np = x.to_numpy()
+
+        # Normalize axis
+        axis_ = axis if axis >= 0 else x_np.ndim + axis
+        if axis_ < 0 or axis_ >= x_np.ndim:
+            raise ValueError(f"Invalid softmax axis {axis} for ndim={x_np.ndim}")
+
+        # Stable softmax
+        x_shift = x_np - np.max(x_np, axis=axis_, keepdims=True)
+        exp_x = np.exp(x_shift)
+        y_np = exp_x / np.sum(exp_x, axis=axis_, keepdims=True)
+
+        y = Tensor(shape=y_np.shape, device=x.device, requires_grad=False)
+        y.copy_from_numpy(y_np.astype(np.float32))
+
+        # Save output for backward (most convenient)
+        ctx.save_for_backward(y)
+        ctx.saved_meta["axis"] = axis_
+
+        return y
+
+    @staticmethod
+    def backward(ctx: Context, grad_out: Tensor) -> Tuple[Tensor]:
+        """
+        Compute gradients of the softmax operation with respect to the input.
+
+        Parameters
+        ----------
+        ctx : Context
+            Autograd context populated during the forward pass.
+        grad_out : Tensor
+            Gradient of the loss with respect to the softmax output. Must have
+            the same shape as the forward output.
+
+        Returns
+        -------
+        tuple[Tensor]
+            A single-element tuple containing the gradient with respect to the
+            input tensor `x`.
+
+        Notes
+        -----
+        The gradient is computed using the softmax Jacobian–vector product:
+
+            dx = y * (g - sum(g * y, axis))
+
+        where:
+        - `y` is the softmax output,
+        - `g` is the upstream gradient (`grad_out`).
+
+        This formulation avoids explicit construction of the full Jacobian and
+        ensures that gradients along the softmax axis sum to zero.
+        """
+        (y,) = ctx.saved_tensors
+        axis = int(ctx.saved_meta["axis"])
+
+        if not grad_out.device.is_cpu():
+            grad_out._raise_device_not_supported("softmax_backward")
+
+        y_np = y.to_numpy()
+        g_np = grad_out.to_numpy()
+
+        # Jacobian-vector product for softmax:
+        # dx = y * (g - sum(g*y, axis))
+        dot = np.sum(g_np * y_np, axis=axis, keepdims=True)
+        dx_np = y_np * (g_np - dot)
+
+        dx = Tensor(shape=dx_np.shape, device=y.device, requires_grad=False)
+        dx.copy_from_numpy(dx_np.astype(np.float32))
+        return (dx,)

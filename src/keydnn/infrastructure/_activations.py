@@ -30,7 +30,7 @@ Notes
 from ._tensor import Tensor, Context
 from ._module import Module
 
-from ._function import SigmoidFn, ReLUFn, LeakyReLUFn, TanhFn
+from ._function import SigmoidFn, ReLUFn, LeakyReLUFn, TanhFn, SoftmaxFn
 
 
 class Sigmoid(Module):
@@ -230,6 +230,67 @@ class Tanh(Module):
             backward_fn=lambda grad_out: (TanhFn.backward(ctx, grad_out),),
         )
         out = TanhFn.forward(ctx, x)
+
+        if x.requires_grad:
+            out.requires_grad = True
+            out._set_ctx(ctx)
+
+        return out
+
+
+class Softmax(Module):
+    """
+    Softmax activation module.
+
+    This module applies the softmax function to its input tensor along a
+    specified axis, producing a normalized probability distribution.
+
+    By default, softmax is applied over the last dimension, which is the
+    standard convention for classification outputs.
+    """
+
+    def __init__(self, *, axis: int = -1) -> None:
+        """
+        Construct a Softmax activation module.
+
+        Parameters
+        ----------
+        axis : int, optional
+            Dimension along which the softmax operation is applied.
+            Defaults to the last dimension (`-1`).
+        """
+        self._axis = axis
+
+    def forward(self, x: Tensor) -> Tensor:
+        """
+        Apply the softmax activation to the input tensor.
+
+        Parameters
+        ----------
+        x : Tensor
+            Input tensor to which softmax will be applied.
+
+        Returns
+        -------
+        Tensor
+            A tensor of the same shape as `x`, where values along the specified
+            axis form a probability distribution (sum to 1).
+
+        Notes
+        -----
+        - This method delegates the numerical computation to `SoftmaxFn`,
+          attaching a backward `Context` when gradient tracking is enabled.
+        - The returned tensor will participate in autograd only if
+          `x.requires_grad` is True.
+        - Gradient propagation is implemented via a Jacobian–vector product
+          in `SoftmaxFn.backward`, avoiding explicit Jacobian construction.
+        """
+        ctx = Context(
+            parents=(x,),
+            backward_fn=lambda grad_out: (SoftmaxFn.backward(ctx, grad_out)[0],),
+        )
+
+        out = SoftmaxFn.forward(ctx, x, axis=self._axis)
 
         if x.requires_grad:
             out.requires_grad = True

@@ -1,9 +1,11 @@
 import unittest
 import numpy as np
 
-from keydnn.domain._device import Device
-from keydnn.infrastructure._tensor import Tensor
-from keydnn.infrastructure._activations import Sigmoid, ReLU, LeakyReLU, Tanh
+from src.keydnn.domain._device import Device
+from src.keydnn.infrastructure._tensor import Tensor, Context
+from src.keydnn.infrastructure._activations import Sigmoid, ReLU, LeakyReLU, Tanh
+from src.keydnn.infrastructure._function import SoftmaxFn
+from src.keydnn.infrastructure._activations import Softmax
 
 
 def make_cpu_tensor(arr: np.ndarray, *, requires_grad: bool = False) -> Tensor:
@@ -17,6 +19,65 @@ def ones_like(t: Tensor) -> Tensor:
     g = Tensor(shape=t.shape, device=t.device, requires_grad=False)
     g.fill(1.0)
     return g
+
+
+def _cpu() -> Device:
+    # Adjust if your Device API differs
+    return Device("cpu")
+
+
+def tensor_from_np(arr, *, requires_grad: bool = False) -> Tensor:
+    arr = np.asarray(arr, dtype=np.float32)
+    t = Tensor(shape=arr.shape, device=_cpu(), requires_grad=requires_grad)
+    t.copy_from_numpy(arr)
+    return t
+
+
+def scalar_tensor(x: float) -> Tensor:
+    t = Tensor(shape=(), device=_cpu(), requires_grad=False)
+    t.copy_from_numpy(np.array(x, dtype=np.float32))
+    return t
+
+
+def as_np(t: Tensor) -> np.ndarray:
+    return np.asarray(t.to_numpy(), dtype=np.float32)
+
+
+def stable_softmax_np(x: np.ndarray, axis: int = -1) -> np.ndarray:
+    x = np.asarray(x, dtype=np.float32)
+    x_shift = x - np.max(x, axis=axis, keepdims=True)
+    exp_x = np.exp(x_shift)
+    return exp_x / np.sum(exp_x, axis=axis, keepdims=True)
+
+
+def finite_diff_grad_x(
+    forward_fn, x_np: np.ndarray, eps: float = 1e-4, axis: int = -1
+) -> np.ndarray:
+    """
+    Central difference gradient wrt x for scalar objective:
+      L(x) = sum( softmax(x) * w )
+    where w is fixed (in closure) via forward_fn.
+    forward_fn: callable(x_tensor) -> scalar float
+    """
+    x_np = np.asarray(x_np, dtype=np.float32)
+    grad = np.zeros_like(x_np, dtype=np.float32)
+
+    it = np.nditer(x_np, flags=["multi_index"], op_flags=["readwrite"])
+    while not it.finished:
+        idx = it.multi_index
+
+        x_plus = x_np.copy()
+        x_minus = x_np.copy()
+        x_plus[idx] += eps
+        x_minus[idx] -= eps
+
+        loss_plus = forward_fn(x_plus)
+        loss_minus = forward_fn(x_minus)
+
+        grad[idx] = (loss_plus - loss_minus) / (2.0 * eps)
+        it.iternext()
+
+    return grad
 
 
 class _ModuleActivationAsserts:
@@ -225,6 +286,54 @@ class TestTanhModule(unittest.TestCase, _ModuleActivationAsserts):
         np.testing.assert_allclose(
             grad_x.to_numpy(), expected_grad, rtol=1e-6, atol=1e-6
         )
+
+
+class TestSoftmaxModule(unittest.TestCase):
+    def test_module_forward_matches_function(self):
+        x_np = np.array([[1.0, 2.0, 3.0]], dtype=np.float32)
+        x = tensor_from_np(x_np, requires_grad=True)
+
+        sm = Softmax(axis=-1)
+
+        # Module forward
+        y_mod = sm(x)
+
+        # Function forward (fresh ctx)
+        ctx = Context(parents=(x,), backward_fn=lambda _g: ())
+        y_fn = SoftmaxFn.forward(ctx, x, axis=-1)
+
+        np.testing.assert_allclose(as_np(y_mod), as_np(y_fn), rtol=1e-6, atol=1e-7)
+
+        # If input requires grad, module output should require grad as well
+        self.assertTrue(y_mod.requires_grad)
+
+    def test_module_backward_matches_function_backward(self):
+        x_np = np.array([[0.2, -0.1, 0.3]], dtype=np.float32)
+        g_np = np.array([[0.5, -0.25, 0.75]], dtype=np.float32)
+
+        x1 = tensor_from_np(x_np, requires_grad=True)
+        x2 = tensor_from_np(x_np, requires_grad=True)
+        g = tensor_from_np(g_np, requires_grad=False)
+
+        sm = Softmax(axis=-1)
+
+        # Module path: get gradient via attached Context (no Tensor.backward yet)
+        y_mod = sm(x1)
+
+        ctx_mod = y_mod._get_ctx()
+        self.assertIsNotNone(ctx_mod, "Softmax module output should have an attached Context when requires_grad=True.")
+
+        (grad_mod_x,) = ctx_mod.backward_fn(g)
+
+        # Function path: direct backward
+        ctx_fn = Context(parents=(x2,), backward_fn=lambda _g: ())
+        _ = SoftmaxFn.forward(ctx_fn, x2, axis=-1)
+        (grad_fn_x,) = SoftmaxFn.backward(ctx_fn, g)
+
+        np.testing.assert_allclose(
+            grad_mod_x.to_numpy(), grad_fn_x.to_numpy(), rtol=1e-6, atol=1e-7
+        )
+
 
 
 if __name__ == "__main__":

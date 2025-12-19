@@ -8,6 +8,7 @@ from src.keydnn.infrastructure._function import (
     ReLUFn,
     LeakyReLUFn,
     TanhFn,
+    SoftmaxFn,
 )
 
 
@@ -22,6 +23,65 @@ def ones_like(t: Tensor) -> Tensor:
     g = Tensor(shape=t.shape, device=t.device, requires_grad=False)
     g.fill(1.0)
     return g
+
+
+def _cpu() -> Device:
+    # Adjust if your Device API differs
+    return Device("cpu")
+
+
+def tensor_from_np(arr, *, requires_grad: bool = False) -> Tensor:
+    arr = np.asarray(arr, dtype=np.float32)
+    t = Tensor(shape=arr.shape, device=_cpu(), requires_grad=requires_grad)
+    t.copy_from_numpy(arr)
+    return t
+
+
+def scalar_tensor(x: float) -> Tensor:
+    t = Tensor(shape=(), device=_cpu(), requires_grad=False)
+    t.copy_from_numpy(np.array(x, dtype=np.float32))
+    return t
+
+
+def as_np(t: Tensor) -> np.ndarray:
+    return np.asarray(t.to_numpy(), dtype=np.float32)
+
+
+def stable_softmax_np(x: np.ndarray, axis: int = -1) -> np.ndarray:
+    x = np.asarray(x, dtype=np.float32)
+    x_shift = x - np.max(x, axis=axis, keepdims=True)
+    exp_x = np.exp(x_shift)
+    return exp_x / np.sum(exp_x, axis=axis, keepdims=True)
+
+
+def finite_diff_grad_x(
+    forward_fn, x_np: np.ndarray, eps: float = 1e-4, axis: int = -1
+) -> np.ndarray:
+    """
+    Central difference gradient wrt x for scalar objective:
+      L(x) = sum( softmax(x) * w )
+    where w is fixed (in closure) via forward_fn.
+    forward_fn: callable(x_tensor) -> scalar float
+    """
+    x_np = np.asarray(x_np, dtype=np.float32)
+    grad = np.zeros_like(x_np, dtype=np.float32)
+
+    it = np.nditer(x_np, flags=["multi_index"], op_flags=["readwrite"])
+    while not it.finished:
+        idx = it.multi_index
+
+        x_plus = x_np.copy()
+        x_minus = x_np.copy()
+        x_plus[idx] += eps
+        x_minus[idx] -= eps
+
+        loss_plus = forward_fn(x_plus)
+        loss_minus = forward_fn(x_minus)
+
+        grad[idx] = (loss_plus - loss_minus) / (2.0 * eps)
+        it.iternext()
+
+    return grad
 
 
 class TestReLU(unittest.TestCase):
@@ -266,6 +326,91 @@ class TestLeakyReLU(unittest.TestCase):
                 num_grad[i, j] = (f(z_pos) - f(z_neg)) / (2.0 * eps)
 
         np.testing.assert_allclose(grad_x, num_grad, rtol=1e-2, atol=1e-2)
+
+
+class TestSoftmaxFn(unittest.TestCase):
+    def test_forward_matches_numpy_2d_axis_last(self):
+        x_np = np.array([[1.0, 2.0, 3.0], [0.5, -1.0, 0.0]], dtype=np.float32)
+        x = tensor_from_np(x_np)
+
+        ctx = Context(parents=(x,), backward_fn=lambda _g: ())
+        y = SoftmaxFn.forward(ctx, x, axis=-1)
+
+        expected = stable_softmax_np(x_np, axis=-1)
+        np.testing.assert_allclose(as_np(y), expected, rtol=1e-6, atol=1e-7)
+
+    def test_forward_probabilities_sum_to_one(self):
+        x_np = np.array([[10.0, 0.0, -10.0], [1.0, 1.0, 1.0]], dtype=np.float32)
+        x = tensor_from_np(x_np)
+
+        ctx = Context(parents=(x,), backward_fn=lambda _g: ())
+        y = SoftmaxFn.forward(ctx, x, axis=-1)
+
+        sums = np.sum(as_np(y), axis=-1)
+        np.testing.assert_allclose(sums, np.ones_like(sums), rtol=1e-6, atol=1e-6)
+
+        self.assertTrue(np.all(as_np(y) >= 0.0))
+
+    def test_backward_jvp_matches_closed_form(self):
+        """
+        Validate backward formula:
+          dx = y * (g - sum(g*y, axis, keepdims=True))
+        """
+        x_np = np.array([[1.0, 2.0, 3.0], [-1.0, 0.0, 1.0]], dtype=np.float32)
+        g_np = np.array([[0.2, -0.1, 0.05], [1.0, -2.0, 0.5]], dtype=np.float32)
+
+        x = tensor_from_np(x_np, requires_grad=True)
+        grad_out = tensor_from_np(g_np, requires_grad=False)
+
+        ctx = Context(parents=(x,), backward_fn=lambda _g: ())
+        y = SoftmaxFn.forward(ctx, x, axis=-1)
+
+        (dx,) = SoftmaxFn.backward(ctx, grad_out)
+
+        y_np = stable_softmax_np(x_np, axis=-1)
+        dot = np.sum(g_np * y_np, axis=-1, keepdims=True)
+        expected = y_np * (g_np - dot)
+
+        np.testing.assert_allclose(as_np(dx), expected, rtol=1e-6, atol=1e-7)
+
+        # Sum of gradients along softmax axis should be ~0 (property of softmax)
+        row_sums = np.sum(as_np(dx), axis=-1)
+        np.testing.assert_allclose(
+            row_sums, np.zeros_like(row_sums), rtol=1e-6, atol=1e-6
+        )
+
+    def test_backward_matches_finite_difference(self):
+        """
+        Finite-difference check of JVP by constructing a scalar objective:
+          L = sum(softmax(x) * w)
+        Then dL/dx = softmax_backward(grad_out=w)
+        """
+        x_np = np.array([[0.1, -0.2, 0.3], [1.5, 0.0, -1.0]], dtype=np.float32)
+        w_np = np.array([[0.3, -0.4, 0.1], [0.05, 0.2, -0.1]], dtype=np.float32)
+
+        x = tensor_from_np(x_np, requires_grad=True)
+        w = tensor_from_np(w_np, requires_grad=False)
+
+        ctx = Context(parents=(x,), backward_fn=lambda _g: ())
+        y = SoftmaxFn.forward(ctx, x, axis=-1)
+
+        # Analytical gradient via backward JVP
+        (dx,) = SoftmaxFn.backward(ctx, w)
+
+        def scalar_objective(x_arr: np.ndarray) -> float:
+            # Use numpy forward for objective; keeps test independent of Tensor ops
+            y_arr = stable_softmax_np(x_arr, axis=-1)
+            return float(np.sum(y_arr * w_np))
+
+        numeric = finite_diff_grad_x(scalar_objective, x_np, eps=1e-4, axis=-1)
+
+        np.testing.assert_allclose(as_np(dx), numeric, rtol=2e-3, atol=2e-3)
+
+    def test_invalid_axis_raises(self):
+        x = tensor_from_np(np.array([[1.0, 2.0, 3.0]], dtype=np.float32))
+        ctx = Context(parents=(x,), backward_fn=lambda _g: ())
+        with self.assertRaises(ValueError):
+            _ = SoftmaxFn.forward(ctx, x, axis=5)
 
 
 if __name__ == "__main__":
