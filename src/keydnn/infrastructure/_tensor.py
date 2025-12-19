@@ -1,10 +1,14 @@
+from __future__ import annotations
+from typing import Any, Union, Callable, Optional, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Callable, Optional, Sequence
 
 import numpy as np
 
 from ..domain._tensor import ITensor
 from ..domain._device import Device
+from ..domain._errors import DeviceNotSupportedError
+
+Number = Union[int, float]
 
 
 @dataclass
@@ -110,3 +114,177 @@ class Tensor(ITensor):
                 f"Shape mismatch: tensor {self._shape} vs array {arr.shape}"
             )
         self._data[...] = arr
+
+    # ----------------------------
+    # Internal helpers
+    # ----------------------------
+    def _raise_device_not_supported(self, op: str) -> "None":
+        raise DeviceNotSupportedError(op=op, device=str(self._device))
+
+    @staticmethod
+    def _result_requires_grad(*parents: "Tensor") -> bool:
+        return any(p.requires_grad for p in parents)
+
+    @staticmethod
+    def _as_tensor_like(x: Union["Tensor", Number], like: "Tensor") -> "Tensor":
+        """
+        Convert Python scalar to a Tensor with same shape/device as `like`.
+        If already a Tensor, return it.
+        """
+        if isinstance(x, Tensor):
+            return x
+        if isinstance(x, (int, float)):
+            t = Tensor(shape=like.shape, device=like.device, requires_grad=False)
+            t.fill(float(x))
+            return t
+        raise TypeError(f"Unsupported operand type: {type(x)!r}")
+
+    @staticmethod
+    def _binary_op_shape_check(a: "Tensor", b: "Tensor") -> None:
+        # Minimal rule for now: exact shape match (no broadcasting yet)
+        if a.shape != b.shape:
+            raise ValueError(f"Shape mismatch: {a.shape} vs {b.shape}")
+
+    # ----------------------------
+    # Unary ops
+    # ----------------------------
+    def __neg__(self) -> "Tensor":
+        if self._device.is_cpu():
+            out = Tensor(
+                shape=self.shape, device=self.device, requires_grad=self.requires_grad
+            )
+            out.copy_from_numpy(-self.to_numpy())
+
+            if self.requires_grad:
+                ctx = Context(
+                    parents=(self,),
+                    backward_fn=lambda grad_out: (-(grad_out),),
+                )
+                out._set_ctx(ctx)
+            return out
+
+        self._raise_device_not_supported("neg")
+
+    # ----------------------------
+    # Addition / Subtraction
+    # ----------------------------
+    def __add__(self, other: Union["Tensor", Number]) -> "Tensor":
+        other_t = self._as_tensor_like(other, self)
+
+        if self._device.is_cpu() and other_t.device.is_cpu():
+            self._binary_op_shape_check(self, other_t)
+
+            req = self._result_requires_grad(self, other_t)
+            out = Tensor(shape=self.shape, device=self.device, requires_grad=req)
+            out.copy_from_numpy(self.to_numpy() + other_t.to_numpy())
+
+            if req:
+                ctx = Context(
+                    parents=(self, other_t),
+                    backward_fn=lambda grad_out: (grad_out, grad_out),
+                )
+                out._set_ctx(ctx)
+            return out
+
+        # pick a consistent error point (left operand op name)
+        self._raise_device_not_supported("add")
+
+    def __radd__(self, other: Number) -> "Tensor":
+        return self.__add__(other)
+
+    def __sub__(self, other: Union["Tensor", Number]) -> "Tensor":
+        other_t = self._as_tensor_like(other, self)
+
+        if self._device.is_cpu() and other_t.device.is_cpu():
+            self._binary_op_shape_check(self, other_t)
+
+            req = self._result_requires_grad(self, other_t)
+            out = Tensor(shape=self.shape, device=self.device, requires_grad=req)
+            out.copy_from_numpy(self.to_numpy() - other_t.to_numpy())
+
+            if req:
+                ctx = Context(
+                    parents=(self, other_t),
+                    backward_fn=lambda grad_out: (grad_out, -grad_out),
+                )
+                out._set_ctx(ctx)
+            return out
+
+        self._raise_device_not_supported("sub")
+
+    def __rsub__(self, other: Number) -> "Tensor":
+        other_t = self._as_tensor_like(other, self)
+        return other_t.__sub__(self)
+
+    # ----------------------------
+    # Multiplication
+    # ----------------------------
+    def __mul__(self, other: Union["Tensor", Number]) -> "Tensor":
+        other_t = self._as_tensor_like(other, self)
+
+        if self._device.is_cpu() and other_t.device.is_cpu():
+            self._binary_op_shape_check(self, other_t)
+
+            req = self._result_requires_grad(self, other_t)
+            out = Tensor(shape=self.shape, device=self.device, requires_grad=req)
+            out.copy_from_numpy(self.to_numpy() * other_t.to_numpy())
+
+            if req:
+                ctx = Context(
+                    parents=(self, other_t),
+                    backward_fn=lambda grad_out: (grad_out * other_t, grad_out * self),
+                )
+                out._set_ctx(ctx)
+            return out
+
+        self._raise_device_not_supported("mul")
+
+    def __rmul__(self, other: Number) -> "Tensor":
+        return self.__mul__(other)
+
+    # ----------------------------
+    # True division
+    # ----------------------------
+    def __truediv__(self, other: Union["Tensor", Number]) -> "Tensor":
+        other_t = self._as_tensor_like(other, self)
+
+        if self._device.is_cpu() and other_t.device.is_cpu():
+            self._binary_op_shape_check(self, other_t)
+
+            req = self._result_requires_grad(self, other_t)
+            out = Tensor(shape=self.shape, device=self.device, requires_grad=req)
+            out.copy_from_numpy(self.to_numpy() / other_t.to_numpy())
+
+            if req:
+                ctx = Context(
+                    parents=(self, other_t),
+                    backward_fn=lambda grad_out: (
+                        grad_out / other_t,
+                        -(grad_out * self) / (other_t * other_t),
+                    ),
+                )
+                out._set_ctx(ctx)
+            return out
+
+        self._raise_device_not_supported("truediv")
+
+    def __rtruediv__(self, other: Number) -> "Tensor":
+        other_t = self._as_tensor_like(other, self)
+        return other_t.__truediv__(self)
+
+    # ----------------------------
+    # Comparisons (no grad)
+    # ----------------------------
+    def __gt__(self, other: Union["Tensor", Number]) -> "Tensor":
+        other_t = self._as_tensor_like(other, self)
+
+        if self._device.is_cpu() and other_t.device.is_cpu():
+            self._binary_op_shape_check(self, other_t)
+
+            out = Tensor(shape=self.shape, device=self.device, requires_grad=False)
+            out.copy_from_numpy(
+                (self.to_numpy() > other_t.to_numpy()).astype(np.float32)
+            )
+            return out
+
+        self._raise_device_not_supported("gt")
