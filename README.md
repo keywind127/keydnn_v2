@@ -41,7 +41,7 @@ Provides concrete implementations of domain contracts:
 - `Module` — base class for neural network layers
 - `Linear` — fully connected (dense) layer implementation
 - Activation functions (ReLU, Sigmoid)
-- Loss functions (SSE, MSE)
+- Loss functions (SSE, MSE, Binary Cross Entropy, Categorical Cross Entropy)
 
 Infrastructure code is free to evolve independently as long as it satisfies domain interfaces.
 
@@ -66,7 +66,7 @@ The test suite is split into two categories:
 - Trainable `Parameter` class with gradient management
 - Module system with parameter registration
 - Fully connected `Linear` layer
-- Regression loss functions (SSE, MSE)
+- Regression and classification loss functions (SSE, MSE, BCE, CCE)
 - Tensor reduction operations (`numel`, `sum`, `mean`)
 - Dynamic computation graph metadata via `Context`
 - Domain-level interfaces using `Protocol` (duck typing)
