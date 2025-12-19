@@ -752,3 +752,106 @@ class Tensor(ITensor):
             return out
 
         self._raise_device_not_supported("gt")
+
+    def numel(self) -> int:
+        """
+        Return the total number of elements in the tensor.
+
+        Returns
+        -------
+        int
+            Product of all dimensions in the tensor shape.
+        """
+        n = 1
+        for d in self._shape:
+            n *= d
+        return n
+
+    def sum(self) -> "Tensor":
+        """
+        Sum all elements of the tensor into a scalar.
+
+        Returns
+        -------
+        Tensor
+            A scalar tensor containing the sum of all elements.
+
+        Notes
+        -----
+        Backward rule:
+            d(sum(x))/dx = 1
+        """
+        if not self._device.is_cpu():
+            self._raise_device_not_supported("sum")
+
+        # Compute forward value
+        value = float(np.sum(self._data))
+        out = Tensor(shape=(), device=self.device, requires_grad=self.requires_grad)
+        out.copy_from_numpy(np.array(value, dtype=np.float32))
+
+        if self.requires_grad:
+
+            def backward_fn(grad_out: "Tensor"):
+                # grad_out is scalar; expand to input shape
+                grad = Tensor(
+                    shape=self.shape,
+                    device=self.device,
+                    requires_grad=False,
+                )
+                grad.copy_from_numpy(
+                    np.ones(self.shape, dtype=np.float32)
+                    * float(np.asarray(grad_out.to_numpy()))
+                )
+                return (grad,)
+
+            ctx = Context(
+                parents=(self,),
+                backward_fn=backward_fn,
+            )
+            out._set_ctx(ctx)
+
+        return out
+
+    def mean(self) -> "Tensor":
+        """
+        Compute the mean of all elements in the tensor.
+
+        Returns
+        -------
+        Tensor
+            A scalar tensor containing the mean value.
+
+        Notes
+        -----
+        Backward rule:
+            d(mean(x))/dx = 1 / numel(x)
+        """
+        if not self._device.is_cpu():
+            self._raise_device_not_supported("mean")
+
+        n = self.numel()
+        value = float(np.sum(self._data) / n)
+        out = Tensor(shape=(), device=self.device, requires_grad=self.requires_grad)
+        out.copy_from_numpy(np.array(value, dtype=np.float32))
+
+        if self.requires_grad:
+
+            def backward_fn(grad_out: "Tensor"):
+                grad = Tensor(
+                    shape=self.shape,
+                    device=self.device,
+                    requires_grad=False,
+                )
+                grad.copy_from_numpy(
+                    np.ones(self.shape, dtype=np.float32)
+                    * (float(np.asarray(grad_out.to_numpy())) / n)
+                )
+                return (grad,)
+
+            ctx = Context(
+                parents=(self,),
+                backward_fn=backward_fn,
+            )
+            out._set_ctx(ctx)
+
+        return out

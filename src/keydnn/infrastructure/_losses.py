@@ -1,0 +1,223 @@
+"""
+Loss function primitives for KeyDNN.
+
+This module implements common regression loss functions as subclasses of
+`Function`, following KeyDNN's explicit forward/backward autograd design.
+
+Currently implemented losses:
+- SSEFn : Sum of Squared Errors
+- MSEFn : Mean Squared Error
+
+Design notes
+------------
+- Losses are implemented as `Function` subclasses rather than `Module`s to
+  emphasize their role as terminal nodes in the computation graph.
+- All reductions (`sum`, `mean`) are delegated to `Tensor` methods to keep
+  NumPy usage out of the loss logic and preserve graph consistency.
+- Backward implementations avoid tensor broadcasting and instead explicitly
+  scale gradients using Python scalars, in accordance with the framework's
+  strict shape-matching rules.
+
+These losses return scalar tensors and are intended to be used as the final
+operation before invoking backpropagation.
+"""
+
+import numpy as np
+from typing import Tuple
+from ._function import Function
+from ._tensor import Tensor, Context
+
+
+def _scalar_to_float(t: Tensor) -> float:
+    """
+    Extract a Python scalar from a scalar Tensor.
+
+    Parameters
+    ----------
+    t : Tensor
+        A scalar tensor (shape `()` or equivalent) residing on the CPU.
+
+    Returns
+    -------
+    float
+        The scalar value stored in the tensor.
+
+    Notes
+    -----
+    This helper exists to bridge scalar gradient values (`grad_out`) with
+    KeyDNN's current non-broadcasting Tensor semantics. It is intentionally
+    used inside backward passes where scalar multiplication of higher-rank
+    tensors is required.
+    """
+    return float(np.asarray(t.to_numpy()).reshape(-1)[0])
+
+
+class SSEFn(Function):
+    """
+    Sum of Squared Errors (SSE) loss function.
+
+    Computes the scalar loss:
+
+        SSE(pred, target) = sum((pred - target)^2)
+
+    This loss is commonly used in regression tasks and serves as a simple
+    baseline loss for validating autograd correctness.
+
+    Notes
+    -----
+    - The forward pass returns a scalar tensor.
+    - The backward pass computes gradients with respect to both `pred`
+      and `target`.
+    - No broadcasting is assumed; all tensor shapes must match exactly.
+    """
+
+    @staticmethod
+    def forward(ctx: Context, pred: Tensor, target: Tensor) -> Tensor:
+        """
+        Compute the Sum of Squared Errors.
+
+        Parameters
+        ----------
+        ctx : Context
+            Autograd context used to store intermediate values for backward.
+        pred : Tensor
+            Predicted values.
+        target : Tensor
+            Ground-truth target values.
+
+        Returns
+        -------
+        Tensor
+            A scalar tensor containing the SSE loss.
+
+        Notes
+        -----
+        The difference tensor `(pred - target)` is saved for use during the
+        backward pass.
+        """
+        diff = pred - target
+        ctx.save_for_backward(diff)
+        return (diff * diff).sum()
+
+    @staticmethod
+    def backward(ctx: Context, grad_out: Tensor) -> Tuple[Tensor, Tensor]:
+        """
+        Compute gradients of SSE with respect to inputs.
+
+        Parameters
+        ----------
+        ctx : Context
+            Autograd context populated during the forward pass.
+        grad_out : Tensor
+            Gradient of the total loss with respect to the SSE output.
+            This is expected to be a scalar tensor.
+
+        Returns
+        -------
+        tuple[Tensor, Tensor]
+            Gradients with respect to `pred` and `target`, respectively.
+
+        Notes
+        -----
+        Gradient formulas:
+            dSSE/dpred   =  2 * (pred - target)
+            dSSE/dtarget = -2 * (pred - target)
+
+        The upstream gradient `grad_out` is treated as a scalar and applied
+        via explicit scaling to avoid tensor broadcasting.
+        """
+        (diff,) = ctx.saved_tensors
+
+        g = _scalar_to_float(grad_out)
+
+        grad_pred = diff * (2.0 * g)
+        grad_target = diff * (-2.0 * g)
+        return grad_pred, grad_target
+
+
+class MSEFn(Function):
+    """
+    Mean Squared Error (MSE) loss function.
+
+    Computes the scalar loss:
+
+        MSE(pred, target) = mean((pred - target)^2)
+
+    This loss normalizes the Sum of Squared Errors by the total number of
+    elements and is one of the most commonly used losses for regression.
+
+    Notes
+    -----
+    - The forward pass returns a scalar tensor.
+    - The backward pass uses the total number of elements (`numel`) to scale
+      gradients appropriately.
+    - Shape broadcasting is intentionally not supported.
+    """
+
+    @staticmethod
+    def forward(ctx: Context, pred: Tensor, target: Tensor) -> Tensor:
+        """
+        Compute the Mean Squared Error.
+
+        Parameters
+        ----------
+        ctx : Context
+            Autograd context used to store intermediate values for backward.
+        pred : Tensor
+            Predicted values.
+        target : Tensor
+            Ground-truth target values.
+
+        Returns
+        -------
+        Tensor
+            A scalar tensor containing the MSE loss.
+
+        Notes
+        -----
+        The difference tensor `(pred - target)` and the total number of elements
+        are saved for use during the backward pass.
+        """
+        diff = pred - target
+        ctx.save_for_backward(diff)
+        ctx.saved_meta["n"] = diff.numel()
+        return (diff * diff).mean()
+
+    @staticmethod
+    def backward(ctx: Context, grad_out: Tensor) -> Tuple[Tensor, Tensor]:
+        """
+        Compute gradients of MSE with respect to inputs.
+
+        Parameters
+        ----------
+        ctx : Context
+            Autograd context populated during the forward pass.
+        grad_out : Tensor
+            Gradient of the total loss with respect to the MSE output.
+            This is expected to be a scalar tensor.
+
+        Returns
+        -------
+        tuple[Tensor, Tensor]
+            Gradients with respect to `pred` and `target`, respectively.
+
+        Notes
+        -----
+        Gradient formulas:
+            dMSE/dpred   =  2 * (pred - target) / N
+            dMSE/dtarget = -2 * (pred - target) / N
+
+        where N is the total number of elements in the input tensor.
+
+        The upstream gradient `grad_out` is applied as a scalar multiplier to
+        preserve strict shape matching.
+        """
+        (diff,) = ctx.saved_tensors
+        n = int(ctx.saved_meta["n"])
+
+        g = _scalar_to_float(grad_out)
+        scale = (2.0 / n) * g
+
+        grad_pred = diff * scale
+        grad_target = diff * (-scale)
+        return grad_pred, grad_target

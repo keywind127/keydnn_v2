@@ -11,6 +11,8 @@ This design is inspired by function-level autograd systems (e.g., PyTorch's
 """
 
 from abc import ABC, abstractmethod
+from typing import Union, Any
+from ._tensor import ITensor
 
 
 class Function(ABC):
@@ -36,7 +38,7 @@ class Function(ABC):
 
     @staticmethod
     @abstractmethod
-    def forward(ctx, *inputs):
+    def forward(ctx, *inputs: Union[ITensor, Any]) -> ITensor:
         """
         Perform the forward computation.
 
@@ -61,7 +63,7 @@ class Function(ABC):
 
     @staticmethod
     @abstractmethod
-    def backward(ctx, grad_out):
+    def backward(ctx, grad_out: ITensor) -> ITensor:
         """
         Compute gradients with respect to the input tensors.
 
