@@ -1,12 +1,15 @@
 """
 Loss function primitives for KeyDNN.
 
-This module implements common regression loss functions as subclasses of
-`Function`, following KeyDNN's explicit forward/backward autograd design.
+This module implements common regression and classification loss functions
+as subclasses of `Function`, following KeyDNN's explicit forward/backward
+autograd design.
 
 Currently implemented losses:
-- SSEFn : Sum of Squared Errors
-- MSEFn : Mean Squared Error
+- SSEFn  : Sum of Squared Errors
+- MSEFn  : Mean Squared Error
+- BinaryCrossEntropyFn : Binary Cross Entropy (probability inputs)
+- CategoricalCrossEntropyFn : Categorical Cross Entropy (probabilities with one-hot targets)
 
 Design notes
 ------------
@@ -17,6 +20,8 @@ Design notes
 - Backward implementations avoid tensor broadcasting and instead explicitly
   scale gradients using Python scalars, in accordance with the framework's
   strict shape-matching rules.
+- Classification losses currently operate on probability inputs; logits-based
+  variants and numerically stabilized formulations may be added in the future.
 
 These losses return scalar tensors and are intended to be used as the final
 operation before invoking backpropagation.
@@ -220,4 +225,192 @@ class MSEFn(Function):
 
         grad_pred = diff * scale
         grad_target = diff * (-scale)
+        return grad_pred, grad_target
+
+
+class BinaryCrossEntropyFn(Function):
+    """
+    Binary Cross Entropy (BCE) loss function.
+
+    Computes the mean binary cross entropy between predicted probabilities
+    and binary targets:
+
+        BCE(pred, target) =
+            mean( -[ target * log(pred) + (1 - target) * log(1 - pred) ] )
+
+    This loss is commonly used for binary classification tasks where
+    predictions are probabilities in the open interval (0, 1).
+
+    Notes
+    -----
+    - `pred` is expected to contain probabilities (e.g., output of Sigmoid).
+    - `target` is expected to contain binary values (0 or 1) with the same shape.
+    - The forward pass returns a scalar tensor (mean reduction).
+    - The backward pass computes gradients with respect to `pred` only;
+      `target` is treated as a constant.
+    - No broadcasting is performed; tensor shapes must match exactly.
+    """
+
+    @staticmethod
+    def forward(ctx: Context, pred: Tensor, target: Tensor) -> Tensor:
+        """
+        Compute the mean Binary Cross Entropy loss.
+
+        Parameters
+        ----------
+        ctx : Context
+            Autograd context used to store intermediate values for backward.
+        pred : Tensor
+            Predicted probabilities with values in (0, 1).
+        target : Tensor
+            Binary ground-truth targets (0 or 1), same shape as `pred`.
+
+        Returns
+        -------
+        Tensor
+            A scalar tensor containing the mean BCE loss.
+
+        Notes
+        -----
+        The total number of elements is stored in the context to support
+        correct gradient scaling during the backward pass.
+        """
+        # Save for backward
+        ctx.save_for_backward(pred, target)
+        ctx.saved_meta["n"] = pred.numel()
+
+        # BCE elementwise loss then mean reduction
+        loss = -(target * pred.log() + (1.0 - target) * (1.0 - pred).log())
+        return loss.mean()
+
+    @staticmethod
+    def backward(ctx: Context, grad_out: Tensor):
+        """
+        Compute gradients of the BCE loss with respect to inputs.
+
+        Parameters
+        ----------
+        ctx : Context
+            Autograd context populated during the forward pass.
+        grad_out : Tensor
+            Gradient of the total loss with respect to the BCE output.
+            This is expected to be a scalar tensor.
+
+        Returns
+        -------
+        tuple[Tensor, None]
+            Gradient with respect to `pred`, and `None` for `target`.
+
+        Notes
+        -----
+        For mean-reduced BCE, the gradient is:
+
+            dL/dpred = (pred - target) / (pred * (1 - pred)) / N
+
+        where N is the total number of elements. The upstream gradient
+        `grad_out` is applied as a scalar multiplier.
+        """
+        pred, target = ctx.saved_tensors
+        n = int(ctx.saved_meta["n"])
+
+        g = _scalar_to_float(grad_out)
+
+        # d/dp for mean BCE
+        grad_pred = (pred - target) / (pred * (1.0 - pred))
+        grad_pred = grad_pred * (g / n)
+
+        # Typically treat targets as constants
+        grad_target = None
+        return grad_pred, grad_target
+
+
+class CategoricalCrossEntropyFn(Function):
+    """
+    Categorical Cross Entropy (CCE) loss function.
+
+    Computes the categorical cross entropy between predicted class
+    probabilities and one-hot encoded targets:
+
+        CCE(pred, target) =
+            -sum(target * log(pred)) / N
+
+    where N is the batch size.
+
+    This loss is commonly used for multi-class classification tasks when
+    predictions are provided as probabilities (e.g., output of Softmax).
+
+    Notes
+    -----
+    - `pred` is expected to have shape (N, C) and contain class probabilities.
+    - `target` must be one-hot encoded with the same shape as `pred`.
+    - The forward pass returns a scalar tensor (mean over batch).
+    - The backward pass computes gradients with respect to `pred` only;
+      `target` is treated as a constant.
+    - No broadcasting or class-index targets are supported in this version.
+    """
+
+    @staticmethod
+    def forward(ctx: Context, pred: Tensor, target: Tensor) -> Tensor:
+        """
+        Compute the categorical cross entropy loss.
+
+        Parameters
+        ----------
+        ctx : Context
+            Autograd context used to store intermediate values for backward.
+        pred : Tensor
+            Predicted class probabilities of shape (N, C).
+        target : Tensor
+            One-hot encoded class labels of shape (N, C).
+
+        Returns
+        -------
+        Tensor
+            A scalar tensor containing the categorical cross entropy loss
+            averaged over the batch.
+
+        Notes
+        -----
+        The loss is reduced by averaging over the batch dimension (N).
+        """
+        ctx.save_for_backward(pred, target)
+
+        loss = -(target * pred.log())
+        return loss.sum() / pred.shape[0]
+
+    @staticmethod
+    def backward(ctx: Context, grad_out: Tensor):
+        """
+        Compute gradients of the CCE loss with respect to inputs.
+
+        Parameters
+        ----------
+        ctx : Context
+            Autograd context populated during the forward pass.
+        grad_out : Tensor
+            Gradient of the total loss with respect to the CCE output.
+            This is expected to be a scalar tensor.
+
+        Returns
+        -------
+        tuple[Tensor, None]
+            Gradient with respect to `pred`, and `None` for `target`.
+
+        Notes
+        -----
+        For batch-mean categorical cross entropy, the gradient is:
+
+            dL/dpred = -(target / pred) / N
+
+        where N is the batch size. The upstream gradient `grad_out` is applied
+        as a scalar multiplier.
+        """
+        (pred, target) = ctx.saved_tensors
+        g = _scalar_to_float(grad_out)
+
+        # dL/dpred = -target / pred
+        grad_pred = -(target / pred)
+        grad_pred = grad_pred * (g / pred.shape[0])
+
+        grad_target = None
         return grad_pred, grad_target

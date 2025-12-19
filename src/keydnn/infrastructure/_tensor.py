@@ -855,3 +855,49 @@ class Tensor(ITensor):
             out._set_ctx(ctx)
 
         return out
+
+    def log(self) -> "Tensor":
+        """
+        Compute the elementwise natural logarithm of the tensor.
+
+        Returns
+        -------
+        Tensor
+            A tensor of the same shape as `self`, where each element is
+            replaced by its natural logarithm.
+
+        Notes
+        -----
+        - This operation is defined only for CPU tensors in the current
+        implementation.
+        - No broadcasting is performed; the output tensor has the same
+        shape as the input.
+        - If `self.requires_grad` is True, the returned tensor participates
+        in autograd with the backward rule:
+
+            d(log(x)) / dx = 1 / x
+
+        - The backward pass propagates gradients elementwise using this rule
+        and relies on strict shape matching.
+        - The behavior for non-positive input values is undefined and will
+        follow NumPy's semantics (e.g., `-inf` or `nan`).
+        """
+        if not self.device.is_cpu():
+            self._raise_device_not_supported("log")
+
+        out = Tensor(
+            shape=self.shape,
+            device=self.device,
+            requires_grad=self.requires_grad,
+        )
+
+        out.copy_from_numpy(np.log(self.to_numpy()))
+
+        if self.requires_grad:
+            ctx = Context(
+                parents=(self,),
+                backward_fn=lambda grad_out: (grad_out / self,),
+            )
+            out._set_ctx(ctx)
+
+        return out
