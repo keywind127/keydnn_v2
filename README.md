@@ -43,13 +43,18 @@ Provides concrete implementations of domain contracts:
 - `Sequential` — ordered container for composing multi-layer models
 - `Linear` — fully connected (dense) layer implementation
 - `Conv2d` — 2D convolution layer (NCHW, CPU reference implementation)
+- Pooling layers:
+  - `MaxPool2d`
+  - `AvgPool2d`
+  - `GlobalAvgPool2d`
 - Activation functions (ReLU, Sigmoid, Softmax)
 - Loss functions (SSE, MSE, Binary Cross Entropy, Categorical Cross Entropy)
 - Optimizers (SGD, Adam)
 - Autograd execution engine via dynamic computation graphs (`Context`, `Tensor.backward`)
-- Convolution primitives:
+- Convolution and pooling primitives:
   - Naive CPU Conv2D forward/backward kernels
-  - Autograd integration via `Conv2dFn`
+  - Naive CPU Pool2D forward/backward kernels
+  - Autograd integration via `Conv2dFn` and pooling `Function`s
 
 Infrastructure code is free to evolve independently as long as it satisfies domain interfaces.
 
@@ -65,7 +70,10 @@ The test suite is split into two categories:
   - Validate tensor, parameter, module, and layer behavior
   - Avoid private attribute access
 - Integration tests validating end-to-end training on nonlinear tasks (e.g., XOR)
-- Unit tests validating Conv2D ops, autograd functions, and module behavior
+- Unit tests validating Conv2D and Pool2D ops, autograd functions, and module behavior
+- Edge-case tests for pooling semantics (tie-breaking, padding traps)
+- Shape matrix tests for stride/padding correctness
+- Chain tests validating Conv2D → Pooling → Activation compatibility
 
 ---
 
@@ -77,7 +85,9 @@ The test suite is split into two categories:
 - Module system with parameter registration
 - Fully connected `Linear` layer
 - 2D convolution layer (`Conv2d`) with configurable kernel size, stride, padding, and optional bias
-- Naive CPU Conv2D forward and backward kernels for correctness
+- 2D pooling layers (`MaxPool2d`, `AvgPool2d`, `GlobalAvgPool2d`)
+- Naive CPU Conv2D and Pool2D forward/backward kernels for correctness
+- Autograd-compatible pooling functions with correct gradient routing
 - Regression and classification loss functions (SSE, MSE, BCE, CCE)
 - Softmax activation module with numerically stable forward and efficient backward
 - Tensor reduction operations (`numel`, `sum`, `mean`)
@@ -94,13 +104,17 @@ The test suite is split into two categories:
 
 - Linear (fully connected)
 - Conv2d (2D convolution, NCHW)
+- Pooling layers:
+  - MaxPool2d
+  - AvgPool2d
+  - GlobalAvgPool2d
 - Activation layers: ReLU, Sigmoid, Softmax
 
 ---
 
 ## Roadmap (Planned)
 
-- Additional layers and activation functions (beyond core ReLU/Sigmoid)
+- Additional layers and activation functions (beyond core Conv2D and Pooling)
 - CUDA-backed tensor operations
 - CUDA acceleration for convolution layers
 - Performance optimizations and kernel fusion
