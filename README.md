@@ -42,10 +42,14 @@ Provides concrete implementations of domain contracts:
 - `Model` — top-level network abstraction with inference utilities
 - `Sequential` — ordered container for composing multi-layer models
 - `Linear` — fully connected (dense) layer implementation
+- `Conv2d` — 2D convolution layer (NCHW, CPU reference implementation)
 - Activation functions (ReLU, Sigmoid, Softmax)
 - Loss functions (SSE, MSE, Binary Cross Entropy, Categorical Cross Entropy)
 - Optimizers (SGD, Adam)
 - Autograd execution engine via dynamic computation graphs (`Context`, `Tensor.backward`)
+- Convolution primitives:
+  - Naive CPU Conv2D forward/backward kernels
+  - Autograd integration via `Conv2dFn`
 
 Infrastructure code is free to evolve independently as long as it satisfies domain interfaces.
 
@@ -61,6 +65,7 @@ The test suite is split into two categories:
   - Validate tensor, parameter, module, and layer behavior
   - Avoid private attribute access
 - Integration tests validating end-to-end training on nonlinear tasks (e.g., XOR)
+- Unit tests validating Conv2D ops, autograd functions, and module behavior
 
 ---
 
@@ -71,6 +76,8 @@ The test suite is split into two categories:
 - Trainable `Parameter` class with gradient management
 - Module system with parameter registration
 - Fully connected `Linear` layer
+- 2D convolution layer (`Conv2d`) with configurable kernel size, stride, padding, and optional bias
+- Naive CPU Conv2D forward and backward kernels for correctness
 - Regression and classification loss functions (SSE, MSE, BCE, CCE)
 - Softmax activation module with numerically stable forward and efficient backward
 - Tensor reduction operations (`numel`, `sum`, `mean`)
@@ -83,10 +90,19 @@ The test suite is split into two categories:
 
 ---
 
+### Supported Layers
+
+- Linear (fully connected)
+- Conv2d (2D convolution, NCHW)
+- Activation layers: ReLU, Sigmoid, Softmax
+
+---
+
 ## Roadmap (Planned)
 
 - Additional layers and activation functions (beyond core ReLU/Sigmoid)
 - CUDA-backed tensor operations
+- CUDA acceleration for convolution layers
 - Performance optimizations and kernel fusion
 - Model serialization and checkpointing
 
