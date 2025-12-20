@@ -39,10 +39,13 @@ Provides concrete implementations of domain contracts:
 - `Context` — backward propagation context for dynamic computation graphs
 - `Parameter` — trainable tensor with gradient semantics
 - `Module` — base class for neural network layers
+- `Model` — top-level network abstraction with inference utilities
+- `Sequential` — ordered container for composing multi-layer models
 - `Linear` — fully connected (dense) layer implementation
 - Activation functions (ReLU, Sigmoid, Softmax)
 - Loss functions (SSE, MSE, Binary Cross Entropy, Categorical Cross Entropy)
 - Optimizers (SGD, Adam)
+- Autograd execution engine via dynamic computation graphs (`Context`, `Tensor.backward`)
 
 Infrastructure code is free to evolve independently as long as it satisfies domain interfaces.
 
@@ -57,6 +60,7 @@ The test suite is split into two categories:
 - **Behavioral unit tests**
   - Validate tensor, parameter, module, and layer behavior
   - Avoid private attribute access
+- Integration tests validating end-to-end training on nonlinear tasks (e.g., XOR)
 
 ---
 
@@ -73,15 +77,18 @@ The test suite is split into two categories:
 - Dynamic computation graph metadata via `Context`
 - Domain-level interfaces using `Protocol` (duck typing)
 - Comprehensive unit tests for contracts and behavior
+- Reverse-mode automatic differentiation (autograd) with dynamic computation graphs
+- End-to-end model training via backpropagation and optimizers
+- Sequential model composition with parameter discovery
 
 ---
 
 ## Roadmap (Planned)
 
-- Automatic differentiation (autograd execution engine)
 - Additional layers and activation functions (beyond core ReLU/Sigmoid)
 - CUDA-backed tensor operations
-- Model composition utilities (e.g., Sequential)
+- Performance optimizations and kernel fusion
+- Model serialization and checkpointing
 
 ---
 
