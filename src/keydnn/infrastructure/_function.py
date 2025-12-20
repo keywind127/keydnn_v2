@@ -25,7 +25,8 @@ Notes
   ops (e.g., `exp`) to reuse autograd wiring.
 """
 
-from typing import Tuple
+from dataclasses import dataclass
+from typing import Optional, Tuple
 
 import numpy as np
 
@@ -528,3 +529,233 @@ class SoftmaxFn(Function):
         dx = Tensor(shape=dx_np.shape, device=y.device, requires_grad=False)
         dx.copy_from_numpy(dx_np.astype(np.float32))
         return (dx,)
+
+
+from typing import Sequence
+
+import numpy as np
+
+from ._tensor import Tensor, Context
+from ..infrastructure.ops.conv2d_cpu import (
+    conv2d_forward_cpu,
+    conv2d_backward_cpu,
+    _pair,
+)
+
+
+def _tensor_from_numpy(
+    arr: np.ndarray, *, device, requires_grad: bool = False
+) -> Tensor:
+    """
+    Construct a KeyDNN `Tensor` from a NumPy array.
+
+    This helper allocates a new `Tensor` on the specified device, copies the
+    provided NumPy array into its underlying storage, and returns the tensor.
+
+    Parameters
+    ----------
+    arr : np.ndarray
+        Source NumPy array. The created tensor will have the same shape as
+        `arr`. The array is converted to float32 during the copy step (via
+        `Tensor.copy_from_numpy`).
+    device : Device
+        Target device placement for the created tensor.
+    requires_grad : bool, optional
+        Whether the returned tensor should participate in autograd and
+        accumulate gradients. Defaults to False.
+
+    Returns
+    -------
+    Tensor
+        A newly allocated tensor containing a copy of `arr`.
+
+    Notes
+    -----
+    - This helper is intended for internal use in operator implementations,
+      where NumPy kernels produce intermediate arrays that must be wrapped as
+      framework tensors.
+    - The returned tensor is created with `ctx=None` (i.e., no history). If it
+      needs to participate in autograd, the caller should attach a `Context`
+      to the operation output tensor after constructing it.
+    """
+    t = Tensor(shape=arr.shape, device=device, requires_grad=requires_grad, ctx=None)
+    t.copy_from_numpy(arr)
+    return t
+
+
+class Conv2dFn(Function):
+    """
+    Autograd-enabled 2D convolution primitive (NCHW).
+
+    `Conv2dFn` implements the differentiable Conv2D operator used by the higher-
+    level `Conv2d` module. It performs the numerical computation via CPU
+    reference kernels and integrates with KeyDNN's autograd engine by:
+
+    - Saving required tensors into `ctx.saved_tensors` during the forward pass
+      (input, weights, optional bias).
+    - Saving non-tensor hyperparameters into `ctx.saved_meta` (stride, padding,
+      bias presence).
+    - Returning gradients aligned exactly with the `Context.parents` ordering.
+
+    Tensor layout
+    -------------
+    - Input `x`:      (N, C_in, H, W)
+    - Weight `w`:     (C_out, C_in, K_h, K_w)
+    - Bias `b`:       (C_out,) or None
+    - Output `y`:     (N, C_out, H_out, W_out)
+
+    Current limitations
+    -------------------
+    - CPU-only (NumPy) backend.
+    - Dense convolution only (no dilation, groups, or other advanced options).
+    - Assumes NCHW layout and integer stride/padding.
+    """
+
+    @staticmethod
+    def forward(
+        ctx: Context,
+        x: Tensor,
+        weight: Tensor,
+        bias: Optional[Tensor],
+        *,
+        stride: int | Tuple[int, int] = 1,
+        padding: int | Tuple[int, int] = 0,
+    ) -> Tensor:
+        """
+        Compute the forward pass of a 2D convolution and record context for backward.
+
+        Parameters
+        ----------
+        ctx : Context
+            Autograd context used to save tensors and metadata required for the
+            backward computation.
+        x : Tensor
+            Input tensor of shape (N, C_in, H, W).
+        weight : Tensor
+            Convolution kernel weights of shape (C_out, C_in, K_h, K_w).
+        bias : Optional[Tensor]
+            Optional bias tensor of shape (C_out,). If None, no bias is added.
+        stride : int or tuple[int, int], optional
+            Convolution stride. If an integer is provided, the same stride is
+            used for both height and width. Defaults to 1.
+        padding : int or tuple[int, int], optional
+            Zero-padding applied to the input. If an integer is provided,
+            symmetric padding is applied to both height and width. Defaults to 0.
+
+        Returns
+        -------
+        Tensor
+            Output tensor of shape (N, C_out, H_out, W_out).
+
+        Notes
+        -----
+        - Tensors needed for backward are saved via `ctx.save_for_backward`.
+          Since `saved_tensors` must contain only tensors, `bias` is saved only
+          when it is not None.
+        - Hyperparameters are stored in `ctx.saved_meta`:
+            - 'has_bias': bool
+            - 'stride': tuple[int, int]
+            - 'padding': tuple[int, int]
+        - The output tensor's `requires_grad` is set based on whether any
+          inputs (x, weight, bias) require gradients. The caller (typically the
+          module) is responsible for attaching the `Context` to the output.
+        """
+        stride2 = _pair(stride)
+        padding2 = _pair(padding)
+
+        x_np = x.to_numpy()
+        w_np = weight.to_numpy()
+        b_np = None if bias is None else bias.to_numpy()
+
+        y_np = conv2d_forward_cpu(x_np, w_np, b_np, stride=stride2, padding=padding2)
+
+        # Save tensors + meta for backward
+        ctx.save_for_backward(x, weight)
+        if bias is not None:
+            ctx.save_for_backward(bias)
+
+        ctx.saved_meta["has_bias"] = bias is not None
+        ctx.saved_meta["stride"] = stride2
+        ctx.saved_meta["padding"] = padding2
+
+        out_req = Tensor._result_requires_grad(x, weight) or (
+            bias is not None and bias.requires_grad
+        )
+        out = _tensor_from_numpy(y_np, device=x.device, requires_grad=out_req)
+        return out
+
+    @staticmethod
+    def backward(ctx: Context, grad_out: Tensor) -> Sequence[Optional[Tensor]]:
+        """
+        Compute gradients for Conv2D with respect to inputs, weights, and bias.
+
+        Parameters
+        ----------
+        ctx : Context
+            Autograd context populated during the forward pass. Must contain:
+            - saved_tensors: [x, weight] + [bias if has_bias]
+            - saved_meta: keys 'has_bias', 'stride', 'padding'
+        grad_out : Tensor
+            Gradient with respect to the Conv2D output, of shape
+            (N, C_out, H_out, W_out).
+
+        Returns
+        -------
+        Sequence[Optional[Tensor]]
+            Gradients aligned with `ctx.parents` order. Entries may be None
+            for parents that do not require gradients.
+
+            - If bias was used: (grad_x, grad_w, grad_b)
+            - If bias was not used: (grad_x, grad_w)
+
+        Notes
+        -----
+        - This method must return exactly one gradient entry per parent in the
+          same order as `ctx.parents`. Your autograd engine validates this.
+        - The returned gradient tensors do not track gradients themselves
+          (`requires_grad=False`) because they are used only for accumulation
+          into leaf tensors/parameters.
+        - This implementation respects `requires_grad` on each parent and
+          returns None when a parent does not require gradients to reduce
+          unnecessary allocations.
+        """
+        has_bias: bool = bool(ctx.saved_meta["has_bias"])
+        stride: Tuple[int, int] = ctx.saved_meta["stride"]
+        padding: Tuple[int, int] = ctx.saved_meta["padding"]
+
+        # Unpack saved tensors
+        # saved_tensors = [x, weight] + [bias if has_bias]
+        x = ctx.saved_tensors[0]
+        weight = ctx.saved_tensors[1]
+        bias = ctx.saved_tensors[2] if has_bias else None
+
+        x_np = x.to_numpy()
+        w_np = weight.to_numpy()
+        b_np = None if bias is None else bias.to_numpy()
+        go_np = grad_out.to_numpy()
+
+        grad_x_np, grad_w_np, grad_b_np = conv2d_backward_cpu(
+            x_np, w_np, b_np, go_np, stride=stride, padding=padding
+        )
+
+        # Respect requires_grad flags: if a parent doesn't require grad, return None
+        grad_x = None
+        if x.requires_grad:
+            grad_x = _tensor_from_numpy(grad_x_np, device=x.device, requires_grad=False)
+
+        grad_w = None
+        if weight.requires_grad:
+            grad_w = _tensor_from_numpy(
+                grad_w_np, device=weight.device, requires_grad=False
+            )
+
+        grad_b = None
+        if bias is not None and bias.requires_grad:
+            assert grad_b_np is not None
+            grad_b = _tensor_from_numpy(
+                grad_b_np, device=bias.device, requires_grad=False
+            )
+
+        if has_bias:
+            return (grad_x, grad_w, grad_b)
+        return (grad_x, grad_w)
