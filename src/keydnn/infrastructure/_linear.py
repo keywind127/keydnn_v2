@@ -82,8 +82,8 @@ class Linear(Module):
 
     Notes
     -----
-    Weight initialization uses a small random normal distribution (scaled by 0.01).
-    Bias initialization uses zeros.
+    Weight initialization uses Xavier/Glorot uniform to break symmetry
+    (critical for learning problems like XOR). Bias is initialized to zeros.
     """
 
     def __init__(
@@ -120,35 +120,31 @@ class Linear(Module):
         self.out_features = int(out_features)
         self.device = device if device is not None else Device("cpu")
 
-        # --- initialize weights (simple small random normal) ---
-        w_np = (np.random.randn(out_features, in_features) * 0.01).astype(np.float32)
+        # --- initialize weights (Xavier/Glorot uniform) ---
+        limit = float(np.sqrt(6.0 / (self.in_features + self.out_features)))
+        w_np = np.random.uniform(
+            low=-limit,
+            high=limit,
+            size=(self.out_features, self.in_features),
+        ).astype(np.float32)
 
-        # Prefer data-based construction if supported; otherwise fall back to shape+fill(0)
-        try:
-            self.weight = Parameter(data=w_np, device=self.device, requires_grad=True)
-        except TypeError:
-            self.weight = Parameter(
-                (out_features, in_features), self.device, requires_grad=True
-            )
-            # If Tensor supports fill, at least initialize deterministically
-            try:
-                self.weight.fill(0.0)
-            except Exception:
-                pass
-
+        self.weight = Parameter(
+            shape=(self.out_features, self.in_features),
+            device=self.device,
+            requires_grad=True,
+        )
+        self.weight.copy_from_numpy(w_np)
         self.register_parameter("weight", self.weight)
 
         # --- initialize bias ---
         if bias:
-            b_np = np.zeros((out_features,), dtype=np.float32)
-            try:
-                self.bias = Parameter(data=b_np, device=self.device, requires_grad=True)
-            except TypeError:
-                self.bias = Parameter((out_features,), self.device, requires_grad=True)
-                try:
-                    self.bias.fill(0.0)
-                except Exception:
-                    pass
+            b_np = np.zeros((self.out_features,), dtype=np.float32)
+            self.bias = Parameter(
+                shape=(self.out_features,),
+                device=self.device,
+                requires_grad=True,
+            )
+            self.bias.copy_from_numpy(b_np)
             self.register_parameter("bias", self.bias)
         else:
             self.bias = None
@@ -179,9 +175,6 @@ class Linear(Module):
         TypeError
             If gradient wiring is needed and `x` is not an infrastructure `Tensor`
             (because it cannot carry autograd context).
-        RuntimeError
-            If there is no public API available to load NumPy data into the output
-            tensor (depending on Tensor construction capabilities).
         """
         # --- validate input shape ---
         x_shape = x.shape
@@ -194,46 +187,51 @@ class Linear(Module):
                 f"Linear expects in_features={self.in_features}, got {x_shape[1]}"
             )
 
-        # --- CPU compute ---
+        # --- compute (CPU) ---
         x_np = x.to_numpy()
         w_np = self.weight.to_numpy()
         y_np = x_np @ w_np.T
         if self.bias is not None:
             y_np = y_np + self.bias.to_numpy()
 
-        # --- build output tensor ---
-        try:
-            out = Tensor(data=y_np.astype(np.float32), device=self.device)
-        except TypeError:
-            out = Tensor(y_np.shape, self.device)
-            if hasattr(out, "from_numpy") and callable(getattr(out, "from_numpy")):
-                out.from_numpy(y_np.astype(np.float32))
-            elif hasattr(out, "copy_from_numpy") and callable(
-                getattr(out, "copy_from_numpy")
-            ):
-                out.copy_from_numpy(y_np.astype(np.float32))
-            else:
-                raise RuntimeError(
-                    "No public way to load NumPy data into Tensor. "
-                    "Add Tensor(data=...) or from_numpy()/copy_from_numpy()."
-                )
+        # --- decide whether output should track gradients ---
+        x_req = bool(getattr(x, "requires_grad", False))
+        w_req = bool(self.weight.requires_grad)
+        b_req = bool(self.bias is not None and self.bias.requires_grad)
+        req = x_req or w_req or b_req
+
+        # --- build output tensor (always via shape+copy, which your Tensor supports) ---
+        out = Tensor(shape=y_np.shape, device=self.device, requires_grad=req)
+        out.copy_from_numpy(y_np.astype(np.float32, copy=False))
 
         # --- autograd wiring (Context) ---
-        # We only attach ctx if something requires grad.
-        x_req = getattr(x, "requires_grad", False)
-        w_req = self.weight.requires_grad
-        b_req = self.bias is not None and self.bias.requires_grad
-
-        if x_req or w_req or b_req:
-            # IMPORTANT: parents should be actual Tensors so the engine can walk the graph.
+        if req:
             if not isinstance(x, Tensor):
                 raise TypeError(
                     "Linear.forward(): to attach autograd Context, x must be an infrastructure Tensor "
                     "(so it can hold grad/ctx). Got ITensor without ctx."
                 )
 
-            # Save what we need for backward
-            # (Saving x and weight is sufficient for Linear backward.)
+            def _make_grad(device: Device, arr: np.ndarray) -> Tensor:
+                """
+                Create a gradient Tensor from a NumPy array using public APIs.
+
+                Parameters
+                ----------
+                device : Device
+                    Target device for the gradient tensor.
+                arr : np.ndarray
+                    Gradient values to load.
+
+                Returns
+                -------
+                Tensor
+                    A newly created tensor holding the given gradient values.
+                """
+                t = Tensor(shape=arr.shape, device=device, requires_grad=False)
+                t.copy_from_numpy(arr.astype(np.float32, copy=False))
+                return t
+
             def backward_fn(grad_out: Tensor) -> Sequence[Optional[Tensor]]:
                 """
                 Compute gradients for the Linear operation.
@@ -258,8 +256,9 @@ class Linear(Module):
                 - dL/dW = (dL/dy)^T @ x
                 - dL/db = sum(dL/dy over batch)
                 """
-                # grad_out: (batch, out_features)
                 go = grad_out.to_numpy()
+
+                # Saved tensors
                 x_saved, w_saved = ctx.saved_tensors
                 x_arr = x_saved.to_numpy()  # (batch, in_features)
                 w_arr = w_saved.to_numpy()  # (out_features, in_features)
@@ -267,42 +266,6 @@ class Linear(Module):
                 grad_x = None
                 grad_w = None
                 grad_b = None
-
-                def _make_grad(device: Device, arr: np.ndarray) -> Tensor:
-                    """
-                    Create a gradient Tensor from a NumPy array using public APIs.
-
-                    Parameters
-                    ----------
-                    device : Device
-                        Target device for the gradient tensor.
-                    arr : np.ndarray
-                        Gradient values to load.
-
-                    Returns
-                    -------
-                    Tensor
-                        A newly created tensor holding the given gradient values.
-
-                    Raises
-                    ------
-                    RuntimeError
-                        If the Tensor class lacks a public method to load NumPy
-                        data (copy_from_numpy/from_numpy).
-                    """
-                    t = Tensor(arr.shape, device)
-                    if hasattr(t, "copy_from_numpy") and callable(
-                        getattr(t, "copy_from_numpy")
-                    ):
-                        t.copy_from_numpy(arr.astype(np.float32, copy=False))
-                        return t
-                    if hasattr(t, "from_numpy") and callable(getattr(t, "from_numpy")):
-                        t.from_numpy(arr.astype(np.float32, copy=False))
-                        return t
-                    raise RuntimeError(
-                        "No public way to load NumPy data into Tensor for gradients. "
-                        "Need copy_from_numpy() or from_numpy()."
-                    )
 
                 # dL/dx = dL/dy @ W
                 if x_saved.requires_grad:
@@ -319,7 +282,6 @@ class Linear(Module):
                     gb = go.sum(axis=0)  # (out_features,)
                     grad_b = _make_grad(self.bias.device, gb)
 
-                # parents order must match ctx.parents order below
                 if self.bias is None:
                     return (grad_x, grad_w)
                 return (grad_x, grad_w, grad_b)
@@ -328,9 +290,10 @@ class Linear(Module):
                 [x, self.weight] if self.bias is None else [x, self.weight, self.bias]
             )
             ctx = Context(parents=parents, backward_fn=backward_fn)
+
+            # Save for backward: x and weight are sufficient
             ctx.save_for_backward(x, self.weight)
 
-            out.requires_grad = True
-            out._set_ctx(ctx)  # uses your internal hook
+            out._set_ctx(ctx)
 
         return out

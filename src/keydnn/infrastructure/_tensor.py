@@ -920,3 +920,176 @@ class Tensor(ITensor):
             return
 
         self._raise_device_not_supported("copy_from")
+
+    # ----------------------------
+    # Autograd engine (graph traversal)
+    # ----------------------------
+    def backward(self, grad_out: Optional["Tensor"] = None) -> None:
+        """
+        Backpropagate gradients from this tensor through the autograd graph.
+
+        Parameters
+        ----------
+        grad_out : Optional[Tensor], optional
+            Gradient w.r.t. this tensor. If omitted, this tensor must be a scalar
+            (shape == ()) and the gradient is assumed to be 1.0.
+
+        Raises
+        ------
+        ValueError
+            If grad_out is None and this tensor is not a scalar.
+        RuntimeError
+            If backward is invoked on a non-CPU tensor in the current implementation.
+
+        Notes
+        -----
+        - Gradients are accumulated into `.grad` of leaf tensors that have
+          `requires_grad=True`.
+        - This implementation performs a reverse topological traversal.
+        - Only CPU tensors are supported for now.
+        """
+        if not self.device.is_cpu():
+            self._raise_device_not_supported("backward")
+
+        # Seed gradient
+        if grad_out is None:
+            if self.shape != ():
+                raise ValueError(
+                    "grad_out must be provided for non-scalar tensors. "
+                    f"Got shape={self.shape}."
+                )
+            grad_out = Tensor(shape=(), device=self.device, requires_grad=False)
+            grad_out.copy_from_numpy(np.array(1.0, dtype=np.float32))
+        else:
+            if not isinstance(grad_out, Tensor):
+                raise TypeError(f"grad_out must be a Tensor, got {type(grad_out)!r}")
+            if grad_out.shape != self.shape:
+                raise ValueError(
+                    f"grad_out shape mismatch: expected {self.shape}, got {grad_out.shape}"
+                )
+            if grad_out.device != self.device:
+                raise ValueError("grad_out must be on the same device as self")
+
+        # Build reverse topological order of nodes reachable from `self`
+        topo: list[Tensor] = []
+        visited: set[int] = set()
+
+        def dfs(t: "Tensor") -> None:
+            tid = id(t)
+            if tid in visited:
+                return
+            visited.add(tid)
+
+            ctx = t._get_ctx()
+            if ctx is not None:
+                for p in ctx.parents:
+                    dfs(p)
+
+            topo.append(t)
+
+        dfs(self)
+
+        # Map from tensor id -> accumulated gradient tensor
+        grads: dict[int, Tensor] = {id(self): grad_out}
+
+        # Traverse in reverse topo order (from outputs back to leaves)
+        for t in reversed(topo):
+            ctx = t._get_ctx()
+            if ctx is None:
+                continue
+
+            grad_t = grads.get(id(t))
+            if grad_t is None:
+                # No gradient flowing to this node; skip
+                continue
+
+            parent_grads = ctx.backward_fn(grad_t)
+            if len(parent_grads) != len(ctx.parents):
+                raise RuntimeError(
+                    "backward_fn must return one grad per parent. "
+                    f"Got {len(parent_grads)} grads for {len(ctx.parents)} parents."
+                )
+
+            for parent, g in zip(ctx.parents, parent_grads):
+                if g is None:
+                    continue
+                if not isinstance(g, Tensor):
+                    raise TypeError(
+                        f"backward_fn must return Tensor or None, got {type(g)!r}"
+                    )
+                if g.device != parent.device:
+                    raise ValueError("Gradient device must match parent device")
+                if g.shape != parent.shape:
+                    raise ValueError(
+                        f"Gradient shape mismatch for parent: expected {parent.shape}, got {g.shape}"
+                    )
+
+                # Accumulate gradient in the grads dict
+                pid = id(parent)
+                if pid in grads:
+                    grads[pid] = self._add_no_grad(grads[pid], g)
+                else:
+                    # Ensure stored grads do not track grad
+                    grads[pid] = self._detach_no_grad(g)
+
+        # Write accumulated grads into leaf tensors that require grad
+        for tid, g in grads.items():
+            # Find the actual Tensor object by scanning visited/topo
+            # (topo contains all visited tensors)
+            # This keeps it simple without weakrefs.
+            # Note: O(n^2) worst-case, but graphs are small for now.
+            for t in topo:
+                if id(t) == tid:
+                    if t.requires_grad:
+                        t._accumulate_grad_(g)
+                    break
+
+    def _accumulate_grad_(self, g: "Tensor") -> None:
+        """
+        In-place accumulate gradient `g` into `self.grad` (CPU-only).
+        """
+        if not self.device.is_cpu():
+            self._raise_device_not_supported("accumulate_grad")
+
+        g0 = self._detach_no_grad(g)
+
+        if self._grad is None:
+            self._grad = g0
+            return
+
+        # In-place add into existing grad storage
+        if not self._grad.device.is_cpu():
+            self._raise_device_not_supported("accumulate_grad_non_cpu")
+
+        if self._grad.shape != g0.shape:
+            raise ValueError(f"Grad shape mismatch: {self._grad.shape} vs {g0.shape}")
+
+        # Add underlying numpy arrays directly (avoid creating autograd edges)
+        self._grad._data[...] = self._grad._data + g0._data  # type: ignore[attr-defined]
+
+    @staticmethod
+    def _detach_no_grad(t: "Tensor") -> "Tensor":
+        """
+        Return a detached copy of `t` that does not track gradients and has no ctx.
+        """
+        out = Tensor(shape=t.shape, device=t.device, requires_grad=False, ctx=None)
+        if t.device.is_cpu():
+            out.copy_from_numpy(t.to_numpy())
+            return out
+        t._raise_device_not_supported("detach_no_grad")
+
+    @staticmethod
+    def _add_no_grad(a: "Tensor", b: "Tensor") -> "Tensor":
+        """
+        Add two tensors without creating autograd history.
+        """
+        if a.device != b.device:
+            raise ValueError("Device mismatch in _add_no_grad")
+        if a.shape != b.shape:
+            raise ValueError("Shape mismatch in _add_no_grad")
+
+        out = Tensor(shape=a.shape, device=a.device, requires_grad=False, ctx=None)
+        if a.device.is_cpu():
+            out.copy_from_numpy(a.to_numpy() + b.to_numpy())
+            return out
+        a._raise_device_not_supported("add_no_grad")

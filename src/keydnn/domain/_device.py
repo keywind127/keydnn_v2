@@ -99,7 +99,7 @@ class Device:
             self.type = DeviceType.CUDA
             self.index = int(m.group(1))
 
-    def __str__(self):
+    def __str__(self) -> str:
         """
         Return the canonical string representation of the device.
 
@@ -109,6 +109,50 @@ class Device:
             "cpu" for CPU devices, or "cuda:<index>" for CUDA devices.
         """
         return "cpu" if self.type is DeviceType.CPU else f"cuda:{self.index}"
+
+    def __repr__(self) -> str:
+        """
+        Return an unambiguous string representation of the device.
+
+        Returns
+        -------
+        str
+            A string suitable for debugging.
+        """
+        return f"Device('{self}')"
+
+    def __eq__(self, other: object) -> bool:
+        """
+        Compare two Device objects for semantic equality.
+
+        Devices are considered equal if they represent the same device type
+        and (for CUDA devices) the same device index.
+
+        Parameters
+        ----------
+        other : object
+            Object to compare against.
+
+        Returns
+        -------
+        bool
+            True if the devices are semantically equivalent, False otherwise.
+        """
+        if not isinstance(other, Device):
+            return NotImplemented
+        return (self.type, self.index) == (other.type, other.index)
+
+    def __hash__(self) -> int:
+        """
+        Compute a hash value for the device.
+
+        Returns
+        -------
+        int
+            Hash based on device type and index, enabling use of Device
+            instances as dictionary keys or set members.
+        """
+        return hash((self.type, self.index))
 
     def is_cpu(self) -> bool:
         """
