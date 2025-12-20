@@ -6,7 +6,8 @@ domain-level `IModule` protocol. It implements common conveniences used by
 neural network layers, including:
 
 - parameter registration and storage
-- parameter traversal (`parameters`, `named_parameters`)
+- submodule registration and storage
+- recursive parameter traversal (`parameters`, `named_parameters`)
 - `__call__` forwarding to `forward` for ergonomic invocation
 
 This class is part of the infrastructure layer and is intended to be subclassed
@@ -29,28 +30,71 @@ class Module(IModule):
     This class provides a lightweight foundation for implementing trainable
     layers. Subclasses typically:
     - create `Parameter` instances (or other `IParameter` implementations),
-    - register them via `register_parameter`,
+    - register them (explicitly via `register_parameter` or implicitly via attribute assignment),
     - implement `forward` to define computation.
 
     Attributes
     ----------
     _parameters : Dict[str, IParameter]
         Mapping from parameter name to parameter object for this module.
+    _modules : Dict[str, Module]
+        Mapping from child module name to child module object for this module.
 
     Notes
     -----
-    - This implementation only handles *direct* parameters registered on the
-      module itself. Recursive traversal over submodules (e.g., `self._modules`)
-      can be added later if/when you implement module composition containers.
-    - `__call__` delegates to `forward`, matching the common deep learning
-      framework convention.
+    - This implementation supports *recursive* traversal over registered submodules.
+    - Parameters and submodules can be registered explicitly (register_*) or
+      implicitly by assigning them as attributes, e.g.:
+          self.weight = Parameter(...)
+          self.block = Sequential(...)
+    - `__call__` delegates to `forward`, matching common deep learning framework conventions.
     """
 
     def __init__(self) -> None:
         """
-        Initialize an empty module with no registered parameters.
+        Initialize an empty module with no registered parameters/submodules.
         """
-        self._parameters: Dict[str, IParameter] = {}
+        # Use super().__setattr__ to avoid triggering our __setattr__ logic.
+        super().__setattr__("_parameters", {})  # type: ignore[assignment]
+        super().__setattr__("_modules", {})  # type: ignore[assignment]
+
+    def __setattr__(self, name: str, value) -> None:
+        """
+        Intercept attribute assignment to auto-register Parameters and child Modules.
+
+        This mirrors common deep learning framework behavior and ensures that:
+        - optimizers can discover parameters via `parameters()`
+        - containers can recurse into submodules
+        """
+        # Let internal bookkeeping attributes pass through without registration.
+        if name in {"_parameters", "_modules"}:
+            super().__setattr__(name, value)
+            return
+
+        # Lazy imports to avoid hard cycles at import time.
+        try:
+            from ._parameter import Parameter  # concrete infra Parameter
+        except Exception:  # pragma: no cover
+            Parameter = None  # type: ignore[assignment]
+
+        # If user assigns None, treat it as "unregister" if present.
+        if value is None:
+            if hasattr(self, "_parameters") and name in self._parameters:
+                self._parameters.pop(name, None)
+            if hasattr(self, "_modules") and name in self._modules:
+                self._modules.pop(name, None)
+            super().__setattr__(name, value)
+            return
+
+        # Auto-register concrete Parameters.
+        if Parameter is not None and isinstance(value, Parameter):
+            self._parameters[name] = value
+
+        # Auto-register child Modules (infrastructure modules).
+        elif isinstance(value, Module):
+            self._modules[name] = value
+
+        super().__setattr__(name, value)
 
     def register_parameter(self, name: str, param: Optional[IParameter]) -> None:
         """
@@ -61,90 +105,89 @@ class Module(IModule):
         name : str
             Name under which the parameter will be stored (e.g., "weight", "bias").
         param : Optional[IParameter]
-            Parameter instance to register. If None, registration is skipped
-            (useful for optional parameters like disabled bias).
+            Parameter instance to register. If None, registration is skipped.
 
         Notes
         -----
         - If `param` is None, nothing is registered.
-        - If the name already exists, it is overwritten intentionally. This
-          mirrors common deep learning frameworks and supports reassignment
-          during initialization or reconfiguration.
+        - If the name already exists, it is overwritten intentionally.
+        - This also sets the attribute on the module so `self.<name>` works.
         """
         if param is None:
             return
         self._parameters[name] = param
+        super().__setattr__(name, param)
+
+    def register_module(self, name: str, module: Optional["Module"]) -> None:
+        """
+        Register a child module with this module.
+
+        Parameters
+        ----------
+        name : str
+            Name under which the module will be stored.
+        module : Optional[Module]
+            Child module to register. If None, registration is skipped.
+
+        Notes
+        -----
+        - If `module` is None, nothing is registered.
+        - This also sets the attribute on the module so `self.<name>` works.
+        """
+        if module is None:
+            return
+        self._modules[name] = module
+        super().__setattr__(name, module)
 
     def parameters(self) -> Iterable[IParameter]:
         """
-        Return an iterable over this module's registered parameters.
+        Return an iterable over this module's parameters (recursive).
 
         Returns
         -------
         Iterable[IParameter]
-            Iterable of parameters registered directly on this module.
-
-        Notes
-        -----
-        This method does not currently recurse into submodules. If you later add
-        submodule registration, extend this method accordingly.
+            Iterable of parameters registered on this module and all submodules.
         """
-        return self._parameters.values()
+        # Yield own parameters first
+        for p in self._parameters.values():
+            yield p
+        # Then recurse
+        for m in self._modules.values():
+            yield from m.parameters()
 
-    def named_parameters(self) -> Iterator[tuple[str, IParameter]]:
+    def named_parameters(self, prefix: str = "") -> Iterator[tuple[str, IParameter]]:
         """
-        Return an iterator over (name, parameter) pairs.
+        Return an iterator over (name, parameter) pairs (recursive).
+
+        Parameters
+        ----------
+        prefix : str
+            Prefix to prepend to parameter names (used for recursion).
 
         Returns
         -------
         Iterator[tuple[str, IParameter]]
-            Iterator yielding (parameter_name, parameter) for each registered
-            parameter.
-
-        Notes
-        -----
-        This method is useful for debugging, logging, and optimizer parameter
-        grouping.
+            Iterator yielding (fully_qualified_name, parameter).
         """
-        return iter(self._parameters.items())
+        base = prefix + "." if prefix else ""
+
+        for name, p in self._parameters.items():
+            yield (f"{base}{name}", p)
+
+        for child_name, child in self._modules.items():
+            child_prefix = f"{base}{child_name}"
+            yield from child.named_parameters(child_prefix)
 
     def forward(self, x):
         """
         Execute the forward computation of the module.
 
-        Parameters
-        ----------
-        x : ITensor
-            Input tensor (or tensor-like) for the module.
-
-        Returns
-        -------
-        ITensor
-            Output tensor produced by the module.
-
-        Raises
-        ------
-        NotImplementedError
-            Always raised in the base class. Subclasses must implement this.
+        Subclasses must implement this.
         """
         raise NotImplementedError
 
     def __call__(self, x):
         """
         Call the module as a function, delegating to `forward`.
-
-        This enables ergonomic usage such as:
-
-            y = module(x)
-
-        Parameters
-        ----------
-        x : ITensor
-            Input tensor (or tensor-like) for the module.
-
-        Returns
-        -------
-        ITensor
-            Output tensor produced by `forward`.
         """
         return self.forward(x)
