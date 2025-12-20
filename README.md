@@ -42,6 +42,7 @@ Provides concrete implementations of domain contracts:
 - `Model` — top-level network abstraction with inference utilities
 - `Sequential` — ordered container for composing multi-layer models
 - `Linear` — fully connected (dense) layer implementation
+- `Flatten` — reshape layer bridging spatial outputs to dense layers
 - `Conv2d` — 2D convolution layer (NCHW, CPU reference implementation)
 - Pooling layers:
   - `MaxPool2d`
@@ -74,6 +75,8 @@ The test suite is split into two categories:
 - Edge-case tests for pooling semantics (tie-breaking, padding traps)
 - Shape matrix tests for stride/padding correctness
 - Chain tests validating Conv2D → Pooling → Activation compatibility
+- End-to-end CNN chain tests (Conv2D → ReLU → MaxPool2D → Flatten → Linear → Softmax)
+- End-to-end CNN composition validated via chain tests (Conv2D → Pooling → Flatten → Dense)
 
 ---
 
@@ -84,6 +87,7 @@ The test suite is split into two categories:
 - Trainable `Parameter` class with gradient management
 - Module system with parameter registration
 - Fully connected `Linear` layer
+- `Flatten` layer for reshaping (N, C, H, W) → (N, C*H*W)
 - 2D convolution layer (`Conv2d`) with configurable kernel size, stride, padding, and optional bias
 - 2D pooling layers (`MaxPool2d`, `AvgPool2d`, `GlobalAvgPool2d`)
 - Naive CPU Conv2D and Pool2D forward/backward kernels for correctness
@@ -103,6 +107,7 @@ The test suite is split into two categories:
 ### Supported Layers
 
 - Linear (fully connected)
+- Flatten
 - Conv2d (2D convolution, NCHW)
 - Pooling layers:
   - MaxPool2d
