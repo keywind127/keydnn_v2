@@ -1,10 +1,10 @@
 import unittest
 import numpy as np
 
-from keydnn.domain._device import Device
-from keydnn.infrastructure._tensor import Tensor, Context
-from keydnn.infrastructure._function import Conv2dFn
-from keydnn.infrastructure.ops.conv2d_cpu import conv2d_forward_cpu, conv2d_backward_cpu
+from src.keydnn.domain._device import Device
+from src.keydnn.infrastructure._tensor import Tensor, Context
+from src.keydnn.infrastructure._function import Conv2dFn
+from src.keydnn.infrastructure.ops.conv2d_cpu import conv2d_forward_cpu, conv2d_backward_cpu
 
 
 def tensor_from_numpy(arr: np.ndarray, device: Device, requires_grad: bool) -> Tensor:
