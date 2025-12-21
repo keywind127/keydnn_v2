@@ -1,0 +1,78 @@
+#include "keydnn_maxpool2d.hpp"
+
+#include <cstddef>
+#include <limits>
+
+static inline std::size_t idx4_nchw(
+    int n, int c, int h, int w,
+    int C, int H, int W
+) {
+    // (((n * C + c) * H + h) * W + w)
+    return static_cast<std::size_t>(
+        (((n * C + c) * H + h) * W + w)
+    );
+}
+
+void keydnn_maxpool2d_forward_f32(
+    const float* x_pad,
+    float* y,
+    std::int64_t* argmax_idx,
+    int N,
+    int C,
+    int H_pad,
+    int W_pad,
+    int H_out,
+    int W_out,
+    int k_h,
+    int k_w,
+    int s_h,
+    int s_w
+) {
+    // Basic argument sanity (cheap guards; feel free to remove in release builds)
+    if (!x_pad || !y || !argmax_idx) return;
+    if (N <= 0 || C <= 0 || H_pad <= 0 || W_pad <= 0) return;
+    if (H_out <= 0 || W_out <= 0 || k_h <= 0 || k_w <= 0) return;
+    if (s_h <= 0 || s_w <= 0) return;
+
+    for (int n = 0; n < N; ++n) {
+        for (int c = 0; c < C; ++c) {
+            for (int i = 0; i < H_out; ++i) {
+                const int h0 = i * s_h;
+                for (int j = 0; j < W_out; ++j) {
+                    const int w0 = j * s_w;
+
+                    // Scan window (k_h x k_w) within padded plane
+                    float best = -std::numeric_limits<float>::infinity();
+                    int best_flat = 0;
+
+                    for (int ph = 0; ph < k_h; ++ph) {
+                        const int h = h0 + ph;
+                        for (int pw = 0; pw < k_w; ++pw) {
+                            const int w = w0 + pw;
+
+                            const std::size_t in_off = idx4_nchw(n, c, h, w, C, H_pad, W_pad);
+                            const float v = x_pad[in_off];
+
+                            const int flat = ph * k_w + pw;
+                            if (v > best) {
+                                best = v;
+                                best_flat = flat;
+                            }
+                        }
+                    }
+
+                    const std::size_t out_off = idx4_nchw(n, c, i, j, C, H_out, W_out);
+                    y[out_off] = best;
+
+                    const int best_ph = best_flat / k_w;
+                    const int best_pw = best_flat % k_w;
+                    const int best_h = h0 + best_ph;
+                    const int best_w = w0 + best_pw;
+
+                    // flattened spatial index into padded HxW plane
+                    argmax_idx[out_off] = static_cast<std::int64_t>(best_h) * W_pad + best_w;
+                }
+            }
+        }
+    }
+}

@@ -119,6 +119,7 @@ def maxpool2d_forward_cpu(
     N, C, H, W = x.shape
     k_h, k_w = k
     p_h, p_w = p
+    s_h, s_w = s
 
     H_out, W_out = _out_hw(H, W, k, s, p)
 
@@ -133,22 +134,54 @@ def maxpool2d_forward_cpu(
     y = np.empty((N, C, H_out, W_out), dtype=x.dtype)
     argmax_idx = np.empty((N, C, H_out, W_out), dtype=np.int64)
 
-    s_h, s_w = s
-    for n in range(N):
-        for c in range(C):
-            for i in range(H_out):
-                h0 = i * s_h
-                for j in range(W_out):
-                    w0 = j * s_w
-                    patch = x_pad[n, c, h0 : h0 + k_h, w0 : w0 + k_w]
-                    flat_idx = int(np.argmax(patch))
-                    y[n, c, i, j] = patch.reshape(-1)[flat_idx]
+    def _maxpool_loop(
+        *,
+        x_pad: np.ndarray,
+        y: np.ndarray,
+        argmax_idx: np.ndarray,
+        N: int,
+        C: int,
+        H_out: int,
+        W_out: int,
+        k_h: int,
+        k_w: int,
+        s_h: int,
+        s_w: int,
+        W_pad: int,
+    ) -> None:
+        for n in range(N):
+            for c in range(C):
+                for i in range(H_out):
+                    h0 = i * s_h
+                    for j in range(W_out):
+                        w0 = j * s_w
 
-                    ph = flat_idx // k_w
-                    pw = flat_idx % k_w
-                    h = h0 + ph
-                    w_ = w0 + pw
-                    argmax_idx[n, c, i, j] = h * W_pad + w_
+                        patch = x_pad[n, c, h0 : h0 + k_h, w0 : w0 + k_w]
+                        flat_idx = int(np.argmax(patch))
+
+                        y[n, c, i, j] = patch.reshape(-1)[flat_idx]
+
+                        ph = flat_idx // k_w
+                        pw = flat_idx % k_w
+                        h = h0 + ph
+                        w = w0 + pw
+
+                        argmax_idx[n, c, i, j] = h * W_pad + w
+
+    _maxpool_loop(
+        x_pad=x_pad,
+        y=y,
+        argmax_idx=argmax_idx,
+        N=N,
+        C=C,
+        H_out=H_out,
+        W_out=W_out,
+        k_h=k_h,
+        k_w=k_w,
+        s_h=s_h,
+        s_w=s_w,
+        W_pad=W_pad,
+    )
 
     return y, argmax_idx
 
