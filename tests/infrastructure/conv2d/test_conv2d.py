@@ -204,10 +204,10 @@ class TestConv2dCPU(unittest.TestCase):
             y[...] = 123.0
 
         with mock.patch(
-            "keydnn.infrastructure.native.python.conv2d_ctypes.load_keydnn_native",
+            "src.keydnn.infrastructure.native.python.conv2d_ctypes.load_keydnn_native",
             side_effect=_fake_load_keydnn_native,
         ), mock.patch(
-            "keydnn.infrastructure.native.python.conv2d_ctypes.conv2d_forward_f32_ctypes",
+            "src.keydnn.infrastructure.native.python.conv2d_ctypes.conv2d_forward_f32_ctypes",
             side_effect=_fake_conv2d_forward_f32_ctypes,
         ):
             y = conv2d_forward_cpu(x, w, b, stride=1, padding=0)
@@ -247,10 +247,10 @@ class TestConv2dCPU(unittest.TestCase):
             grad_w[...] = 9.0
 
         with mock.patch(
-            "keydnn.infrastructure.native.python.conv2d_ctypes.load_keydnn_native",
+            "src.keydnn.infrastructure.native.python.conv2d_ctypes.load_keydnn_native",
             side_effect=_fake_load_keydnn_native,
         ), mock.patch(
-            "keydnn.infrastructure.native.python.conv2d_ctypes.conv2d_backward_f32_ctypes",
+            "src.keydnn.infrastructure.native.python.conv2d_ctypes.conv2d_backward_f32_ctypes",
             side_effect=_fake_conv2d_backward_f32_ctypes,
         ):
             grad_x, grad_w_out, grad_b = conv2d_backward_cpu(
