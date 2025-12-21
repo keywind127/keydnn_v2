@@ -46,6 +46,8 @@ Provides concrete implementations of domain contracts:
 - `Conv2d` — 2D convolution layer (NCHW)
   - Naive NumPy reference implementation (forward + backward)
   - Optional native CPU acceleration (float32 / float64) via C++ + ctypes
+    - Single-threaded native C++ kernels
+    - OpenMP-parallelized native kernels for compute-heavy workloads
   - Automatic dtype-aware dispatch with safe fallback
 - Pooling layers:
   - `MaxPool2d`
@@ -87,6 +89,31 @@ via C++ kernels exposed through `ctypes`, including:
 
 This design allows incremental performance optimization without sacrificing
 portability or debuggability.
+
+---
+
+#### OpenMP Parallelization (CPU)
+
+For compute-intensive CPU kernels (Conv2D, Pool2D), KeyDNN optionally enables
+**OpenMP-based intra-kernel parallelism** in the native C++ backend.
+
+Design rationale:
+- Python multiprocessing introduces high overhead from process creation,
+  inter-process communication, and tensor marshaling.
+- Native kernels invoked via `ctypes` already execute outside the Python GIL.
+- OpenMP enables fine-grained parallelism directly inside hot loops
+  without crossing the Python/C boundary.
+
+Behavioral characteristics:
+- OpenMP provides additional speedups (up to ~3×) for sufficiently large
+  Conv2D workloads.
+- For small tensor shapes, thread scheduling overhead may dominate and
+  reduce gains.
+- OpenMP acceleration is workload-dependent and conservatively enabled
+  only at the native kernel level.
+
+On Windows (MinGW-w64), OpenMP runtime DLLs are staged next to the native
+shared library to ensure reliable dynamic loading via `ctypes`.
 
 ---
 
@@ -157,8 +184,28 @@ Conservatively summarized, native Conv2D forward execution in KeyDNN
 achieves an average **~50× speedup over NumPy-based implementations** on
 CPU while preserving correctness and portability.
 
+Additional benchmarking comparing **native C++ with and without OpenMP**
+shows that OpenMP provides incremental acceleration only for sufficiently
+large workloads. Representative results indicate:
+
+- Up to ~3× speedup for larger spatial resolutions and channel counts
+- Minimal or negative gains for small tensors due to threading overhead
+
+This behavior matches expected CPU parallelization trade-offs and validates
+OpenMP as a scalable optimization path for realistic CNN workloads.
+
 Benchmark scripts and full timing reports are provided under `scripts/`
 and are not part of the unit test suite.
+
+#### Native Build & Reproducibility
+
+Native CPU kernels are built from source and are **not required** to use KeyDNN.
+
+- Platform-specific build scripts are provided under `scripts/`
+- Windows builds use MinGW-w64 and support both OpenMP and non-OpenMP variants
+- Required OpenMP runtime DLLs are staged automatically for reliable loading
+- Environment variables (e.g., compiler paths) are centralized in `.env`
+  to ensure reproducible builds across systems
 
 ---
 
@@ -223,7 +270,7 @@ The test suite is split into two categories:
 ## Roadmap (Planned)
 
 - Additional layers and activation functions (beyond core Conv2D and Pooling)
-- CUDA-backed tensor operations
+- CUDA-backed tensor operations (following validated CPU OpenMP parallelism)
 - CUDA acceleration for convolution layers
 - Performance optimizations and kernel fusion
 - Model serialization and checkpointing
