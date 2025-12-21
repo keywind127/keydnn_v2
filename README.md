@@ -49,6 +49,12 @@ Provides concrete implementations of domain contracts:
     - Single-threaded native C++ kernels
     - OpenMP-parallelized native kernels for compute-heavy workloads
   - Automatic dtype-aware dispatch with safe fallback
+- `RNNCell` — vanilla recurrent neural network cell (tanh activation)
+  - NumPy-based forward and backward
+  - Autograd-compatible via dynamic computation graphs
+- `RNN` — sequence-level RNN module
+  - Executes `RNNCell` over time-major sequences
+  - Supports Backpropagation Through Time (BPTT) via chained autograd contexts
 - Pooling layers:
   - `MaxPool2d`
   - `AvgPool2d`
@@ -57,6 +63,12 @@ Provides concrete implementations of domain contracts:
 - Loss functions (SSE, MSE, Binary Cross Entropy, Categorical Cross Entropy)
 - Optimizers (SGD, Adam)
 - Autograd execution engine via dynamic computation graphs (`Context`, `Tensor.backward`)
+- Tensor indexing and slicing (`Tensor.__getitem__`)
+  - Supports basic slicing, integer indexing, fancy indexing, and boolean masks
+  - Scatter-based gradient propagation for correct backward behavior
+- Tensor stacking (`Tensor.stack`)
+  - Enables sequence-level outputs with gradient distribution to individual tensors
+  - Critical for recurrent models and BPTT
 - Convolution and pooling primitives:
   - Conv2D forward/backward kernels
     - Naive NumPy reference implementations
@@ -227,6 +239,12 @@ The test suite is split into two categories:
 - End-to-end CNN composition validated via chain tests (Conv2D → Pooling → Flatten → Dense)
 - Finite-difference gradient checks for Conv2D forward and backward
 - Native vs reference path consistency tests via mocked dispatch
+- Recurrent Neural Network (RNN) tests:
+  - RNNCell forward correctness vs NumPy reference
+  - RNNCell backward gradient propagation (inputs, hidden state, parameters)
+  - End-to-end BPTT gradient flow across time steps
+  - Training sanity tests (sequence fitting with loss decrease)
+  - Hidden-state (h0) gradient correctness and edge cases
 
 ---
 
@@ -251,6 +269,10 @@ The test suite is split into two categories:
 - Reverse-mode automatic differentiation (autograd) with dynamic computation graphs
 - End-to-end model training via backpropagation and optimizers
 - Sequential model composition with parameter discovery
+- Vanilla recurrent neural networks (RNN)
+  - `RNNCell` with tanh nonlinearity
+  - `RNN` sequence module with Backpropagation Through Time (BPTT)
+  - Gradient propagation through time via dynamic autograd graphs
 
 ---
 
@@ -259,11 +281,19 @@ The test suite is split into two categories:
 - Linear (fully connected)
 - Flatten
 - Conv2d (2D convolution, NCHW)
+- Recurrent:
+  - RNNCell (vanilla tanh)
+  - RNN (sequence module)
 - Pooling layers:
   - MaxPool2d
   - AvgPool2d
   - GlobalAvgPool2d
-- Activation layers: ReLU, Sigmoid, Softmax
+- Activation layers:
+  - ReLU
+  - Sigmoid
+  - Softmax
+  - Tanh
+  - LeakyReLU
 
 ---
 
@@ -274,6 +304,12 @@ The test suite is split into two categories:
 - CUDA acceleration for convolution layers
 - Performance optimizations and kernel fusion
 - Model serialization and checkpointing
+- Advanced recurrent architectures:
+  - LSTM
+  - GRU
+- Fused recurrent kernels for improved performance
+- Sequence masking and variable-length sequence support
+- Bidirectional and multi-layer RNNs
 
 ---
 
