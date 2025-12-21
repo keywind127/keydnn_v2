@@ -72,7 +72,7 @@ if [[ -z "$CXX" ]]; then
   CXX="clang++"
 fi
 
-echo "[KeyDNN] Building native maxpool kernel (macOS)"
+echo "[KeyDNN] Building native pooling kernels (macOS)"
 echo "  Source   : $SRC_DIR"
 echo "  Output   : $OUT_LIB"
 echo "  Compiler : $CXX"
@@ -82,6 +82,7 @@ mkdir -p "$OUT_DIR"
 "$CXX" -O3 -std=c++17 -fPIC -shared \
   -I"$INC_DIR" \
   "$SRC_DIR/keydnn_maxpool2d.cpp" \
+  "$SRC_DIR/keydnn_avgpool2d.cpp" \
   -o "$OUT_LIB"
 
 echo "[KeyDNN] Build successful"

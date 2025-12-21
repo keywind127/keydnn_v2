@@ -26,9 +26,6 @@ KEYDNN_GPP="${KEYDNN_GPP:-}"
 KEYDNN_MINGW_BIN="${KEYDNN_MINGW_BIN:-}"
 
 if [[ -f "$ENV_FILE" ]]; then
-  # shellcheck disable=SC1090
-  set -a
-  # Parse .env safely (no "export" required). We only accept KEY=VALUE pairs.
   while IFS= read -r line || [[ -n "$line" ]]; do
     # trim leading/trailing spaces
     line="${line#"${line%%[![:space:]]*}"}"
@@ -37,16 +34,13 @@ if [[ -f "$ENV_FILE" ]]; then
     [[ -z "$line" ]] && continue
     [[ "${line:0:1}" == "#" ]] && continue
 
-    # Accept KEY=VALUE
     if [[ "$line" == *"="* ]]; then
       key="${line%%=*}"
       val="${line#*=}"
 
-      # trim spaces around key
       key="${key#"${key%%[![:space:]]*}"}"
       key="${key%"${key##*[![:space:]]}"}"
 
-      # strip surrounding quotes from value
       if [[ "${val:0:1}" == "\"" && "${val: -1}" == "\"" ]]; then
         val="${val:1:-1}"
       fi
@@ -58,7 +52,6 @@ if [[ -f "$ENV_FILE" ]]; then
       esac
     fi
   done < "$ENV_FILE"
-  set +a
 fi
 
 # Determine compiler
@@ -70,7 +63,7 @@ if [[ -z "$GPP" ]]; then
   GPP="g++"
 fi
 
-echo "[KeyDNN] Building native maxpool kernel (Linux)"
+echo "[KeyDNN] Building native pooling kernels (Linux)"
 echo "  Source   : $SRC_DIR"
 echo "  Output   : $OUT_LIB"
 echo "  Compiler : $GPP"
@@ -80,6 +73,7 @@ mkdir -p "$OUT_DIR"
 "$GPP" -O3 -std=c++17 -fPIC -shared \
   -I"$INC_DIR" \
   "$SRC_DIR/keydnn_maxpool2d.cpp" \
+  "$SRC_DIR/keydnn_avgpool2d.cpp" \
   -o "$OUT_LIB"
 
 echo "[KeyDNN] Build successful"

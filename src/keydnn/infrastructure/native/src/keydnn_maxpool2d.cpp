@@ -83,6 +83,69 @@ static inline void maxpool2d_forward_impl(
     }
 }
 
+template <typename T>
+static inline void maxpool2d_backward_impl(
+    const T* grad_out,
+    const std::int64_t* argmax_idx,
+    T* grad_x_pad,
+    int N, int C,
+    int H_out, int W_out,
+    int H_pad, int W_pad
+) {
+    static_assert(std::is_floating_point_v<T>, "maxpool2d_backward_impl requires floating point T");
+
+    if (!grad_out || !argmax_idx || !grad_x_pad) return;
+    if (N <= 0 || C <= 0) return;
+    if (H_out <= 0 || W_out <= 0 || H_pad <= 0 || W_pad <= 0) return;
+
+    // Accumulate grad_out into grad_x_pad at argmax locations
+    for (int n = 0; n < N; ++n) {
+        for (int c = 0; c < C; ++c) {
+            for (int i = 0; i < H_out; ++i) {
+                for (int j = 0; j < W_out; ++j) {
+                    const std::size_t out_off = idx4_nchw(n, c, i, j, C, H_out, W_out);
+                    const std::int64_t idx = argmax_idx[out_off];
+
+                    // idx = h * W_pad + w
+                    const int h = static_cast<int>(idx / W_pad);
+                    const int w = static_cast<int>(idx % W_pad);
+
+                    if (h < 0 || h >= H_pad || w < 0 || w >= W_pad) {
+                        continue; // guard against corrupted indices
+                    }
+
+                    const std::size_t in_off = idx4_nchw(n, c, h, w, C, H_pad, W_pad);
+                    grad_x_pad[in_off] += grad_out[out_off];
+                }
+            }
+        }
+    }
+}
+
+// -------------------- Exports --------------------
+
+void keydnn_maxpool2d_backward_f32(
+    const float* grad_out,
+    const std::int64_t* argmax_idx,
+    float* grad_x_pad,
+    int N, int C,
+    int H_out, int W_out,
+    int H_pad, int W_pad
+) {
+    maxpool2d_backward_impl<float>(grad_out, argmax_idx, grad_x_pad, N, C, H_out, W_out, H_pad, W_pad);
+}
+
+void keydnn_maxpool2d_backward_f64(
+    const double* grad_out,
+    const std::int64_t* argmax_idx,
+    double* grad_x_pad,
+    int N, int C,
+    int H_out, int W_out,
+    int H_pad, int W_pad
+) {
+    maxpool2d_backward_impl<double>(grad_out, argmax_idx, grad_x_pad, N, C, H_out, W_out, H_pad, W_pad);
+}
+
 void keydnn_maxpool2d_forward_f32(
     const float* x_pad,
     float* y,

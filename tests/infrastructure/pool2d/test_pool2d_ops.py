@@ -82,6 +82,156 @@ def _ref_maxpool2d_forward_numpy(
     return y, argmax_idx
 
 
+def _ref_maxpool2d_backward_numpy(
+    grad_out: np.ndarray,
+    argmax_idx: np.ndarray,
+    *,
+    x_shape: tuple[int, int, int, int],
+    kernel_size: int | tuple[int, int],
+    stride: int | tuple[int, int] | None = None,
+    padding: int | tuple[int, int] = 0,
+) -> np.ndarray:
+    """
+    Reference maxpool2d backward that matches KeyDNN semantics:
+    - argmax_idx stores flattened spatial index into padded plane: h * W_pad + w
+    - gradients are accumulated into padded buffer and then unpadded
+    """
+
+    def _pair(v):
+        if isinstance(v, tuple):
+            return v
+        return (v, v)
+
+    k = _pair(kernel_size)
+    s = _pair(kernel_size if stride is None else stride)
+    p = _pair(padding)
+
+    N, C, H, W = x_shape
+    p_h, p_w = p
+    H_pad = H + 2 * p_h
+    W_pad = W + 2 * p_w
+
+    grad_x_pad = np.zeros((N, C, H_pad, W_pad), dtype=grad_out.dtype)
+
+    H_out, W_out = grad_out.shape[2], grad_out.shape[3]
+    for n in range(N):
+        for c in range(C):
+            for i in range(H_out):
+                for j in range(W_out):
+                    idx = int(argmax_idx[n, c, i, j])
+                    h = idx // W_pad
+                    w_ = idx % W_pad
+                    grad_x_pad[n, c, h, w_] += grad_out[n, c, i, j]
+
+    return grad_x_pad[:, :, p_h : p_h + H, p_w : p_w + W]
+
+
+def _ref_avgpool2d_forward_numpy(
+    x: np.ndarray,
+    *,
+    kernel_size: int | tuple[int, int],
+    stride: int | tuple[int, int] | None = None,
+    padding: int | tuple[int, int] = 0,
+) -> np.ndarray:
+    """
+    Reference avgpool2d forward that matches KeyDNN semantics:
+    - padding with 0
+    - average computed over full kernel area (k_h * k_w), including padded zeros
+    """
+
+    def _pair(v):
+        if isinstance(v, tuple):
+            return v
+        return (v, v)
+
+    def _out_hw(H, W, k, s, p):
+        k_h, k_w = k
+        s_h, s_w = s
+        p_h, p_w = p
+        H_out = (H + 2 * p_h - k_h) // s_h + 1
+        W_out = (W + 2 * p_w - k_w) // s_w + 1
+        return H_out, W_out
+
+    k = _pair(kernel_size)
+    s = _pair(kernel_size if stride is None else stride)
+    p = _pair(padding)
+
+    N, C, H, W = x.shape
+    k_h, k_w = k
+    p_h, p_w = p
+    s_h, s_w = s
+
+    H_out, W_out = _out_hw(H, W, k, s, p)
+
+    x_pad = np.pad(
+        x,
+        pad_width=((0, 0), (0, 0), (p_h, p_h), (p_w, p_w)),
+        mode="constant",
+        constant_values=0.0,
+    )
+
+    y = np.zeros((N, C, H_out, W_out), dtype=x.dtype)
+    denom = float(k_h * k_w)
+
+    for n in range(N):
+        for c in range(C):
+            for i in range(H_out):
+                h0 = i * s_h
+                for j in range(W_out):
+                    w0 = j * s_w
+                    patch = x_pad[n, c, h0 : h0 + k_h, w0 : w0 + k_w]
+                    y[n, c, i, j] = np.sum(patch) / denom
+
+    return y
+
+
+def _ref_avgpool2d_backward_numpy(
+    grad_out: np.ndarray,
+    *,
+    x_shape: tuple[int, int, int, int],
+    kernel_size: int | tuple[int, int],
+    stride: int | tuple[int, int] | None = None,
+    padding: int | tuple[int, int] = 0,
+) -> np.ndarray:
+    """
+    Reference avgpool2d backward that matches KeyDNN semantics:
+    - gradients distributed uniformly over each pooling window
+    - accumulated into padded buffer then unpadded
+    """
+
+    def _pair(v):
+        if isinstance(v, tuple):
+            return v
+        return (v, v)
+
+    k = _pair(kernel_size)
+    s = _pair(kernel_size if stride is None else stride)
+    p = _pair(padding)
+
+    N, C, H, W = x_shape
+    k_h, k_w = k
+    p_h, p_w = p
+    s_h, s_w = s
+
+    H_out, W_out = grad_out.shape[2], grad_out.shape[3]
+    H_pad = H + 2 * p_h
+    W_pad = W + 2 * p_w
+
+    grad_x_pad = np.zeros((N, C, H_pad, W_pad), dtype=grad_out.dtype)
+    denom = float(k_h * k_w)
+
+    for n in range(N):
+        for c in range(C):
+            for i in range(H_out):
+                h0 = i * s_h
+                for j in range(W_out):
+                    w0 = j * s_w
+                    go = grad_out[n, c, i, j] / denom
+                    grad_x_pad[n, c, h0 : h0 + k_h, w0 : w0 + k_w] += go
+
+    return grad_x_pad[:, :, p_h : p_h + H, p_w : p_w + W]
+
+
 class TestPool2dOps(unittest.TestCase):
     def setUp(self) -> None:
         np.random.seed(0)
@@ -267,6 +417,157 @@ class TestPool2dOps(unittest.TestCase):
                 )
                 self.assertEqual(idx.dtype, np.int64)
 
+                self.assertTrue(
+                    any(issubclass(wi.category, RuntimeWarning) for wi in w)
+                )
+                self.assertTrue(
+                    any("falling back to NumPy" in str(wi.message) for wi in w)
+                )
+
+    def test_maxpool2d_backward_dtype_handling(self):
+        x = np.array([[[[1.0, 2.0], [3.0, 4.0]]]], dtype=np.float32)
+        _, idx = maxpool2d_forward_cpu(x, kernel_size=2, stride=2, padding=0)
+
+        # float32 OK
+        go32 = np.array([[[[5.0]]]], dtype=np.float32)
+        gx32 = maxpool2d_backward_cpu(
+            go32, idx, x_shape=x.shape, kernel_size=2, stride=2, padding=0
+        )
+        self.assertEqual(gx32.dtype, np.float32)
+
+        # float64 OK
+        go64 = np.array([[[[5.0]]]], dtype=np.float64)
+        gx64 = maxpool2d_backward_cpu(
+            go64, idx, x_shape=x.shape, kernel_size=2, stride=2, padding=0
+        )
+        self.assertEqual(gx64.dtype, np.float64)
+
+        # float16 allowed
+        go16 = np.array([[[[5.0]]]], dtype=np.float16)
+        gx16 = maxpool2d_backward_cpu(
+            go16, idx, x_shape=x.shape, kernel_size=2, stride=2, padding=0
+        )
+        self.assertEqual(gx16.dtype, np.float16)
+
+        # int grads: allowed (accumulates as ints)
+        go_i32 = np.array([[[[5]]]], dtype=np.int32)
+        gx_i32 = maxpool2d_backward_cpu(
+            go_i32, idx, x_shape=x.shape, kernel_size=2, stride=2, padding=0
+        )
+        self.assertEqual(gx_i32.dtype, np.int32)
+        np.testing.assert_array_equal(
+            gx_i32, np.array([[[[0, 0], [0, 5]]]], dtype=np.int32)
+        )
+
+    def test_avgpool2d_forward_dtype_handling(self):
+        x32 = np.array([[[[1.0, 2.0], [3.0, 4.0]]]], dtype=np.float32)
+        y32 = avgpool2d_forward_cpu(x32, kernel_size=2, stride=2, padding=0)
+        self.assertEqual(y32.dtype, np.float32)
+
+        x64 = x32.astype(np.float64)
+        y64 = avgpool2d_forward_cpu(x64, kernel_size=2, stride=2, padding=0)
+        self.assertEqual(y64.dtype, np.float64)
+
+        x16 = x32.astype(np.float16)
+        y16 = avgpool2d_forward_cpu(x16, kernel_size=2, stride=2, padding=0)
+        self.assertEqual(y16.dtype, np.float16)
+
+        x_i32 = np.array([[[[1, 2], [3, 4]]]], dtype=np.int32)
+        with self.assertRaises(TypeError):
+            _ = avgpool2d_forward_cpu(x_i32, kernel_size=2, stride=2, padding=0)
+
+    def test_avgpool2d_backward_dtype_handling(self):
+        x_shape = (1, 1, 2, 2)
+
+        go32 = np.array([[[[8.0]]]], dtype=np.float32)
+        gx32 = avgpool2d_backward_cpu(
+            go32, x_shape=x_shape, kernel_size=2, stride=2, padding=0
+        )
+        self.assertEqual(gx32.dtype, np.float32)
+
+        go64 = np.array([[[[8.0]]]], dtype=np.float64)
+        gx64 = avgpool2d_backward_cpu(
+            go64, x_shape=x_shape, kernel_size=2, stride=2, padding=0
+        )
+        self.assertEqual(gx64.dtype, np.float64)
+
+        go16 = np.array([[[[8.0]]]], dtype=np.float16)
+        gx16 = avgpool2d_backward_cpu(
+            go16, x_shape=x_shape, kernel_size=2, stride=2, padding=0
+        )
+        self.assertEqual(gx16.dtype, np.float16)
+
+        go_i32 = np.array([[[[8]]]], dtype=np.int32)
+        with self.assertRaises(TypeError):
+            _ = avgpool2d_backward_cpu(
+                go_i32, x_shape=x_shape, kernel_size=2, stride=2, padding=0
+            )
+
+    def test_maxpool2d_backward_warns_and_falls_back_when_native_missing(self):
+        x = np.array([[[[1.0, 2.0], [3.0, 4.0]]]], dtype=np.float32)
+        _, idx = maxpool2d_forward_cpu(x, kernel_size=2, stride=2, padding=0)
+
+        grad_out = np.array([[[[5.0]]]], dtype=np.float32)
+        expected = _ref_maxpool2d_backward_numpy(
+            grad_out, idx, x_shape=x.shape, kernel_size=2, stride=2, padding=0
+        )
+
+        with patch(
+            "src.keydnn.infrastructure.native.python.maxpool2d_ctypes.load_keydnn_native",
+            side_effect=OSError("simulated missing dll"),
+        ):
+            with warnings.catch_warnings(record=True) as w:
+                warnings.simplefilter("always", RuntimeWarning)
+                grad_x = maxpool2d_backward_cpu(
+                    grad_out, idx, x_shape=x.shape, kernel_size=2, stride=2, padding=0
+                )
+
+                np.testing.assert_allclose(grad_x, expected, rtol=0, atol=0)
+                self.assertTrue(
+                    any(issubclass(wi.category, RuntimeWarning) for wi in w)
+                )
+                self.assertTrue(
+                    any("falling back to NumPy" in str(wi.message) for wi in w)
+                )
+
+    def test_avgpool2d_forward_warns_and_falls_back_when_native_missing(self):
+        x = np.array([[[[1.0, 2.0], [3.0, 4.0]]]], dtype=np.float64)
+        expected = _ref_avgpool2d_forward_numpy(x, kernel_size=2, stride=2, padding=0)
+
+        with patch(
+            "src.keydnn.infrastructure.native.python.avgpool2d_ctypes.load_keydnn_native",
+            side_effect=OSError("simulated missing dll"),
+        ):
+            with warnings.catch_warnings(record=True) as w:
+                warnings.simplefilter("always", RuntimeWarning)
+                y = avgpool2d_forward_cpu(x, kernel_size=2, stride=2, padding=0)
+
+                np.testing.assert_allclose(y, expected, rtol=0, atol=0)
+                self.assertTrue(
+                    any(issubclass(wi.category, RuntimeWarning) for wi in w)
+                )
+                self.assertTrue(
+                    any("falling back to NumPy" in str(wi.message) for wi in w)
+                )
+
+    def test_avgpool2d_backward_warns_and_falls_back_when_native_missing(self):
+        x_shape = (1, 1, 2, 2)
+        grad_out = np.array([[[[8.0]]]], dtype=np.float32)
+        expected = _ref_avgpool2d_backward_numpy(
+            grad_out, x_shape=x_shape, kernel_size=2, stride=2, padding=0
+        )
+
+        with patch(
+            "src.keydnn.infrastructure.native.python.avgpool2d_ctypes.load_keydnn_native",
+            side_effect=OSError("simulated missing dll"),
+        ):
+            with warnings.catch_warnings(record=True) as w:
+                warnings.simplefilter("always", RuntimeWarning)
+                grad_x = avgpool2d_backward_cpu(
+                    grad_out, x_shape=x_shape, kernel_size=2, stride=2, padding=0
+                )
+
+                np.testing.assert_allclose(grad_x, expected, rtol=0, atol=0)
                 self.assertTrue(
                     any(issubclass(wi.category, RuntimeWarning) for wi in w)
                 )

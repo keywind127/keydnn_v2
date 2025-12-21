@@ -268,6 +268,58 @@ def maxpool2d_backward_cpu(
     grad_x_pad = np.zeros((N, C, H_pad, W_pad), dtype=grad_out.dtype)
 
     H_out, W_out = grad_out.shape[2], grad_out.shape[3]
+
+    import warnings
+
+    try:
+        if grad_out.dtype in (np.float32, np.float64):
+            from ..native.python.maxpool2d_ctypes import load_keydnn_native
+            from ..native.python.maxpool2d_ctypes import (
+                maxpool2d_backward_f32_ctypes,
+                maxpool2d_backward_f64_ctypes,
+            )
+
+            lib = load_keydnn_native()
+
+            if grad_out.dtype == np.float32:
+                maxpool2d_backward_f32_ctypes(
+                    lib,
+                    grad_out=grad_out,
+                    argmax_idx=argmax_idx,
+                    grad_x_pad=grad_x_pad,
+                    N=N,
+                    C=C,
+                    H_out=H_out,
+                    W_out=W_out,
+                    H_pad=H_pad,
+                    W_pad=W_pad,
+                )
+                return grad_x_pad[:, :, p_h : p_h + H, p_w : p_w + W]
+
+            if grad_out.dtype == np.float64:
+                maxpool2d_backward_f64_ctypes(
+                    lib,
+                    grad_out=grad_out,
+                    argmax_idx=argmax_idx,
+                    grad_x_pad=grad_x_pad,
+                    N=N,
+                    C=C,
+                    H_out=H_out,
+                    W_out=W_out,
+                    H_pad=H_pad,
+                    W_pad=W_pad,
+                )
+                return grad_x_pad[:, :, p_h : p_h + H, p_w : p_w + W]
+
+    except OSError as e:
+        warnings.warn(
+            "KeyDNN native maxpool2d backward library could not be loaded; "
+            "falling back to NumPy reference implementation. "
+            f"Reason: {e}",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+
     for n in range(N):
         for c in range(C):
             for i in range(H_out):
@@ -308,6 +360,11 @@ def avgpool2d_forward_cpu(
     - The average is computed over the full kernel area (k_h * k_w),
       including padded values.
     """
+    if x.dtype.kind != "f":
+        raise TypeError(
+            f"avgpool2d_forward_cpu expects floating input; got dtype={x.dtype}"
+        )
+
     k = _pair(kernel_size)
     s = _pair(kernel_size if stride is None else stride)
     p = _pair(padding)
@@ -328,6 +385,63 @@ def avgpool2d_forward_cpu(
     y = np.zeros((N, C, H_out, W_out), dtype=x.dtype)
     s_h, s_w = s
     denom = float(k_h * k_w)
+
+    import warnings
+
+    try:
+        if x_pad.dtype in (np.float32, np.float64) and y.dtype == x_pad.dtype:
+            from ..native.python.avgpool2d_ctypes import load_keydnn_native
+            from ..native.python.avgpool2d_ctypes import (
+                avgpool2d_forward_f32_ctypes,
+                avgpool2d_forward_f64_ctypes,
+            )
+
+            lib = load_keydnn_native()
+
+            if x_pad.dtype == np.float32:
+                avgpool2d_forward_f32_ctypes(
+                    lib,
+                    x_pad=x_pad,
+                    y=y,
+                    N=N,
+                    C=C,
+                    H_pad=x_pad.shape[2],
+                    W_pad=x_pad.shape[3],
+                    H_out=H_out,
+                    W_out=W_out,
+                    k_h=k_h,
+                    k_w=k_w,
+                    s_h=s_h,
+                    s_w=s_w,
+                )
+                return y
+
+            if x_pad.dtype == np.float64:
+                avgpool2d_forward_f64_ctypes(
+                    lib,
+                    x_pad=x_pad,
+                    y=y,
+                    N=N,
+                    C=C,
+                    H_pad=x_pad.shape[2],
+                    W_pad=x_pad.shape[3],
+                    H_out=H_out,
+                    W_out=W_out,
+                    k_h=k_h,
+                    k_w=k_w,
+                    s_h=s_h,
+                    s_w=s_w,
+                )
+                return y
+
+    except OSError as e:
+        warnings.warn(
+            "KeyDNN native avgpool2d forward library could not be loaded; "
+            "falling back to NumPy reference implementation. "
+            f"Reason: {e}",
+            RuntimeWarning,
+            stacklevel=2,
+        )
 
     for n in range(N):
         for c in range(C):
@@ -371,6 +485,12 @@ def avgpool2d_backward_cpu(
     - Gradients are distributed uniformly over each pooling window.
     - Padding regions are ignored after accumulation.
     """
+
+    if grad_out.dtype.kind != "f":
+        raise TypeError(
+            f"avgpool2d_backward_cpu expects floating grad_out; got dtype={grad_out.dtype}"
+        )
+
     k = _pair(kernel_size)
     s = _pair(kernel_size if stride is None else stride)
     p = _pair(padding)
@@ -386,6 +506,63 @@ def avgpool2d_backward_cpu(
 
     grad_x_pad = np.zeros((N, C, H_pad, W_pad), dtype=grad_out.dtype)
     denom = float(k_h * k_w)
+
+    import warnings
+
+    try:
+        if grad_out.dtype in (np.float32, np.float64):
+            from ..native.python.avgpool2d_ctypes import load_keydnn_native
+            from ..native.python.avgpool2d_ctypes import (
+                avgpool2d_backward_f32_ctypes,
+                avgpool2d_backward_f64_ctypes,
+            )
+
+            lib = load_keydnn_native()
+
+            if grad_out.dtype == np.float32:
+                avgpool2d_backward_f32_ctypes(
+                    lib,
+                    grad_out=grad_out,
+                    grad_x_pad=grad_x_pad,
+                    N=N,
+                    C=C,
+                    H_out=H_out,
+                    W_out=W_out,
+                    H_pad=H_pad,
+                    W_pad=W_pad,
+                    k_h=k_h,
+                    k_w=k_w,
+                    s_h=s_h,
+                    s_w=s_w,
+                )
+                return grad_x_pad[:, :, p_h : p_h + H, p_w : p_w + W]
+
+            if grad_out.dtype == np.float64:
+                avgpool2d_backward_f64_ctypes(
+                    lib,
+                    grad_out=grad_out,
+                    grad_x_pad=grad_x_pad,
+                    N=N,
+                    C=C,
+                    H_out=H_out,
+                    W_out=W_out,
+                    H_pad=H_pad,
+                    W_pad=W_pad,
+                    k_h=k_h,
+                    k_w=k_w,
+                    s_h=s_h,
+                    s_w=s_w,
+                )
+                return grad_x_pad[:, :, p_h : p_h + H, p_w : p_w + W]
+
+    except OSError as e:
+        warnings.warn(
+            "KeyDNN native avgpool2d backward library could not be loaded; "
+            "falling back to NumPy reference implementation. "
+            f"Reason: {e}",
+            RuntimeWarning,
+            stacklevel=2,
+        )
 
     for n in range(N):
         for c in range(C):

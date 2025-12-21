@@ -22,58 +22,52 @@
 //
 // argmax_idx stores flattened index into padded spatial plane: h * W_pad + w
 
-KEYDNN_EXPORT void keydnn_maxpool2d_forward_f32(
+// ----------------------------
+// AvgPool2D forward
+// ----------------------------
+// x_pad: float32/float64, shape (N, C, H_pad, W_pad), contiguous NCHW (zero-padded)
+// y: float32/float64, shape (N, C, H_out, W_out), contiguous NCHW
+KEYDNN_EXPORT void keydnn_avgpool2d_forward_f32(
     const float* x_pad,
     float* y,
-    std::int64_t* argmax_idx,
-    int N,
-    int C,
-    int H_pad,
-    int W_pad,
-    int H_out,
-    int W_out,
-    int k_h,
-    int k_w,
-    int s_h,
-    int s_w
+    int N, int C,
+    int H_pad, int W_pad,
+    int H_out, int W_out,
+    int k_h, int k_w,
+    int s_h, int s_w
 );
 
-KEYDNN_EXPORT void keydnn_maxpool2d_forward_f64(
+KEYDNN_EXPORT void keydnn_avgpool2d_forward_f64(
     const double* x_pad,
     double* y,
-    std::int64_t* argmax_idx,
-    int N,
-    int C,
-    int H_pad,
-    int W_pad,
-    int H_out,
-    int W_out,
-    int k_h,
-    int k_w,
-    int s_h,
-    int s_w
+    int N, int C,
+    int H_pad, int W_pad,
+    int H_out, int W_out,
+    int k_h, int k_w,
+    int s_h, int s_w
 );
 
 // ----------------------------
-// MaxPool2D backward
+// AvgPool2D backward
 // ----------------------------
 // grad_out: float32/float64, shape (N, C, H_out, W_out), contiguous NCHW
-// argmax_idx: int64, shape (N, C, H_out, W_out), flattened index into padded plane: h * W_pad + w
 // grad_x_pad: float32/float64, shape (N, C, H_pad, W_pad), contiguous NCHW (must be zero-initialized by caller)
-KEYDNN_EXPORT void keydnn_maxpool2d_backward_f32(
+KEYDNN_EXPORT void keydnn_avgpool2d_backward_f32(
     const float* grad_out,
-    const std::int64_t* argmax_idx,
     float* grad_x_pad,
     int N, int C,
     int H_out, int W_out,
-    int H_pad, int W_pad
+    int H_pad, int W_pad,
+    int k_h, int k_w,
+    int s_h, int s_w
 );
 
-KEYDNN_EXPORT void keydnn_maxpool2d_backward_f64(
+KEYDNN_EXPORT void keydnn_avgpool2d_backward_f64(
     const double* grad_out,
-    const std::int64_t* argmax_idx,
     double* grad_x_pad,
     int N, int C,
     int H_out, int W_out,
-    int H_pad, int W_pad
+    int H_pad, int W_pad,
+    int k_h, int k_w,
+    int s_h, int s_w
 );

@@ -6,7 +6,7 @@ of performance-critical tensor operations via `ctypes`. It is part of the
 KeyDNN infrastructure layer and is intentionally backend-specific.
 
 Currently, this module exposes:
-- A CPU-based MaxPool2D forward kernel for float32 tensors in NCHW layout.
+- A CPU-based MaxPool2D forward/backward kernels for float32/float64 tensors in NCHW layout.
 
 Design notes
 ------------
@@ -294,4 +294,191 @@ def maxpool2d_forward_f64_ctypes(
         k_w,
         s_h,
         s_w,
+    )
+
+
+def maxpool2d_backward_f32_ctypes(
+    lib: ctypes.CDLL,
+    *,
+    grad_out: np.ndarray,
+    argmax_idx: np.ndarray,
+    grad_x_pad: np.ndarray,
+    N: int,
+    C: int,
+    H_out: int,
+    W_out: int,
+    H_pad: int,
+    W_pad: int,
+) -> None:
+    """
+    Call the native C++ MaxPool2D backward kernel (float32, NCHW) via ctypes.
+
+    This function accumulates gradients into the padded input gradient buffer
+    (`grad_x_pad`) by routing each output gradient element to the input location
+    that won the max operation during the forward pass.
+
+    Parameters
+    ----------
+    lib : ctypes.CDLL
+        Loaded KeyDNN native shared library.
+    grad_out : np.ndarray
+        Gradient with respect to the output, shape (N, C, H_out, W_out),
+        dtype float32, C-contiguous.
+    argmax_idx : np.ndarray
+        Argmax indices produced by the forward pass, shape (N, C, H_out, W_out),
+        dtype int64, storing flattened indices into the padded spatial plane.
+    grad_x_pad : np.ndarray
+        Output buffer for gradients with respect to the padded input,
+        shape (N, C, H_pad, W_pad), dtype float32, C-contiguous.
+        Must be zero-initialized before calling.
+    N, C : int
+        Batch size and number of channels.
+    H_out, W_out : int
+        Spatial dimensions of the pooling output.
+    H_pad, W_pad : int
+        Spatial dimensions of the padded input.
+
+    Returns
+    -------
+    None
+        Results are written in-place into `grad_x_pad`.
+
+    Notes
+    -----
+    - This function performs no padding removal; the caller is responsible
+      for slicing `grad_x_pad` back to the original input shape.
+    - Only float32 inputs are supported by this wrapper.
+    - No bounds checking is performed inside the native kernel.
+    """
+    if grad_out.dtype != np.float32:
+        raise TypeError(f"grad_out must be float32, got {grad_out.dtype}")
+    if argmax_idx.dtype != np.int64:
+        raise TypeError(f"argmax_idx must be int64, got {argmax_idx.dtype}")
+    if grad_x_pad.dtype != np.float32:
+        raise TypeError(f"grad_x_pad must be float32, got {grad_x_pad.dtype}")
+
+    if not grad_out.flags["C_CONTIGUOUS"]:
+        grad_out = np.ascontiguousarray(grad_out)
+    if not argmax_idx.flags["C_CONTIGUOUS"]:
+        argmax_idx = np.ascontiguousarray(argmax_idx)
+    if not grad_x_pad.flags["C_CONTIGUOUS"]:
+        raise ValueError("grad_x_pad must be C-contiguous")
+
+    fn = lib.keydnn_maxpool2d_backward_f32
+    fn.argtypes = [
+        POINTER(c_float),  # grad_out
+        POINTER(c_int64),  # argmax_idx
+        POINTER(c_float),  # grad_x_pad
+        c_int,
+        c_int,  # N, C
+        c_int,
+        c_int,  # H_out, W_out
+        c_int,
+        c_int,  # H_pad, W_pad
+    ]
+    fn.restype = None
+
+    fn(
+        grad_out.ctypes.data_as(POINTER(c_float)),
+        argmax_idx.ctypes.data_as(POINTER(c_int64)),
+        grad_x_pad.ctypes.data_as(POINTER(c_float)),
+        N,
+        C,
+        H_out,
+        W_out,
+        H_pad,
+        W_pad,
+    )
+
+
+def maxpool2d_backward_f64_ctypes(
+    lib: ctypes.CDLL,
+    *,
+    grad_out: np.ndarray,
+    argmax_idx: np.ndarray,
+    grad_x_pad: np.ndarray,
+    N: int,
+    C: int,
+    H_out: int,
+    W_out: int,
+    H_pad: int,
+    W_pad: int,
+) -> None:
+    """
+    Call the native C++ MaxPool2D backward kernel (float64, NCHW) via ctypes.
+
+    This function is identical in semantics to
+    `maxpool2d_backward_f32_ctypes`, but operates on double-precision
+    floating-point data.
+
+    Parameters
+    ----------
+    lib : ctypes.CDLL
+        Loaded KeyDNN native shared library.
+    grad_out : np.ndarray
+        Gradient with respect to the output, shape (N, C, H_out, W_out),
+        dtype float64, C-contiguous.
+    argmax_idx : np.ndarray
+        Argmax indices produced by the forward pass, shape (N, C, H_out, W_out),
+        dtype int64.
+    grad_x_pad : np.ndarray
+        Output buffer for gradients with respect to the padded input,
+        shape (N, C, H_pad, W_pad), dtype float64, C-contiguous.
+        Must be zero-initialized before calling.
+    N, C : int
+        Batch size and number of channels.
+    H_out, W_out : int
+        Spatial dimensions of the pooling output.
+    H_pad, W_pad : int
+        Spatial dimensions of the padded input.
+
+    Returns
+    -------
+    None
+        Results are written in-place into `grad_x_pad`.
+
+    Notes
+    -----
+    - This wrapper supports float64 only.
+    - The native kernel accumulates gradients additively.
+    - The caller is responsible for removing padding after the call.
+    """
+    if grad_out.dtype != np.float64:
+        raise TypeError(f"grad_out must be float64, got {grad_out.dtype}")
+    if argmax_idx.dtype != np.int64:
+        raise TypeError(f"argmax_idx must be int64, got {argmax_idx.dtype}")
+    if grad_x_pad.dtype != np.float64:
+        raise TypeError(f"grad_x_pad must be float64, got {grad_x_pad.dtype}")
+
+    if not grad_out.flags["C_CONTIGUOUS"]:
+        grad_out = np.ascontiguousarray(grad_out)
+    if not argmax_idx.flags["C_CONTIGUOUS"]:
+        argmax_idx = np.ascontiguousarray(argmax_idx)
+    if not grad_x_pad.flags["C_CONTIGUOUS"]:
+        raise ValueError("grad_x_pad must be C-contiguous")
+
+    fn = lib.keydnn_maxpool2d_backward_f64
+    fn.argtypes = [
+        POINTER(c_double),
+        POINTER(c_int64),
+        POINTER(c_double),
+        c_int,
+        c_int,
+        c_int,
+        c_int,
+        c_int,
+        c_int,
+    ]
+    fn.restype = None
+
+    fn(
+        grad_out.ctypes.data_as(POINTER(c_double)),
+        argmax_idx.ctypes.data_as(POINTER(c_int64)),
+        grad_x_pad.ctypes.data_as(POINTER(c_double)),
+        N,
+        C,
+        H_out,
+        W_out,
+        H_pad,
+        W_pad,
     )

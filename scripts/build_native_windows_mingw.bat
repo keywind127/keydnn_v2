@@ -65,6 +65,7 @@ if not exist "%OUT_DIR%" mkdir "%OUT_DIR%"
 "%GPP%" -O3 -std=c++17 -shared ^
   -I"%INC_DIR%" ^
   "%SRC_DIR%\keydnn_maxpool2d.cpp" ^
+  "%SRC_DIR%\keydnn_avgpool2d.cpp" ^
   -o "%OUT_LIB%"
 
 if errorlevel 1 (
