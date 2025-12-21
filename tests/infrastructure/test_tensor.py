@@ -268,5 +268,116 @@ class TestTensorGetItem(TestCase):
             _ = t[0]
 
 
+class TestTensorStack(TestCase):
+    def setUp(self) -> None:
+        self.device = Device("cpu")
+
+    def _tensor_from_numpy(self, arr: np.ndarray, requires_grad: bool) -> Tensor:
+        arr = np.asarray(arr, dtype=np.float32)
+        t = Tensor(arr.shape, self.device, requires_grad=requires_grad)
+        t.copy_from_numpy(arr)
+        return t
+
+    def test_stack_forward_axis0(self):
+        a = self._tensor_from_numpy(
+            np.ones((2, 3), dtype=np.float32), requires_grad=False
+        )
+        b = self._tensor_from_numpy(
+            np.zeros((2, 3), dtype=np.float32), requires_grad=False
+        )
+
+        s = Tensor.stack([a, b], axis=0)
+        self.assertEqual(s.shape, (2, 2, 3))
+
+        expected = np.stack([a.to_numpy(), b.to_numpy()], axis=0)
+        self.assertTrue(np.array_equal(s.to_numpy(), expected))
+
+    def test_stack_forward_axis1(self):
+        a = self._tensor_from_numpy(
+            np.ones((2, 3), dtype=np.float32), requires_grad=False
+        )
+        b = self._tensor_from_numpy(
+            2.0 * np.ones((2, 3), dtype=np.float32), requires_grad=False
+        )
+
+        s = Tensor.stack([a, b], axis=1)
+        self.assertEqual(s.shape, (2, 2, 3))
+
+        expected = np.stack([a.to_numpy(), b.to_numpy()], axis=1)
+        self.assertTrue(np.array_equal(s.to_numpy(), expected))
+
+    def test_stack_backward_splits_grad_to_inputs_axis0(self):
+        """
+        For loss = stack([a,b], axis=0).sum(), grads to a and b should be all-ones
+        with their original shapes.
+        """
+        a = self._tensor_from_numpy(np.random.randn(2, 3), requires_grad=True)
+        b = self._tensor_from_numpy(np.random.randn(2, 3), requires_grad=True)
+
+        s = Tensor.stack([a, b], axis=0)
+        loss = s.sum()
+        loss.backward()
+
+        self.assertIsNotNone(a.grad)
+        self.assertIsNotNone(b.grad)
+
+        self.assertEqual(a.grad.shape, a.shape)
+        self.assertEqual(b.grad.shape, b.shape)
+
+        self.assertTrue(
+            np.array_equal(a.grad.to_numpy(), np.ones((2, 3), dtype=np.float32))
+        )
+        self.assertTrue(
+            np.array_equal(b.grad.to_numpy(), np.ones((2, 3), dtype=np.float32))
+        )
+
+    def test_stack_backward_splits_grad_to_inputs_axis1(self):
+        """
+        Same as axis0 test, but along axis=1.
+        """
+        a = self._tensor_from_numpy(np.random.randn(2, 3), requires_grad=True)
+        b = self._tensor_from_numpy(np.random.randn(2, 3), requires_grad=True)
+
+        s = Tensor.stack([a, b], axis=1)
+        loss = s.sum()
+        loss.backward()
+
+        self.assertIsNotNone(a.grad)
+        self.assertIsNotNone(b.grad)
+
+        self.assertTrue(
+            np.array_equal(a.grad.to_numpy(), np.ones((2, 3), dtype=np.float32))
+        )
+        self.assertTrue(
+            np.array_equal(b.grad.to_numpy(), np.ones((2, 3), dtype=np.float32))
+        )
+
+    def test_stack_rejects_empty_list(self):
+        with self.assertRaises(Exception):
+            _ = Tensor.stack([], axis=0)
+
+    def test_stack_rejects_mismatched_shapes(self):
+        a = self._tensor_from_numpy(
+            np.zeros((2, 3), dtype=np.float32), requires_grad=False
+        )
+        b = self._tensor_from_numpy(
+            np.zeros((2, 4), dtype=np.float32), requires_grad=False
+        )
+
+        with self.assertRaises(Exception):
+            _ = Tensor.stack([a, b], axis=0)
+
+    def test_stack_on_cuda_raises_or_not_supported(self):
+        """
+        Your current Tensor ops are CPU-first. If stack isn't implemented for CUDA,
+        it should raise.
+        """
+        a = Tensor((2, 3), Device("cuda:0"), requires_grad=False)
+        b = Tensor((2, 3), Device("cuda:0"), requires_grad=False)
+
+        with self.assertRaises(Exception):
+            _ = Tensor.stack([a, b], axis=0)
+
+
 if __name__ == "__main__":
     unittest.main()

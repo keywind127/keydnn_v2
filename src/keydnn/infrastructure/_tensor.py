@@ -1140,10 +1140,7 @@ class Tensor(ITensor):
                         return True
                     # Tuple: if any component is fancy => fancy
                     if isinstance(k, tuple):
-                        for kk in k:
-                            if isinstance(kk, (list, np.ndarray)):
-                                return True
-                        return False
+                        return any(isinstance(kk, (list, np.ndarray)) for kk in k)
                     return False
 
                 fancy = _is_fancy(key)
@@ -1152,8 +1149,8 @@ class Tensor(ITensor):
                     # np.add.at correctly accumulates for repeated indices
                     np.add.at(grad_parent_np, key, g_out_np)
                 else:
-                    # Basic slicing / integer indexing: assignment works
-                    grad_parent_np[key] = g_out_np
+                    # Basic slicing/integer indexing: still conceptually an accumulation op
+                    grad_parent_np[key] += g_out_np
 
                 grad_parent = Tensor(
                     shape=self.shape, device=self.device, requires_grad=False, ctx=None
@@ -1163,6 +1160,120 @@ class Tensor(ITensor):
 
             ctx = Context(
                 parents=(self,),
+                backward_fn=backward_fn,
+            )
+            # Optional: keep debug metadata
+            ctx.saved_meta["getitem_key"] = key
+            ctx.saved_meta["parent_shape"] = self.shape
+
+            out._set_ctx(ctx)
+
+        return out
+
+    @staticmethod
+    def stack(tensors: Sequence["Tensor"], axis: int = 0) -> "Tensor":
+        """
+        Stack a sequence of tensors along a new axis (CPU-only).
+
+        This is the differentiable counterpart of `np.stack`. All input tensors must:
+        - live on CPU
+        - share the same shape
+        - share the same device
+
+        Parameters
+        ----------
+        tensors : Sequence[Tensor]
+            Input tensors to stack. Must be non-empty and same-shape.
+        axis : int, optional
+            Axis at which the new dimension is inserted. Supports negative axes.
+            Defaults to 0.
+
+        Returns
+        -------
+        Tensor
+            A new tensor whose shape is:
+                out.shape = in.shape[:axis] + (len(tensors),) + in.shape[axis:]
+
+        Notes
+        -----
+        - Forward returns a *copy* (not a view).
+        - Backward splits `grad_out` along `axis` and routes each slice back to
+          the corresponding parent tensor.
+        """
+        if len(tensors) == 0:
+            raise ValueError("Tensor.stack() requires a non-empty sequence")
+
+        # ---- Validate devices and shapes ----
+        first = tensors[0]
+        if not first.device.is_cpu():
+            first._raise_device_not_supported("stack")
+
+        dev = first.device
+        in_shape = first.shape
+
+        for i, t in enumerate(tensors):
+            if not t.device.is_cpu():
+                t._raise_device_not_supported("stack")
+            if str(t.device) != str(dev):
+                raise ValueError(
+                    f"Tensor.stack() requires all tensors on the same device; "
+                    f"tensors[0] is {dev!r} but tensors[{i}] is {t.device!r}"
+                )
+            if t.shape != in_shape:
+                raise ValueError(
+                    f"Tensor.stack() requires all tensors to have the same shape; "
+                    f"expected {in_shape}, got {t.shape} at index {i}"
+                )
+
+        # Normalize axis (np.stack does this too, but we want predictable error messages)
+        ndim = len(in_shape)
+        # axis is in [-ndim-1, ndim]
+        if axis < 0:
+            axis = axis + (ndim + 1)
+        if axis < 0 or axis > ndim:
+            raise ValueError(
+                f"axis {axis} out of bounds for stack with input ndim {ndim}"
+            )
+
+        # ---- Forward ----
+        arrs = [t.to_numpy() for t in tensors]
+        stacked = np.stack(arrs, axis=axis).astype(np.float32, copy=False)
+
+        req = any(t.requires_grad for t in tensors)
+        out = Tensor(shape=stacked.shape, device=dev, requires_grad=req, ctx=None)
+        out.copy_from_numpy(stacked)
+
+        # ---- Backward ----
+        if req:
+
+            def backward_fn(grad_out: "Tensor"):
+                if not grad_out.device.is_cpu():
+                    raise RuntimeError("grad_out must be CPU in current implementation")
+
+                g = grad_out.to_numpy()  # shape: stacked.shape
+
+                grads: list[Optional["Tensor"]] = []
+                for i, t in enumerate(tensors):
+                    if not t.requires_grad:
+                        grads.append(None)
+                        continue
+
+                    # Select the i-th slice along the stacked axis.
+                    # Use take() to avoid view complexities; it returns an array.
+                    gi_np = np.take(g, indices=i, axis=axis).astype(
+                        np.float32, copy=False
+                    )
+
+                    gi = Tensor(
+                        shape=t.shape, device=dev, requires_grad=False, ctx=None
+                    )
+                    gi.copy_from_numpy(gi_np)
+                    grads.append(gi)
+
+                return tuple(grads)
+
+            ctx = Context(
+                parents=tuple(tensors),
                 backward_fn=backward_fn,
             )
             out._set_ctx(ctx)

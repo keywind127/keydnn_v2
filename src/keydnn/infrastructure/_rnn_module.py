@@ -429,14 +429,9 @@ class RNN(Module):
 
         hs = []
         for t in range(T):
-            # if x requires grad, each x_t should require grad too
-            x_t = tensor_from_numpy(
-                x_np[t], device=x.device, requires_grad=x.requires_grad
-            )
+            x_t = x[t]  # uses __getitem__ (keeps grad path to x)
             h_prev = self.cell.forward(x_t, h_prev)
-            hs.append(h_prev.to_numpy())
+            hs.append(h_prev)  # keep as Tensor
 
-        h_seq = tensor_from_numpy(
-            np.stack(hs, axis=0), device=x.device, requires_grad=False
-        )
+        h_seq = Tensor.stack(hs, axis=0)
         return h_seq, h_prev

@@ -146,5 +146,63 @@ class TestParameterInfrastructure(TestCase):
         self.assertIsNone(p.grad)
 
 
+class TestParameterAutogradAccumulation(TestCase):
+    def setUp(self) -> None:
+        self.device = Device("cpu")
+
+    def test_parameter_reuse_in_graph_accumulates_grad(self):
+        """
+        If the same Parameter appears in the graph multiple times, autograd must
+        accumulate its gradients (not overwrite).
+
+        This is a core requirement for BPTT, because W_ih/W_hh are reused at
+        every timestep.
+        """
+        # p used twice in the forward graph
+        p = Parameter((2, 2), self.device, requires_grad=True)
+        p.copy_from_numpy(np.zeros((2, 2), dtype=np.float32))
+
+        x = Tensor((2, 2), self.device, requires_grad=False)
+        x.fill(0.0)
+
+        # y = p + x
+        # z = p + x
+        # loss = (y + z).sum()
+        y = p + x
+        z = p + x
+        loss = (y + z).sum()
+        loss.backward()
+
+        self.assertIsNotNone(p.grad, "p.grad should exist after backward()")
+
+        # d/dp of (p+x) is 1, used twice => 2
+        expected = np.full((2, 2), 2.0, dtype=np.float32)
+        self.assertTrue(
+            np.array_equal(p.grad.to_numpy(), expected),
+            msg=(
+                "Expected Parameter grad to accumulate across multiple uses in graph. "
+                "If this fails, your autograd engine is likely overwriting grads "
+                "instead of accumulating."
+            ),
+        )
+
+    def test_parameter_reuse_in_graph_does_not_require_x_grad(self):
+        """
+        Sanity check: x.requires_grad=False should not prevent p from receiving grad.
+        """
+        p = Parameter((3, 1), self.device, requires_grad=True)
+        p.copy_from_numpy(np.zeros((3, 1), dtype=np.float32))
+
+        x = Tensor((3, 1), self.device, requires_grad=False)
+        x.fill(0.0)
+
+        loss = (p + x).sum()
+        loss.backward()
+
+        self.assertIsNotNone(p.grad)
+        expected = np.ones((3, 1), dtype=np.float32)
+        self.assertTrue(np.array_equal(p.grad.to_numpy(), expected))
+
+
 if __name__ == "__main__":
     unittest.main()
