@@ -1093,3 +1093,78 @@ class Tensor(ITensor):
             out.copy_from_numpy(a.to_numpy() + b.to_numpy())
             return out
         a._raise_device_not_supported("add_no_grad")
+
+    def __getitem__(self, key: Any) -> "Tensor":
+        """
+        Slice/index into a tensor (CPU-only), producing a new Tensor.
+
+        Notes
+        -----
+        - This returns a *copy* (not a view) for simplicity.
+        - Backward rule scatters grad_out back into the parent tensor shape.
+        - Supports basic slicing and NumPy-style fancy indexing.
+        """
+        if not self.device.is_cpu():
+            self._raise_device_not_supported("getitem")
+
+        # Forward: NumPy slice/index
+        src = self.to_numpy()
+        sliced = src[key]
+
+        # Normalize scalar outputs to shape=()
+        if np.isscalar(sliced) or getattr(sliced, "shape", None) == ():
+            sliced_arr = np.array(sliced, dtype=np.float32)  # shape ()
+            out_shape = ()
+        else:
+            sliced_arr = np.asarray(sliced, dtype=np.float32)
+            out_shape = sliced_arr.shape
+
+        req = self.requires_grad
+        out = Tensor(shape=out_shape, device=self.device, requires_grad=req)
+        out.copy_from_numpy(sliced_arr)
+
+        if req:
+
+            def backward_fn(grad_out: "Tensor"):
+                if not grad_out.device.is_cpu():
+                    raise RuntimeError("grad_out must be CPU in current implementation")
+
+                g_out_np = grad_out.to_numpy()
+                grad_parent_np = np.zeros(self.shape, dtype=np.float32)
+
+                # Determine whether this key uses fancy/advanced indexing,
+                # where `grad_parent_np[key] += ...` would NOT accumulate correctly.
+                def _is_fancy(k: Any) -> bool:
+                    # Bool mask, list, ndarray => fancy
+                    if isinstance(k, (list, np.ndarray)):
+                        return True
+                    # Tuple: if any component is fancy => fancy
+                    if isinstance(k, tuple):
+                        for kk in k:
+                            if isinstance(kk, (list, np.ndarray)):
+                                return True
+                        return False
+                    return False
+
+                fancy = _is_fancy(key)
+
+                if fancy:
+                    # np.add.at correctly accumulates for repeated indices
+                    np.add.at(grad_parent_np, key, g_out_np)
+                else:
+                    # Basic slicing / integer indexing: assignment works
+                    grad_parent_np[key] = g_out_np
+
+                grad_parent = Tensor(
+                    shape=self.shape, device=self.device, requires_grad=False, ctx=None
+                )
+                grad_parent.copy_from_numpy(grad_parent_np)
+                return (grad_parent,)
+
+            ctx = Context(
+                parents=(self,),
+                backward_fn=backward_fn,
+            )
+            out._set_ctx(ctx)
+
+        return out

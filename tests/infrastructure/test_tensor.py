@@ -100,14 +100,8 @@ class TestTensorAutogradFields(TestCase):
         self.assertIsNone(t.grad)
 
     def test_zero_grad_clears_grad(self):
-        # We don't have a public "set_grad" on Tensor yet, so we set grad via a minimal safe hack:
-        # use _requires_grad and assign through the private attribute is NOT allowed.
-        # Instead, we'll create a Tensor with ctx and check zero_grad clears grad after setting via _grad
-        # If you want strict encapsulation, add a set_grad() method and update this test accordingly.
-
+        # See note in original test: we avoid setting private _grad.
         t = Tensor((2, 3), Device("cpu"), requires_grad=True)
-        # Setting _grad directly is private; avoid doing so in tests.
-        # Instead, validate that calling zero_grad when grad is None stays None (contract).
         t.zero_grad()
         self.assertIsNone(t.grad)
 
@@ -155,6 +149,123 @@ class TestTensorAutogradFields(TestCase):
 
         ctx.saved_meta["stride"] = 2
         self.assertEqual(ctx.saved_meta["stride"], 2)
+
+
+class TestTensorGetItem(TestCase):
+    def _make_arange(self, shape, requires_grad=False):
+        t = Tensor(shape, Device("cpu"), requires_grad=requires_grad)
+        t.copy_from_numpy(np.arange(np.prod(shape), dtype=np.float32).reshape(shape))
+        return t
+
+    def test_getitem_forward_basic_slice(self):
+        x = self._make_arange((3, 4), requires_grad=False)
+        y = x[:, 1:3]
+        expected = x.to_numpy()[:, 1:3]
+        self.assertEqual(y.shape, expected.shape)
+        self.assertTrue(np.array_equal(y.to_numpy(), expected))
+
+    def test_getitem_forward_integer_index_reduces_dim(self):
+        x = self._make_arange((3, 4), requires_grad=False)
+        y = x[1]  # shape (4,)
+        expected = x.to_numpy()[1]
+        self.assertEqual(y.shape, expected.shape)
+        self.assertTrue(np.array_equal(y.to_numpy(), expected))
+
+    def test_getitem_forward_scalar_index(self):
+        x = self._make_arange((3, 4), requires_grad=False)
+        y = x[2, 1]  # scalar
+        expected = x.to_numpy()[2, 1]
+        self.assertEqual(y.shape, ())
+        self.assertAlmostEqual(
+            float(np.asarray(y.to_numpy())), float(expected), places=6
+        )
+
+    def test_getitem_backward_basic_slice_scatter(self):
+        x = self._make_arange((3, 4), requires_grad=True)
+        y = x[:, 1:3]  # (3,2)
+        loss = y.sum()  # scalar
+        loss.backward()
+
+        grad = x.grad.to_numpy()
+        expected = np.zeros((3, 4), dtype=np.float32)
+        expected[:, 1:3] = 1.0
+        self.assertTrue(np.array_equal(grad, expected))
+
+    def test_getitem_backward_single_element(self):
+        x = self._make_arange((2, 2), requires_grad=True)
+        y = x[1, 0]  # scalar
+        y.backward()
+
+        grad = x.grad.to_numpy()
+        expected = np.zeros((2, 2), dtype=np.float32)
+        expected[1, 0] = 1.0
+        self.assertTrue(np.array_equal(grad, expected))
+
+    def test_getitem_backward_negative_index(self):
+        x = self._make_arange((3, 4), requires_grad=True)
+        y = x[-1, -2]  # scalar -> x[2,2]
+        y.backward()
+
+        grad = x.grad.to_numpy()
+        expected = np.zeros((3, 4), dtype=np.float32)
+        expected[2, 2] = 1.0
+        self.assertTrue(np.array_equal(grad, expected))
+
+    def test_getitem_backward_step_slice(self):
+        x = self._make_arange((6,), requires_grad=True)
+        y = x[::2]  # indices 0,2,4
+        loss = y.sum()
+        loss.backward()
+
+        grad = x.grad.to_numpy()
+        expected = np.zeros((6,), dtype=np.float32)
+        expected[0] = 1.0
+        expected[2] = 1.0
+        expected[4] = 1.0
+        self.assertTrue(np.array_equal(grad, expected))
+
+    def test_getitem_backward_fancy_index_accumulates_repeats(self):
+        # This ensures you used np.add.at (or equivalent) for fancy indexing.
+        x = Tensor((5,), Device("cpu"), requires_grad=True)
+        x.copy_from_numpy(np.zeros((5,), dtype=np.float32))
+
+        y = x[[1, 1, 3]]  # repeated index 1
+        loss = y.sum()
+        loss.backward()
+
+        grad = x.grad.to_numpy()
+        expected = np.zeros((5,), dtype=np.float32)
+        expected[1] = 2.0
+        expected[3] = 1.0
+        self.assertTrue(np.array_equal(grad, expected))
+
+    def test_getitem_backward_boolean_mask(self):
+        x = Tensor((5,), Device("cpu"), requires_grad=True)
+        x.copy_from_numpy(np.arange(5, dtype=np.float32))
+
+        mask = np.array([True, False, True, False, True])
+        y = x[mask]  # shape (3,)
+        loss = y.sum()
+        loss.backward()
+
+        grad = x.grad.to_numpy()
+        expected = np.zeros((5,), dtype=np.float32)
+        expected[mask] = 1.0
+        self.assertTrue(np.array_equal(grad, expected))
+
+    def test_getitem_requires_grad_propagates(self):
+        x = self._make_arange((3, 4), requires_grad=True)
+        y = x[:, :2]
+        self.assertTrue(y.requires_grad)
+
+        x2 = self._make_arange((3, 4), requires_grad=False)
+        y2 = x2[:, :2]
+        self.assertFalse(y2.requires_grad)
+
+    def test_getitem_on_cuda_raises(self):
+        t = Tensor((2, 3), Device("cuda:0"))
+        with self.assertRaises(Exception):
+            _ = t[0]
 
 
 if __name__ == "__main__":
