@@ -43,7 +43,10 @@ Provides concrete implementations of domain contracts:
 - `Sequential` — ordered container for composing multi-layer models
 - `Linear` — fully connected (dense) layer implementation
 - `Flatten` — reshape layer bridging spatial outputs to dense layers
-- `Conv2d` — 2D convolution layer (NCHW, CPU reference implementation)
+- `Conv2d` — 2D convolution layer (NCHW)
+  - Naive NumPy reference implementation (forward + backward)
+  - Optional native CPU acceleration (float32 / float64) via C++ + ctypes
+  - Automatic dtype-aware dispatch with safe fallback
 - Pooling layers:
   - `MaxPool2d`
   - `AvgPool2d`
@@ -53,11 +56,14 @@ Provides concrete implementations of domain contracts:
 - Optimizers (SGD, Adam)
 - Autograd execution engine via dynamic computation graphs (`Context`, `Tensor.backward`)
 - Convolution and pooling primitives:
-  - Naive CPU Conv2D forward/backward reference kernels
-  - Pool2D forward/backward kernels with optional native C++ acceleration
+  - Conv2D forward/backward kernels
+    - Naive NumPy reference implementations
+    - Optional native CPU acceleration via C++ + ctypes (float32 / float64)
+    - Automatic dispatch with fallback for unsupported dtypes
+  - Pool2D forward/backward kernels
     - AvgPool2D and MaxPool2D native CPU kernels via ctypes
     - Float32 / Float64 dtype-aware dispatch
-    - Safe fallback to NumPy reference implementations when native kernels are unavailable
+    - Safe fallback to NumPy reference implementations
   - Autograd integration via `Conv2dFn` and pooling `Function`s
 
 Infrastructure code is free to evolve independently as long as it satisfies domain interfaces.
@@ -67,8 +73,11 @@ Infrastructure code is free to evolve independently as long as it satisfies doma
 ### Native CPU Acceleration (Optional)
 
 KeyDNN supports optional native CPU acceleration for selected operations
-(currently AvgPool2D and MaxPool2D) via C++ kernels exposed through `ctypes`.
+via C++ kernels exposed through `ctypes`, including:
 
+- Conv2D (forward and backward)
+- AvgPool2D
+- MaxPool2D
 - Native kernels are used automatically for supported dtypes (`float32`, `float64`)
 - If the native shared library is unavailable, KeyDNN emits a runtime warning
   and safely falls back to NumPy reference implementations
@@ -126,6 +135,8 @@ The test suite is split into two categories:
 - Chain tests validating Conv2D → Pooling → Activation compatibility
 - End-to-end CNN chain tests (Conv2D → ReLU → MaxPool2D → Flatten → Linear → Softmax)
 - End-to-end CNN composition validated via chain tests (Conv2D → Pooling → Flatten → Dense)
+- Finite-difference gradient checks for Conv2D forward and backward
+- Native vs reference path consistency tests via mocked dispatch
 
 ---
 
