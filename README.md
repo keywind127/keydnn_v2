@@ -53,11 +53,31 @@ Provides concrete implementations of domain contracts:
 - Optimizers (SGD, Adam)
 - Autograd execution engine via dynamic computation graphs (`Context`, `Tensor.backward`)
 - Convolution and pooling primitives:
-  - Naive CPU Conv2D forward/backward kernels
-  - Naive CPU Pool2D forward/backward kernels
+  - Naive CPU Conv2D forward/backward reference kernels
+  - Pool2D forward/backward kernels with optional native C++ acceleration
+    - AvgPool2D and MaxPool2D native CPU kernels via ctypes
+    - Float32 / Float64 dtype-aware dispatch
+    - Safe fallback to NumPy reference implementations when native kernels are unavailable
   - Autograd integration via `Conv2dFn` and pooling `Function`s
 
 Infrastructure code is free to evolve independently as long as it satisfies domain interfaces.
+
+---
+
+### Native CPU Acceleration (Optional)
+
+KeyDNN supports optional native CPU acceleration for selected operations
+(currently AvgPool2D and MaxPool2D) via C++ kernels exposed through `ctypes`.
+
+- Native kernels are used automatically for supported dtypes (`float32`, `float64`)
+- If the native shared library is unavailable, KeyDNN emits a runtime warning
+  and safely falls back to NumPy reference implementations
+- Build scripts are provided for Windows (MinGW), Linux, and macOS
+- Native acceleration is an optimization layer only; correctness is always
+  validated against reference implementations via unit tests
+
+This design allows incremental performance optimization without sacrificing
+portability or debuggability.
 
 ---
 
@@ -90,7 +110,7 @@ The test suite is split into two categories:
 - `Flatten` layer for reshaping (N, C, H, W) → (N, C*H*W)
 - 2D convolution layer (`Conv2d`) with configurable kernel size, stride, padding, and optional bias
 - 2D pooling layers (`MaxPool2d`, `AvgPool2d`, `GlobalAvgPool2d`)
-- Naive CPU Conv2D and Pool2D forward/backward kernels for correctness
+- CPU Conv2D and Pool2D forward/backward kernels with reference and native implementations
 - Autograd-compatible pooling functions with correct gradient routing
 - Regression and classification loss functions (SSE, MSE, BCE, CCE)
 - Softmax activation module with numerically stable forward and efficient backward
