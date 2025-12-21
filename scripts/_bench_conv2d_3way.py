@@ -282,6 +282,7 @@ def bench_case(
     do_sanity_check: bool,
     use_bias: bool,
     skip_pure_py: bool,
+    lib_path: Optional[str],
 ) -> None:
     rng = np.random.default_rng(0)
 
@@ -355,7 +356,7 @@ def bench_case(
 
     if _NATIVE_IMPORT_OK:
         try:
-            native_lib = load_keydnn_native()  # type: ignore[name-defined]
+            native_lib = load_keydnn_native(lib_path=lib_path)  # type: ignore[name-defined]
             native = _make_native_conv2d_fwd(
                 native_lib,
                 dtype=dtype,
@@ -435,6 +436,12 @@ def bench_case(
 
 def main() -> None:
     ap = argparse.ArgumentParser()
+    ap.add_argument(
+        "--lib",
+        type=str,
+        default=None,
+        help="Optional path to KeyDNN native shared library (overrides default loader path).",
+    )
     ap.add_argument("--N", type=int, default=1)
     ap.add_argument("--C_in", type=int, default=8)
     ap.add_argument("--H", type=int, default=28)
@@ -499,7 +506,9 @@ def main() -> None:
                 do_sanity_check=args.sanity,
                 use_bias=use_bias,
                 skip_pure_py=args.skip_pure_py,
+                lib_path=args.lib,
             )
+
     else:
         c = Case(
             "single",
@@ -521,6 +530,7 @@ def main() -> None:
             do_sanity_check=args.sanity,
             use_bias=use_bias,
             skip_pure_py=args.skip_pure_py,
+            lib_path=args.lib,
         )
 
 

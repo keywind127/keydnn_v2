@@ -77,11 +77,46 @@ def load_keydnn_native(lib_path: Optional[str] = None) -> ctypes.CDLL:
     OSError
         If the shared library cannot be found or loaded.
     """
-    if lib_path is None:
-        here = os.path.dirname(os.path.abspath(__file__))
-        lib_path = os.path.join(here, _default_lib_name())
+    from pathlib import Path
 
-    return ctypes.CDLL(lib_path)
+    # Resolve the target DLL path (your existing logic can remain; this is just a sketch)
+    if lib_path is None:
+        # default path (example)
+        lib_path = str(Path(__file__).resolve().parent / "keydnn_native.dll")
+
+    dll_path = Path(lib_path).resolve()
+    if not dll_path.exists():
+        raise FileNotFoundError(f"Native library not found: {dll_path}")
+
+    # ---- Critical: ensure dependent DLL search paths are registered on Windows (Py 3.8+) ----
+    add_dirs = []
+    if sys.platform.startswith("win"):
+        # 1) directory containing keydnn_native_omp.dll / keydnn_native_noomp.dll
+        add_dirs.append(str(dll_path.parent))
+
+        # 2) MinGW bin directory (best effort)
+        mingw_bin = os.environ.get("KEYDNN_MINGW_BIN", "")
+        if mingw_bin:
+            add_dirs.append(mingw_bin)
+
+    # Register DLL directories (Python 3.8+)
+    # Keep handles alive to preserve directory registration.
+    _handles = []
+    if sys.platform.startswith("win") and hasattr(os, "add_dll_directory"):
+        for d in add_dirs:
+            if d and Path(d).exists():
+                _handles.append(os.add_dll_directory(d))
+
+    # Now load the DLL
+    try:
+        return ctypes.CDLL(str(dll_path))
+    except OSError as e:
+        # Optional: include helpful details
+        raise OSError(
+            f"Failed to load native library: {dll_path}\n"
+            f"Registered DLL dirs: {add_dirs}\n"
+            f"Original error: {e}"
+        ) from e
 
 
 def maxpool2d_forward_f32_ctypes(
