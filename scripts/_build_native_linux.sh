@@ -74,6 +74,7 @@ mkdir -p "$OUT_DIR"
   -I"$INC_DIR" \
   "$SRC_DIR/keydnn_maxpool2d.cpp" \
   "$SRC_DIR/keydnn_avgpool2d.cpp" \
+  "$SRC_DIR/keydnn_conv2d.cpp" \
   -o "$OUT_LIB"
 
 echo "[KeyDNN] Build successful"
