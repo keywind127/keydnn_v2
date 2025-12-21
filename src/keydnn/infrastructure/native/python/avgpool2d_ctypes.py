@@ -38,9 +38,9 @@ from ctypes import POINTER, c_int, c_float, c_double
 
 import numpy as np
 
-from .maxpool2d_ctypes import (
+from ._native_loader import (
     load_keydnn_native,
-)  # reuse your loader, don't remove, dynamic loading
+)  # dynamic load the shared library, do not remove this line
 
 
 class AvgPool2DNativeKernels:
