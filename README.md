@@ -81,6 +81,35 @@ portability or debuggability.
 
 ---
 
+#### Performance Evaluation (Pool2D)
+
+Standalone benchmark scripts were used to evaluate the impact of native
+C++ Pool2D kernels compared to Python-based implementations.
+
+Three implementations were compared:
+
+1. Pure Python reference (explicit nested loops)
+2. NumPy-based reference implementation
+3. Native C++ kernels compiled as shared libraries and loaded via `ctypes`
+
+Representative results on CPU (float32):
+
+| Shape (N,C,H,W) | Operation     | Speedup vs Python | Speedup vs NumPy |
+| --------------- | ------------- | ----------------- | ---------------- |
+| 1×8×28×28       | MaxPool2D fwd | ~150×             | ~240×            |
+| 8×16×32×32      | AvgPool2D fwd | ~400×             | ~800×            |
+| 8×32×64×64      | MaxPool2D fwd | ~250×             | ~210×            |
+| 16×64×56×56     | AvgPool2D fwd | ~430×             | ~890×            |
+
+These results demonstrate that eliminating Python loop overhead—rather than
+micro-optimizing NumPy expressions—is the dominant factor in accelerating
+Pool2D operations.
+
+Benchmark scripts are provided under `scripts/` for reproducibility and are
+not part of the unit test suite.
+
+---
+
 ### Tests
 
 The test suite is split into two categories:
