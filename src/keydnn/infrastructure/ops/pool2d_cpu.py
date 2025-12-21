@@ -27,6 +27,8 @@ Design notes
 from __future__ import annotations
 
 from typing import Optional, Tuple
+import warnings
+
 import numpy as np
 
 
@@ -112,6 +114,12 @@ def maxpool2d_forward_cpu(
     - Padding is performed with `-inf` so padded values never become maxima.
     - `argmax_idx` is required for correct gradient routing in the backward pass.
     """
+
+    if x.dtype.kind != "f":
+        raise TypeError(
+            f"maxpool2d_forward_cpu expects a floating-point input tensor; got dtype={x.dtype}."
+        )
+
     k = _pair(kernel_size)
     s = _pair(kernel_size if stride is None else stride)
     p = _pair(padding)
@@ -134,54 +142,82 @@ def maxpool2d_forward_cpu(
     y = np.empty((N, C, H_out, W_out), dtype=x.dtype)
     argmax_idx = np.empty((N, C, H_out, W_out), dtype=np.int64)
 
-    def _maxpool_loop(
-        *,
-        x_pad: np.ndarray,
-        y: np.ndarray,
-        argmax_idx: np.ndarray,
-        N: int,
-        C: int,
-        H_out: int,
-        W_out: int,
-        k_h: int,
-        k_w: int,
-        s_h: int,
-        s_w: int,
-        W_pad: int,
-    ) -> None:
-        for n in range(N):
-            for c in range(C):
-                for i in range(H_out):
-                    h0 = i * s_h
-                    for j in range(W_out):
-                        w0 = j * s_w
+    # Fast path: call the native C++ kernel via ctypes (float32/float64 only).
+    # If native kernel is unavailable or dtype is unsupported, fall back to
+    # the original NumPy reference loop for correctness and dtype preservation.
+    try:
+        if x_pad.dtype in (np.float32, np.float64) and y.dtype == x_pad.dtype:
+            from ..native.python.maxpool2d_ctypes import (
+                load_keydnn_native,
+                maxpool2d_forward_f32_ctypes,
+                maxpool2d_forward_f64_ctypes,
+            )
 
-                        patch = x_pad[n, c, h0 : h0 + k_h, w0 : w0 + k_w]
-                        flat_idx = int(np.argmax(patch))
+            lib = load_keydnn_native()
 
-                        y[n, c, i, j] = patch.reshape(-1)[flat_idx]
+            if x_pad.dtype == np.float32:
+                maxpool2d_forward_f32_ctypes(
+                    lib,
+                    x_pad=x_pad,
+                    y=y,
+                    argmax_idx=argmax_idx,
+                    N=N,
+                    C=C,
+                    H_pad=H_pad,
+                    W_pad=W_pad,
+                    H_out=H_out,
+                    W_out=W_out,
+                    k_h=k_h,
+                    k_w=k_w,
+                    s_h=s_h,
+                    s_w=s_w,
+                )
+                return y, argmax_idx
 
-                        ph = flat_idx // k_w
-                        pw = flat_idx % k_w
-                        h = h0 + ph
-                        w = w0 + pw
+            if x_pad.dtype == np.float64:
+                maxpool2d_forward_f64_ctypes(
+                    lib,
+                    x_pad=x_pad,
+                    y=y,
+                    argmax_idx=argmax_idx,
+                    N=N,
+                    C=C,
+                    H_pad=H_pad,
+                    W_pad=W_pad,
+                    H_out=H_out,
+                    W_out=W_out,
+                    k_h=k_h,
+                    k_w=k_w,
+                    s_h=s_h,
+                    s_w=s_w,
+                )
+                return y, argmax_idx
+    except OSError as e:
+        # Shared library not found / not loadable -> fall back to NumPy loop.
+        warnings.warn(
+            "KeyDNN native maxpool2d library could not be loaded; "
+            "falling back to NumPy reference implementation. "
+            f"Reason: {e}",
+            RuntimeWarning,
+            stacklevel=2,
+        )
 
-                        argmax_idx[n, c, i, j] = h * W_pad + w
+    # Reference path (original Python loop) for non-float32/float64 or when native is unavailable.
+    for n in range(N):
+        for c in range(C):
+            for i in range(H_out):
+                h0 = i * s_h
+                for j in range(W_out):
+                    w0 = j * s_w
+                    patch = x_pad[n, c, h0 : h0 + k_h, w0 : w0 + k_w]
+                    flat_idx = int(np.argmax(patch))
+                    y[n, c, i, j] = patch.reshape(-1)[flat_idx]
 
-    _maxpool_loop(
-        x_pad=x_pad,
-        y=y,
-        argmax_idx=argmax_idx,
-        N=N,
-        C=C,
-        H_out=H_out,
-        W_out=W_out,
-        k_h=k_h,
-        k_w=k_w,
-        s_h=s_h,
-        s_w=s_w,
-        W_pad=W_pad,
-    )
+                    ph = flat_idx // k_w
+                    pw = flat_idx % k_w
+                    h = h0 + ph
+                    w_ = w0 + pw
+                    argmax_idx[n, c, i, j] = h * W_pad + w_
 
     return y, argmax_idx
 

@@ -1,7 +1,9 @@
 #include "keydnn_maxpool2d.hpp"
 
 #include <cstddef>
+#include <cstdint>
 #include <limits>
+#include <type_traits>
 
 static inline std::size_t idx4_nchw(
     int n, int c, int h, int w,
@@ -13,9 +15,10 @@ static inline std::size_t idx4_nchw(
     );
 }
 
-void keydnn_maxpool2d_forward_f32(
-    const float* x_pad,
-    float* y,
+template <typename T>
+static inline void maxpool2d_forward_impl(
+    const T* x_pad,
+    T* y,
     std::int64_t* argmax_idx,
     int N,
     int C,
@@ -28,6 +31,8 @@ void keydnn_maxpool2d_forward_f32(
     int s_h,
     int s_w
 ) {
+    static_assert(std::is_floating_point_v<T>, "maxpool2d_forward_impl requires floating point T");
+
     // Basic argument sanity (cheap guards; feel free to remove in release builds)
     if (!x_pad || !y || !argmax_idx) return;
     if (N <= 0 || C <= 0 || H_pad <= 0 || W_pad <= 0) return;
@@ -42,7 +47,7 @@ void keydnn_maxpool2d_forward_f32(
                     const int w0 = j * s_w;
 
                     // Scan window (k_h x k_w) within padded plane
-                    float best = -std::numeric_limits<float>::infinity();
+                    T best = -std::numeric_limits<T>::infinity();
                     int best_flat = 0;
 
                     for (int ph = 0; ph < k_h; ++ph) {
@@ -51,9 +56,10 @@ void keydnn_maxpool2d_forward_f32(
                             const int w = w0 + pw;
 
                             const std::size_t in_off = idx4_nchw(n, c, h, w, C, H_pad, W_pad);
-                            const float v = x_pad[in_off];
+                            const T v = x_pad[in_off];
 
                             const int flat = ph * k_w + pw;
+                            // Tie-breaking matches NumPy argmax (first occurrence in row-major order)
                             if (v > best) {
                                 best = v;
                                 best_flat = flat;
@@ -75,4 +81,48 @@ void keydnn_maxpool2d_forward_f32(
             }
         }
     }
+}
+
+void keydnn_maxpool2d_forward_f32(
+    const float* x_pad,
+    float* y,
+    std::int64_t* argmax_idx,
+    int N,
+    int C,
+    int H_pad,
+    int W_pad,
+    int H_out,
+    int W_out,
+    int k_h,
+    int k_w,
+    int s_h,
+    int s_w
+) {
+    maxpool2d_forward_impl<float>(
+        x_pad, y, argmax_idx,
+        N, C, H_pad, W_pad, H_out, W_out,
+        k_h, k_w, s_h, s_w
+    );
+}
+
+void keydnn_maxpool2d_forward_f64(
+    const double* x_pad,
+    double* y,
+    std::int64_t* argmax_idx,
+    int N,
+    int C,
+    int H_pad,
+    int W_pad,
+    int H_out,
+    int W_out,
+    int k_h,
+    int k_w,
+    int s_h,
+    int s_w
+) {
+    maxpool2d_forward_impl<double>(
+        x_pad, y, argmax_idx,
+        N, C, H_pad, W_pad, H_out, W_out,
+        k_h, k_w, s_h, s_w
+    );
 }
