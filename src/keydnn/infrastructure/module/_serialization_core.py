@@ -74,8 +74,18 @@ def module_from_config(node: dict[str, Any]) -> Any:
                 f"Module '{type_name}' cannot accept children (no _modules dict)."
             )
 
+        # for name, child_node in children.items():
+        #     m._modules[str(name)] = module_from_config(child_node)
         for name, child_node in children.items():
-            m._modules[str(name)] = module_from_config(child_node)
+            child = module_from_config(child_node)
+
+            # Prefer the public registration API so both attribute + _modules stay consistent
+            reg = getattr(m, "register_module", None)
+            if callable(reg):
+                reg(str(name), child)
+            else:
+                # Fallback: ensure attribute is set (Module.__setattr__ should populate _modules)
+                setattr(m, str(name), child)
 
     post = getattr(m, "_post_load", None)
     if callable(post):

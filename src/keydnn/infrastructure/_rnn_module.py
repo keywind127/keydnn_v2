@@ -36,7 +36,7 @@ Public API
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Any, Dict
 
 import numpy as np
 
@@ -44,6 +44,7 @@ from ..domain.device._device import Device
 from ..infrastructure._tensor import Tensor, Context
 from ..infrastructure._parameter import Parameter
 from ..infrastructure._module import Module
+from ..infrastructure.module._serialization_core import register_module
 
 
 def tensor_from_numpy(
@@ -74,6 +75,7 @@ def tensor_from_numpy(
     return out
 
 
+@register_module()
 @dataclass
 class RNNCell(Module):
     """
@@ -350,7 +352,40 @@ class RNNCell(Module):
 
         return (gx, ghp, gWih, gWhh)
 
+    def get_config(self) -> Dict[str, Any]:
+        """
+        Return a JSON-serializable configuration for reconstructing this cell.
 
+        Notes
+        -----
+        This captures constructor hyperparameters only.
+        Trainable parameters (W_ih, W_hh, b_ih, b_hh) are serialized separately
+        by the checkpoint/state_dict mechanism.
+        """
+        return {
+            "input_size": int(self.input_size),
+            "hidden_size": int(self.hidden_size),
+            "bias": bool(self.bias),
+        }
+
+    @classmethod
+    def from_config(cls, cfg: Dict[str, Any]) -> "RNNCell":
+        """
+        Reconstruct a cell from config.
+
+        Notes
+        -----
+        We intentionally do not load weights here; weight loading is handled by
+        `load_state_payload_` after the module graph is instantiated.
+        """
+        return cls(
+            input_size=int(cfg["input_size"]),
+            hidden_size=int(cfg["hidden_size"]),
+            bias=bool(cfg.get("bias", True)),
+        )
+
+
+@register_module()
 class RNN(Module):
     """
     Unidirectional vanilla RNN over a time-major sequence using `RNNCell`.
@@ -498,3 +533,46 @@ class RNN(Module):
         if self.return_state:
             return out, h_T
         return out
+
+    def get_config(self) -> Dict[str, Any]:
+        """
+        Return a JSON-serializable configuration for reconstructing this RNN.
+
+        Notes
+        -----
+        This captures constructor hyperparameters only. The child `cell`
+        is a submodule and will be serialized structurally by `module_to_config`.
+        Trainable parameters are serialized separately by the weights payload.
+        """
+        return {
+            # architectural hyperparameters
+            "input_size": int(self.cell.input_size),
+            "hidden_size": int(self.cell.hidden_size),
+            "bias": bool(self.cell.bias),
+            # output behavior flags
+            "return_sequences": bool(self.return_sequences),
+            "return_state": bool(self.return_state),
+            "keras_compat": bool(self.keras_compat),
+        }
+
+    @classmethod
+    def from_config(cls, cfg: Dict[str, Any]) -> "RNN":
+        """
+        Reconstruct an RNN from config.
+
+        Notes
+        -----
+        - We construct RNN with the same hyperparameters.
+        - The deserializer will attach child modules into `_modules` afterward.
+          Since `RNN.__init__` creates `self.cell` already, the serializer should
+          remain consistent: either rely on this default cell or overwrite it
+          via `_modules["cell"]` depending on your core deserialization design.
+        """
+        return cls(
+            input_size=int(cfg["input_size"]),
+            hidden_size=int(cfg["hidden_size"]),
+            bias=bool(cfg.get("bias", True)),
+            return_sequences=bool(cfg.get("return_sequences", True)),
+            return_state=bool(cfg.get("return_state", True)),
+            keras_compat=bool(cfg.get("keras_compat", False)),
+        )

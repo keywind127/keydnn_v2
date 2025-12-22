@@ -1,1 +1,2 @@
 numpy==2.2.6
+typing_extensions==4.15.0

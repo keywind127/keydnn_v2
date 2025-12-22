@@ -17,7 +17,7 @@ by concrete layers (e.g., Linear, Conv2D, activations-as-modules, containers).
 from __future__ import annotations
 
 from collections.abc import Iterable
-from typing import Dict, Iterator, Optional
+from typing import Dict, Iterator, Optional, Any
 
 from ..domain._module import IModule
 from ..domain._parameter import IParameter
@@ -191,3 +191,41 @@ class Module(IModule):
         Call the module as a function, delegating to `forward`.
         """
         return self.forward(x)
+
+    # ------------------------------------------------------------------
+    # Serialization hooks (opt-in contract)
+    # ------------------------------------------------------------------
+    def get_config(self) -> Dict[str, Any]:
+        """
+        Return a JSON-serializable configuration for this module.
+
+        Subclasses that participate in JSON-based model save/load MUST
+        override this method.
+
+        Raises
+        ------
+        NotImplementedError
+            If the module does not support JSON serialization.
+        """
+        raise NotImplementedError(
+            f"{self.__class__.__name__} does not implement get_config(). "
+            "This module cannot be serialized to JSON."
+        )
+
+    @classmethod
+    def from_config(cls, cfg: Dict[str, Any]) -> "Module":
+        """
+        Reconstruct a module from a JSON configuration.
+
+        Subclasses that participate in JSON-based model save/load MUST
+        override this method.
+
+        Raises
+        ------
+        NotImplementedError
+            If the module does not support JSON deserialization.
+        """
+        raise NotImplementedError(
+            f"{cls.__name__} does not implement from_config(). "
+            "This module cannot be deserialized from JSON."
+        )

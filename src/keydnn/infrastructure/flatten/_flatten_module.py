@@ -28,12 +28,16 @@ Design notes
 
 from __future__ import annotations
 
+from ...domain.model._stateless_mixin import StatelessConfigMixin
+from ..module._serialization_core import register_module
+
 from .._module import Module
 from .._tensor import Tensor, Context
 from ._flatten_function import FlattenFn
 
 
-class Flatten(Module):
+@register_module()
+class Flatten(StatelessConfigMixin, Module):
     """
     Flatten layer.
 

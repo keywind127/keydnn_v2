@@ -27,13 +27,18 @@ Notes
   context. (This module currently types it as `Tensor` accordingly.)
 """
 
+from typing import Any, Dict
+
+from ..domain.model._stateless_mixin import StatelessConfigMixin
+from .module._serialization_core import register_module
 from ._tensor import Tensor, Context
 from ._module import Module
 
 from ._function import SigmoidFn, ReLUFn, LeakyReLUFn, TanhFn, SoftmaxFn
 
 
-class Sigmoid(Module):
+@register_module()
+class Sigmoid(StatelessConfigMixin, Module):
     """
     Sigmoid activation module.
 
@@ -80,7 +85,8 @@ class Sigmoid(Module):
         return out
 
 
-class ReLU(Module):
+@register_module()
+class ReLU(StatelessConfigMixin, Module):
     """
     ReLU activation module.
 
@@ -127,6 +133,7 @@ class ReLU(Module):
         return out
 
 
+@register_module()
 class LeakyReLU(Module):
     """
     Leaky ReLU activation module.
@@ -190,8 +197,16 @@ class LeakyReLU(Module):
 
         return out
 
+    def get_config(self) -> Dict[str, Any]:
+        return {"alpha": float(self.alpha)}
 
-class Tanh(Module):
+    @classmethod
+    def from_config(cls, cfg: Dict[str, Any]) -> "LeakyReLU":
+        return cls(alpha=float(cfg.get("alpha", 0.01)))
+
+
+@register_module()
+class Tanh(StatelessConfigMixin, Module):
     """
     Hyperbolic tangent activation module.
 
@@ -238,6 +253,7 @@ class Tanh(Module):
         return out
 
 
+@register_module()
 class Softmax(Module):
     """
     Softmax activation module.
@@ -259,6 +275,7 @@ class Softmax(Module):
             Dimension along which the softmax operation is applied.
             Defaults to the last dimension (`-1`).
         """
+        super().__init__()
         self._axis = axis
 
     def forward(self, x: Tensor) -> Tensor:
@@ -297,3 +314,10 @@ class Softmax(Module):
             out._set_ctx(ctx)
 
         return out
+
+    def get_config(self) -> Dict[str, Any]:
+        return {"axis": int(self._axis)}
+
+    @classmethod
+    def from_config(cls, cfg: Dict[str, Any]) -> "Softmax":
+        return cls(axis=int(cfg.get("axis", -1)))
