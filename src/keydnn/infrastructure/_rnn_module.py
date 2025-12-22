@@ -36,11 +36,11 @@ Public API
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Optional
 
 import numpy as np
 
-from ..domain._device import Device
+from ..domain.device._device import Device
 from ..infrastructure._tensor import Tensor, Context
 from ..infrastructure._parameter import Parameter
 from ..infrastructure._module import Module

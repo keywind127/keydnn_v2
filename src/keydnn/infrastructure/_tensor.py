@@ -31,7 +31,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from ..domain._tensor import ITensor
-from ..domain._device import Device
+from ..domain.device._device import Device
 from ..domain._errors import DeviceNotSupportedError
 
 Number = Union[int, float]
@@ -131,13 +131,27 @@ class Tensor(ITensor):
         ValueError
             If the device type is unsupported.
         """
-        match self._device:
-            case Device() if self._device.is_cpu():
-                self._data = np.zeros(self._shape, dtype=np.float32)
-            case Device() if self._device.is_cuda():
-                self._data = f"CUDA Tensor on device {self._device.index} with shape {self._shape}"
-            case _:
-                raise ValueError("Unsupported device type")
+        # match self._device:
+        #     case Device() if self._device.is_cpu():
+        #         self._data = np.zeros(self._shape, dtype=np.float32)
+        #     case Device() if self._device.is_cuda():
+        #         self._data = f"CUDA Tensor on device {self._device.index} with shape {self._shape}"
+        #     case _:
+        #         raise ValueError("Unsupported device type")
+        d = self._device
+
+        # Duck typing: avoid class-identity issues.
+        is_cpu = getattr(d, "is_cpu", None)
+        if callable(is_cpu) and is_cpu():
+            self._data = np.zeros(self._shape, dtype=np.float32)
+            return
+
+        is_cuda = getattr(d, "is_cuda", None)
+        if callable(is_cuda) and is_cuda():
+            self._data = f"CUDA Tensor on device {getattr(d, 'index', None)} with shape {self._shape}"
+            return
+
+        raise ValueError(f"Unsupported device type: {type(d)!r} value={d!r}")
 
     def __init__(
         self,

@@ -1,7 +1,7 @@
 import unittest
 import numpy as np
 
-from src.keydnn.domain._device import Device
+from src.keydnn.domain.device._device import Device
 from src.keydnn.infrastructure._tensor import Tensor, Context
 from src.keydnn.infrastructure._function import (
     SigmoidFn,

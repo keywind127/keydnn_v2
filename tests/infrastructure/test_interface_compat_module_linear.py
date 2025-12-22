@@ -1,7 +1,7 @@
 import unittest
 
 
-from src.keydnn.domain._device import Device
+from src.keydnn.domain.device._device import Device
 from src.keydnn.domain._module import IModule
 from src.keydnn.infrastructure._module import Module
 from src.keydnn.infrastructure._linear import Linear

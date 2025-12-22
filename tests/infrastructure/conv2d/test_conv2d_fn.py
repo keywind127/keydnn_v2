@@ -1,7 +1,7 @@
 import unittest
 import numpy as np
 
-from src.keydnn.domain._device import Device
+from src.keydnn.domain.device._device import Device
 from src.keydnn.infrastructure._tensor import Tensor, Context
 from src.keydnn.infrastructure._function import Conv2dFn
 from src.keydnn.infrastructure.ops.conv2d_cpu import conv2d_forward_cpu, conv2d_backward_cpu

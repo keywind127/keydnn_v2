@@ -12,7 +12,7 @@ class TestSequentialXORTraining(unittest.TestCase):
             from src.keydnn.infrastructure._linear import Linear
             from src.keydnn.infrastructure._activations import Sigmoid
             from src.keydnn.infrastructure._tensor import Tensor
-            from src.keydnn.domain._device import Device
+            from src.keydnn.domain.device._device import Device
             from src.keydnn.infrastructure._optimizers import SGD
         except (ModuleNotFoundError, ImportError) as e:
             self.skipTest(f"XOR training test skipped (missing import): {e}")

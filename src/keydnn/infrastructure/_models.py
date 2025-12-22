@@ -13,9 +13,21 @@ remaining agnostic to training loops, optimizers, and execution engines.
 
 from __future__ import annotations
 
-from typing import Iterator, List, Optional, Tuple
+from typing import Iterator, List, Optional, Tuple, Any
+from pathlib import Path
+import json
 
 from ._module import Module
+
+from .module._serialization_core import (
+    module_to_config,
+    module_from_config,
+    register_module,
+)
+from .module._serialization_weights import (
+    extract_state_payload,
+    load_state_payload_,
+)
 
 
 class Model(Module):
@@ -79,7 +91,76 @@ class Model(Module):
 
         return out
 
+    def save_json(self, path: str | Path) -> None:
+        """
+        Save model architecture and weights into a single JSON file.
 
+        Parameters
+        ----------
+        path : str | Path
+            Output JSON file path, e.g. "checkpoint.json".
+
+        Format
+        ------
+        {
+          "format": "keydnn.json.ckpt.v1",
+          "arch": {...},
+          "state": {
+            "layer1.weight": {"b64": "...", "dtype": "<f4", "shape": [...], "order": "C"},
+            ...
+          }
+        }
+
+        Notes
+        -----
+        - Avoids pickle and HDF5 dependencies.
+        - JSON file can get large; base64 adds ~33% size overhead.
+        """
+        p = Path(path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+
+        payload = {
+            "format": "keydnn.json.ckpt.v1",
+            "arch": module_to_config(self),
+            "state": extract_state_payload(self),
+        }
+
+        p.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
+    @classmethod
+    def load_json(cls, path: str | Path) -> "Model":
+        """
+        Load a model from a single JSON checkpoint created by `save_json()`.
+
+        Parameters
+        ----------
+        path : str | Path
+            Checkpoint JSON path.
+
+        Returns
+        -------
+        Model
+            Reconstructed model with weights loaded.
+        """
+        p = Path(path)
+        payload = json.loads(p.read_text(encoding="utf-8"))
+
+        fmt = payload.get("format")
+        if fmt != "keydnn.json.ckpt.v1":
+            raise ValueError(f"Unsupported checkpoint format: {fmt!r}")
+
+        model = module_from_config(payload["arch"])
+        load_state_payload_(model, payload["state"])
+
+        if not isinstance(model, cls):
+            raise TypeError(
+                f"Loaded object is {type(model).__name__}, expected {cls.__name__}."
+            )
+
+        return model
+
+
+@register_module()
 class Sequential(Model):
     """
     Sequential container module.
@@ -111,6 +192,9 @@ class Sequential(Model):
         self._layers: List[Module] = []
         for layer in layers:
             self.add(layer)
+
+    def get_config(self) -> dict[str, Any]:
+        return {}
 
     def add(self, layer: Module, name: Optional[str] = None) -> None:
         """
@@ -250,3 +334,36 @@ class Sequential(Model):
             eval_fn()
 
         return self.forward(x)
+
+    @classmethod
+    def from_config(cls, cfg: dict[str, Any]) -> "Sequential":
+        """
+        Construct a Sequential container from config.
+
+        Notes
+        -----
+        Children are attached later by the deserializer into `self._modules`.
+        This method restores the ordered `_layers` view from `_modules` once present.
+        """
+        return cls()
+
+    def _post_load(self) -> None:
+        """
+        Internal hook invoked by JSON deserialization after children are attached.
+
+        Restores `_layers` ordering from `_modules` so that indexing, iteration,
+        and forward() work correctly after load.
+        """
+        if not hasattr(self, "_modules") or not isinstance(self._modules, dict):
+            return
+
+        # Deterministic order: numeric names first ("0", "1", ...)
+        def _key_order(k: str) -> tuple[int, int | str]:
+            try:
+                return (0, int(k))
+            except ValueError:
+                return (1, k)
+
+        self._layers = [
+            self._modules[k] for k in sorted(self._modules.keys(), key=_key_order)
+        ]

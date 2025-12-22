@@ -36,8 +36,10 @@ Example
 """
 
 import numpy as np
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Any, Dict
 
+from ..domain.device._device import Device
+from .module._serialization_core import register_module
 from ._module import Module
 from ._tensor import Tensor, Context
 from ._parameter import Parameter
@@ -45,38 +47,25 @@ from .ops.conv2d_cpu import _pair
 from ._function import Conv2dFn
 
 
-def _param_from_numpy(arr: np.ndarray, *, device) -> Parameter:
+def _param_from_numpy(arr: np.ndarray, device=None) -> Parameter:
     """
-    Construct a trainable `Parameter` from a NumPy array.
-
-    This helper initializes a `Parameter` instance using the array's shape
-    and copies the provided NumPy data into the parameter's underlying
-    tensor storage.
-
-    Parameters
-    ----------
-    arr : np.ndarray
-        NumPy array containing the initial parameter values.
-    device : Device
-        Target device on which the parameter tensor will be allocated.
-
-    Returns
-    -------
-    Parameter
-        A trainable parameter initialized with the given NumPy data.
+    Create a trainable Parameter from a NumPy array.
 
     Notes
     -----
-    - `Parameter` is a subclass of `Tensor` in this codebase.
-    - The created parameter always has `requires_grad=True`.
-    - This helper encapsulates the Tensor construction + data copy pattern
-      used throughout layer initialization code.
+    - If `device` is None, defaults to CPU.
+    - This function should be the single place where Conv2d parameter device
+      normalization happens, so callers can pass `device=None` safely.
     """
+    if device is None:
+        device = Device("cpu")
+
     p = Parameter(shape=arr.shape, device=device, requires_grad=True, ctx=None)
-    p.copy_from_numpy(arr)
+    p.copy_from_numpy(arr.astype(np.float32, copy=False))
     return p
 
 
+@register_module()
 class Conv2d(Module):
     """
     Two-dimensional convolution layer (NCHW).
@@ -213,3 +202,65 @@ class Conv2d(Module):
             out._set_ctx(ctx)
 
         return out
+
+    # -------------------------------------------------------------------------
+    # ADD-ON ONLY: JSON serialization hooks (do not change existing logic above)
+    # -------------------------------------------------------------------------
+    def get_config(self) -> Dict[str, Any]:
+        """
+        Return a JSON-serializable configuration for reconstructing this layer.
+
+        Notes
+        -----
+        This configuration captures constructor-level hyperparameters only.
+        Trainable parameters (weights/bias) are serialized separately by the
+        checkpoint/state_dict mechanism.
+        """
+        k_h, k_w = self.kernel_size
+        s_h, s_w = self.stride
+        p_h, p_w = self.padding
+
+        return {
+            "in_channels": int(self.in_channels),
+            "out_channels": int(self.out_channels),
+            "kernel_size": [int(k_h), int(k_w)],
+            "stride": [int(s_h), int(s_w)],
+            "padding": [int(p_h), int(p_w)],
+            "bias": bool(self.bias is not None),
+            # Serialize device via parameter (authoritative source)
+            "device": str(self.weight.device),
+            # dtype is optional; safe default
+            "dtype": np.dtype(np.float32).str,
+        }
+
+    @classmethod
+    def from_config(cls, cfg: Dict[str, Any]) -> "Conv2d":
+        """
+        Construct a Conv2d layer from a configuration dict.
+
+        Notes
+        -----
+        This reconstructs the module structure (hyperparameters). Weights are
+        expected to be loaded afterward from the checkpoint state.
+        """
+        device_cfg = cfg.get("device", None)
+
+        # Accept None | "cpu" | "cuda:0" | Device-like
+        if device_cfg is None:
+            device = None
+        elif isinstance(device_cfg, str):
+            device = Device(device_cfg)
+        else:
+            # Already a Device-like object (rare in JSON path, but safe)
+            device = device_cfg
+
+        return cls(
+            in_channels=int(cfg["in_channels"]),
+            out_channels=int(cfg["out_channels"]),
+            kernel_size=tuple(cfg["kernel_size"]),
+            stride=tuple(cfg["stride"]),
+            padding=tuple(cfg["padding"]),
+            bias=bool(cfg["bias"]),
+            device=device,
+            dtype=np.dtype(cfg.get("dtype", np.float32)),
+        )

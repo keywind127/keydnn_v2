@@ -1,7 +1,7 @@
 import unittest
 
 from src.keydnn.domain._optimizers import IOptimizer
-from src.keydnn.domain._device import Device
+from src.keydnn.domain.device._device import Device
 from src.keydnn.infrastructure._optimizers import SGD, Adam
 from src.keydnn.infrastructure._parameter import Parameter
 

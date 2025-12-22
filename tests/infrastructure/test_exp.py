@@ -1,9 +1,9 @@
 import unittest
 import numpy as np
 
-from keydnn.domain._device import Device
-from keydnn.infrastructure._tensor import Tensor, Context
-from keydnn.infrastructure._function import ExpFn, exp
+from src.keydnn.domain.device._device import Device
+from src.keydnn.infrastructure._tensor import Tensor, Context
+from src.keydnn.infrastructure._function import ExpFn, exp
 
 
 def make_cpu_tensor(arr: np.ndarray, *, requires_grad: bool = False) -> Tensor:

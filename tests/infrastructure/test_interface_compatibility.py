@@ -7,7 +7,7 @@ def _make_cpu_device():
     Try to construct a CPU Device without assuming one specific API.
     Edit this if your Device API is strict.
     """
-    from keydnn.domain._device import Device  # adjust import if needed
+    from src.keydnn.domain.device._device import Device  # adjust import if needed
 
     if hasattr(Device, "cpu") and callable(getattr(Device, "cpu")):
         return Device.cpu()

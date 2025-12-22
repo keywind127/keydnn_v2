@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 import numpy as np
 
-from src.keydnn.domain._device import Device
+from src.keydnn.domain.device._device import Device
 from src.keydnn.infrastructure._tensor import Tensor
 from src.keydnn.infrastructure._rnn_module import RNN, RNNCell
 

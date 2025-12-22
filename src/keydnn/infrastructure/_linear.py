@@ -32,17 +32,20 @@ Important limitations
 
 from __future__ import annotations
 
-from typing import Optional, Sequence
+from typing import Optional, Sequence, Any, Dict
 
 import numpy as np
 
-from ..domain._device import Device
-from ..domain._tensor import ITensor
+
+from .module._serialization_core import register_module
 from ._module import Module
 from ._parameter import Parameter
 from ._tensor import Tensor, Context
+from ..domain.device._device import Device
+from ..domain._tensor import ITensor
 
 
+@register_module()
 class Linear(Module):
     """
     Fully connected (dense) layer: y = x @ W^T + b.
@@ -297,3 +300,43 @@ class Linear(Module):
             out._set_ctx(ctx)
 
         return out
+
+    # -------------------------------------------------------------------------
+    # ADD-ON ONLY: JSON serialization hooks (no change to existing logic above)
+    # -------------------------------------------------------------------------
+    def get_config(self) -> Dict[str, Any]:
+        """
+        Return a JSON-serializable configuration for reconstructing this layer.
+
+        Notes
+        -----
+        This configuration captures constructor-level hyperparameters only.
+        Trainable parameters (weights/bias) are serialized separately by the
+        checkpoint/state_dict mechanism.
+        """
+        return {
+            "in_features": int(self.in_features),
+            "out_features": int(self.out_features),
+            "bias": bool(self.bias is not None),
+            # Store device as a string to keep JSON stable.
+            # Assumes Device can be reconstructed from its string form (e.g., "cpu").
+            "device": str(self.device),
+        }
+
+    @classmethod
+    def from_config(cls, cfg: Dict[str, Any]) -> "Linear":
+        """
+        Construct a Linear layer from a configuration dict.
+
+        Notes
+        -----
+        This reconstructs the module structure (hyperparameters). Weights are
+        expected to be loaded afterward from the checkpoint state.
+        """
+        dev = cfg.get("device", "cpu")
+        return cls(
+            in_features=int(cfg["in_features"]),
+            out_features=int(cfg["out_features"]),
+            bias=bool(cfg.get("bias", True)),
+            device=Device(str(dev)),
+        )

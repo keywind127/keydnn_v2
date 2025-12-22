@@ -4,7 +4,7 @@ import numpy as np
 from src.keydnn.infrastructure._models import Sequential, Model
 from src.keydnn.infrastructure._parameter import Parameter
 from src.keydnn.infrastructure._module import Module
-from src.keydnn.domain._device import Device
+from src.keydnn.domain.device._device import Device
 
 
 class AddOne(Module):

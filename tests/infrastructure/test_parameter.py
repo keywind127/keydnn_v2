@@ -5,7 +5,7 @@ import numpy as np
 
 from src.keydnn.infrastructure._tensor import Tensor
 from src.keydnn.infrastructure._parameter import Parameter
-from src.keydnn.domain._device import Device
+from src.keydnn.domain.device._device import Device
 
 
 class TestParameterInfrastructure(TestCase):

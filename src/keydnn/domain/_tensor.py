@@ -11,7 +11,8 @@ from __future__ import annotations
 
 from typing import Any, Optional, Protocol, Sequence, Union, runtime_checkable
 
-from ._device import Device
+from .device._device import Device
+from .device._device_protocol import DeviceLike
 
 
 Number = Union[int, float]
@@ -58,7 +59,7 @@ class ITensor(Protocol):
         ...
 
     @property
-    def device(self) -> Device:
+    def device(self) -> DeviceLike:
         """
         Return the device on which this tensor resides.
 
