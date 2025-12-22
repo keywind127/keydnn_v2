@@ -363,25 +363,49 @@ class RNN(Module):
         Hidden state dimension H.
     bias : bool, optional
         Whether to use biases in the underlying cell. Defaults to True.
+    return_sequences : bool, optional
+        If True, include the full hidden-state sequence `h_seq` (T, N, H) in the output.
+        Defaults to True for backward compatibility (historically `forward()` returned h_seq).
+    return_state : bool, optional
+        If True, also include the final hidden state `h_T` (N, H) in the output.
+        Defaults to True for backward compatibility (historically `forward()` returned (h_seq, h_T)).
+    keras_compat : bool, optional
+        If True, use Keras-like return behavior:
+          - return_sequences=False, return_state=False -> h_T
+          - return_sequences=True,  return_state=False -> h_seq
+          - return_sequences=False, return_state=True  -> (h_T, h_T)
+          - return_sequences=True,  return_state=True  -> (h_seq, h_T)
+        If False (default), preserve legacy behavior where `forward()` returns:
+          - (h_seq, h_T) when return_state=True (default)
+          - h_seq when return_state=False
+        Defaults to False.
 
     Input / Output
     --------------
     Input:
         x : Tensor of shape (T, N, D)  (time-major)
         h0 : Optional[Tensor] of shape (N, H)
-    Output:
+    Output (default legacy behavior):
         h_seq : Tensor of shape (T, N, H)
         h_T : Tensor of shape (N, H)
 
     Notes
     -----
     - Uses an explicit Python loop over timesteps for clarity.
-    - The current implementation constructs per-timestep tensors from NumPy
-      slices; without a view/slice Tensor implementation, gradients will not
-      automatically accumulate back into the original `x` tensor.
+    - The current implementation uses Tensor slicing (`x[t]`) and `Tensor.stack`,
+      so BPTT emerges naturally from the autograd graph (no fused RNN backward).
     """
 
-    def __init__(self, input_size: int, hidden_size: int, bias: bool = True):
+    def __init__(
+        self,
+        input_size: int,
+        hidden_size: int,
+        bias: bool = True,
+        *,
+        return_sequences: bool = True,  # <-- legacy default
+        return_state: bool = True,  # <-- legacy default
+        keras_compat: bool = False,  # <-- opt-in
+    ):
         """
         Create an RNN module that owns a single `RNNCell`.
 
@@ -393,11 +417,21 @@ class RNN(Module):
             Hidden state dimension H.
         bias : bool, optional
             Whether to use biases in the cell. Defaults to True.
+        return_sequences : bool, optional
+            If True, return the full hidden-state sequence `h_seq` of shape (T, N, H).
+            If False, return only the final hidden state `h_T` of shape (N, H).
+            Defaults to True.
+        return_state : bool, optional
+            If True, also return the final hidden state `h_T` as an additional output.
+            Defaults to True.
         """
         super().__init__()  # ensure _parameters/_modules exist
         self.cell = RNNCell(input_size, hidden_size, bias=bias)
+        self.return_sequences = bool(return_sequences)
+        self.return_state = bool(return_state)
+        self.keras_compat = bool(keras_compat)
 
-    def forward(self, x: Tensor, h0: Optional[Tensor] = None) -> Tuple[Tensor, Tensor]:
+    def forward(self, x: Tensor, h0: Optional[Tensor] = None):
         """
         Run the RNN over a full sequence (time-major).
 
@@ -411,9 +445,21 @@ class RNN(Module):
 
         Returns
         -------
-        Tuple[Tensor, Tensor]
-            - h_seq: all hidden states, shape (T, N, H)
-            - h_T: final hidden state, shape (N, H)
+        Tensor | Tuple[Tensor, Tensor]
+            Output determined by `return_sequences` and `return_state`:
+
+            - return_sequences=False, return_state=False:
+                out : Tensor, final hidden state `h_T` of shape (N, H)
+
+            - return_sequences=True, return_state=False:
+                out : Tensor, full sequence `h_seq` of shape (T, N, H)
+
+            - return_sequences=False, return_state=True:
+                (out, h_T) : Tuple[Tensor, Tensor], both are `h_T` of shape (N, H)
+
+            - return_sequences=True, return_state=True:
+                (out, h_T) : Tuple[Tensor, Tensor], where out is `h_seq` of shape (T, N, H)
+                and h_T is final hidden state of shape (N, H)
         """
         x_np = x.to_numpy()
         T, N, D = x_np.shape
@@ -431,7 +477,24 @@ class RNN(Module):
         for t in range(T):
             x_t = x[t]  # uses __getitem__ (keeps grad path to x)
             h_prev = self.cell.forward(x_t, h_prev)
-            hs.append(h_prev)  # keep as Tensor
+            hs.append(h_prev)
 
-        h_seq = Tensor.stack(hs, axis=0)
-        return h_seq, h_prev
+        h_seq = Tensor.stack(hs, axis=0)  # (T, N, H)
+        h_T = h_prev  # (N, H)
+
+        # --- Legacy behavior (default): keep tests working ---
+        if not self.keras_compat:
+            if self.return_state:
+                # default legacy: (h_seq, h_T)
+                if self.return_sequences:
+                    return h_seq, h_T
+                # rarely used: (h_T,) isn't great; return h_T to keep sane behavior
+                return h_T
+            # return_state=False: historically some code might expect h_seq only
+            return h_seq if self.return_sequences else h_T
+
+        # --- Keras-like behavior (opt-in) ---
+        out = h_seq if self.return_sequences else h_T
+        if self.return_state:
+            return out, h_T
+        return out

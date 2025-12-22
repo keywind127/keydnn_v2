@@ -379,5 +379,98 @@ class TestTensorStack(TestCase):
             _ = Tensor.stack([a, b], axis=0)
 
 
+class TestTensorReshape(TestCase):
+    def _make_arange(self, shape, requires_grad=False):
+        t = Tensor(shape, Device("cpu"), requires_grad=requires_grad)
+        t.copy_from_numpy(np.arange(np.prod(shape), dtype=np.float32).reshape(shape))
+        return t
+
+    def test_reshape_forward_preserves_values(self):
+        x = self._make_arange((2, 3), requires_grad=False)
+        y = x.reshape((3, 2))
+
+        self.assertEqual(y.shape, (3, 2))
+        self.assertTrue(np.array_equal(y.to_numpy(), x.to_numpy().reshape(3, 2)))
+
+    def test_reshape_forward_supports_minus_one_inference(self):
+        x = self._make_arange((2, 3, 4), requires_grad=False)
+        y = x.reshape((-1, 4))
+
+        self.assertEqual(y.shape, (6, 4))
+        self.assertTrue(np.array_equal(y.to_numpy(), x.to_numpy().reshape(6, 4)))
+
+    def test_reshape_scalar_roundtrip(self):
+        x = Tensor((), Device("cpu"), requires_grad=False)
+        x.copy_from_numpy(np.array(3.14, dtype=np.float32))
+
+        y = x.reshape((1,))
+        self.assertEqual(y.shape, (1,))
+        self.assertTrue(np.allclose(y.to_numpy(), np.array([3.14], dtype=np.float32)))
+
+        z = y.reshape(())
+        self.assertEqual(z.shape, ())
+        self.assertAlmostEqual(float(np.asarray(z.to_numpy())), 3.14, places=6)
+
+    def test_reshape_requires_grad_propagates(self):
+        x = self._make_arange((2, 3), requires_grad=True)
+        y = x.reshape((6,))
+        self.assertTrue(y.requires_grad)
+
+        x2 = self._make_arange((2, 3), requires_grad=False)
+        y2 = x2.reshape((6,))
+        self.assertFalse(y2.requires_grad)
+
+    def test_reshape_backward_routes_gradient_to_original_shape(self):
+        x = self._make_arange((2, 3), requires_grad=True)
+        y = x.reshape((3, 2))
+        loss = y.sum()
+        loss.backward()
+
+        self.assertIsNotNone(x.grad)
+        self.assertEqual(x.grad.shape, x.shape)
+
+        # d(sum)/dx = 1 everywhere
+        expected = np.ones((2, 3), dtype=np.float32)
+        self.assertTrue(np.array_equal(x.grad.to_numpy(), expected))
+
+    def test_reshape_backward_chained_reshapes(self):
+        x = self._make_arange((2, 3), requires_grad=True)
+        y = x.reshape((6,)).reshape((3, 2))  # reshape chain
+        loss = y.sum()
+        loss.backward()
+
+        expected = np.ones((2, 3), dtype=np.float32)
+        self.assertTrue(np.array_equal(x.grad.to_numpy(), expected))
+
+    def test_reshape_after_getitem_keeps_grad_path(self):
+        # x[t] uses __getitem__ (scatter backward), then reshape should reshape grad for that slice.
+        x = Tensor((4, 2, 3), Device("cpu"), requires_grad=True)
+        x.copy_from_numpy(np.arange(24, dtype=np.float32).reshape(4, 2, 3))
+
+        t_pick = 2
+        x_t = x[t_pick]  # shape (2,3)
+        y = x_t.reshape((6,))  # shape (6,)
+        loss = y.sum()
+        loss.backward()
+
+        grad = x.grad.to_numpy()
+        expected = np.zeros((4, 2, 3), dtype=np.float32)
+        expected[t_pick, :, :] = 1.0
+
+        self.assertTrue(np.array_equal(grad, expected))
+
+    def test_reshape_invalid_shape_raises(self):
+        x = self._make_arange((2, 3), requires_grad=False)
+
+        # 2*3=6 cannot reshape to 5
+        with self.assertRaises(Exception):
+            _ = x.reshape((5,))
+
+    def test_reshape_on_cuda_raises(self):
+        x = Tensor((2, 3), Device("cuda:0"), requires_grad=False)
+        with self.assertRaises(Exception):
+            _ = x.reshape((3, 2))
+
+
 if __name__ == "__main__":
     unittest.main()

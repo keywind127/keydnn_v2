@@ -1279,3 +1279,62 @@ class Tensor(ITensor):
             out._set_ctx(ctx)
 
         return out
+
+    def reshape(self, new_shape: tuple[int, ...]) -> "Tensor":
+        """
+        Return a reshaped view of this tensor.
+
+        Notes
+        -----
+        - CPU-only.
+        - Forward uses NumPy reshape (view when possible).
+        - Backward reshapes grad_out back to the original tensor shape.
+        - No data copy in forward.
+        """
+        if not self.device.is_cpu():
+            self._raise_device_not_supported("reshape")
+
+        # NumPy reshape (may be a view)
+        src_np = self.to_numpy()
+        try:
+            reshaped_np = src_np.reshape(new_shape)
+        except Exception as e:
+            raise ValueError(f"Invalid reshape from {self.shape} to {new_shape}") from e
+
+        req = self.requires_grad
+        out = Tensor(
+            shape=reshaped_np.shape,
+            device=self.device,
+            requires_grad=req,
+            ctx=None,
+        )
+        out.copy_from_numpy(reshaped_np)
+
+        if req:
+
+            def backward_fn(grad_out: "Tensor"):
+                if not grad_out.device.is_cpu():
+                    raise RuntimeError("grad_out must be CPU in current implementation")
+
+                g_out_np = grad_out.to_numpy()
+
+                # Reshape gradient back to input shape
+                grad_parent_np = g_out_np.reshape(self.shape)
+
+                grad_parent = Tensor(
+                    shape=self.shape,
+                    device=self.device,
+                    requires_grad=False,
+                    ctx=None,
+                )
+                grad_parent.copy_from_numpy(grad_parent_np)
+
+                return (grad_parent,)
+
+            ctx = Context(
+                parents=(self,),
+                backward_fn=backward_fn,
+            )
+            out._set_ctx(ctx)
+
+        return out
