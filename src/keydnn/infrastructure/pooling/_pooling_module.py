@@ -25,16 +25,18 @@ Design notes
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Dict, Any
 
-from src.keydnn.infrastructure._module import Module
-from src.keydnn.infrastructure._tensor import Tensor, Context
-from src.keydnn.infrastructure.ops.pool2d_cpu import _pair
-from src.keydnn.infrastructure.pooling._pooling_function import (
+from .._module import Module
+from ..module._serialization_core import register_module
+from .._tensor import Tensor, Context
+from ..ops.pool2d_cpu import _pair
+from ..pooling._pooling_function import (
     MaxPool2dFn,
     AvgPool2dFn,
     GlobalAvgPool2dFn,
 )
+from ...domain.model._pool2d_mixin import Pool2dConfigMixin
 
 
 @dataclass(frozen=True)
@@ -65,7 +67,8 @@ class Pool2dMeta:
     padding: Tuple[int, int]
 
 
-class MaxPool2d(Module):
+@register_module()
+class MaxPool2d(Module, Pool2dConfigMixin):
     """
     2D max pooling module (NCHW).
 
@@ -191,7 +194,8 @@ class MaxPool2d(Module):
         return out
 
 
-class AvgPool2d(Module):
+@register_module()
+class AvgPool2d(Module, Pool2dConfigMixin):
     """
     2D average pooling module (NCHW).
 
@@ -315,6 +319,7 @@ class AvgPool2d(Module):
         return out
 
 
+@register_module()
 class GlobalAvgPool2d(Module):
     """
     Global average pooling module (NCHW).
@@ -362,3 +367,10 @@ class GlobalAvgPool2d(Module):
             out.requires_grad = True
             out._set_ctx(ctx)
         return out
+
+    def get_config(self) -> Dict[str, Any]:
+        return {}
+
+    @classmethod
+    def from_config(cls, cfg: Dict[str, Any]) -> "GlobalAvgPool2d":
+        return cls()

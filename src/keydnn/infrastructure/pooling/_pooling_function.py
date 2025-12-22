@@ -34,9 +34,9 @@ from __future__ import annotations
 from typing import Optional, Sequence, Tuple
 import numpy as np
 
-from src.keydnn.infrastructure._tensor import Tensor, Context
-from src.keydnn.infrastructure._function import Function
-from src.keydnn.infrastructure.ops.pool2d_cpu import (
+from .._tensor import Tensor, Context
+from .._function import Function
+from ..ops.pool2d_cpu import (
     _pair,
     maxpool2d_forward_cpu,
     maxpool2d_backward_cpu,
