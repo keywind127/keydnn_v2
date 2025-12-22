@@ -221,6 +221,59 @@ Native CPU kernels are built from source and are **not required** to use KeyDNN.
 
 ---
 
+## Model Serialization (JSON Checkpoints)
+
+KeyDNN supports saving and loading complete models (architecture + weights)
+to a single JSON file.
+
+### Format
+
+A checkpoint JSON has the form:
+
+```json
+{
+  "format": "keydnn.json.ckpt.v1",
+  "arch": { "...": "module config tree" },
+  "state": {
+    "layer_name.weight": { "b64": "...", "dtype": "<f4", "shape": [..], "order": "C" }
+  }
+}
+```
+- `arch` stores a recursive module configuration tree (`type`, `config`, `children`)
+- `state` stores trainable tensors serialized as base64-encoded raw bytes
+- Stateless modules (e.g., activations/pooling/flatten) serialize via config only
+
+### Usage
+
+```python=
+from keydnn.infrastructure._models import Sequential
+from keydnn.infrastructure._conv2d_module import Conv2d
+from keydnn.infrastructure._linear import Linear
+from keydnn.infrastructure.pooling._pooling_module import MaxPool2d
+from keydnn.infrastructure.nn._flatten_module import Flatten
+from keydnn.infrastructure._activations_module import ReLU, Softmax
+
+model = Sequential(
+    Conv2d(in_channels=1, out_channels=8, kernel_size=3, padding=1),
+    ReLU(),
+    MaxPool2d(kernel_size=2),
+    Flatten(),
+    Linear(in_features=8 * 14 * 14, out_features=10),
+    Softmax(axis=-1),
+)
+
+model.save_json("checkpoint.json")
+loaded = Sequential.load_json("checkpoint.json")
+```
+
+#### Supported layers for JSON save/load
+
+- Containers: `Sequential`
+- Trainable: `Linear`, `Conv2d`, `RNNCell`, `RNN`
+- Stateless: `Flatten`, pooling modules, activation modules
+
+---
+
 ### Tests
 
 The test suite is split into two categories:
@@ -235,6 +288,12 @@ The test suite is split into two categories:
 - Edge-case tests for pooling semantics (tie-breaking, padding traps)
 - Shape matrix tests for stride/padding correctness
 - Chain tests validating Conv2D → Pooling → Activation compatibility
+- JSON checkpointing tests (save/load):
+  - forward output equivalence before/after load
+  - parameter round-trip correctness for trainable layers
+  - config/hyperparameter preservation for stateless layers
+  - failure modes for missing keys / malformed configs
+  - registry coverage tests to prevent missing serialization hooks
 - End-to-end CNN chain tests (Conv2D → ReLU → MaxPool2D → Flatten → Linear → Softmax)
 - End-to-end CNN composition validated via chain tests (Conv2D → Pooling → Flatten → Dense)
 - Finite-difference gradient checks for Conv2D forward and backward
@@ -260,6 +319,7 @@ The test suite is split into two categories:
 - 2D pooling layers (`MaxPool2d`, `AvgPool2d`, `GlobalAvgPool2d`)
 - CPU Conv2D and Pool2D forward/backward kernels with reference and native implementations
 - Autograd-compatible pooling functions with correct gradient routing
+- Model checkpointing: JSON save/load (architecture config + base64-encoded weights)
 - Regression and classification loss functions (SSE, MSE, BCE, CCE)
 - Softmax activation module with numerically stable forward and efficient backward
 - Tensor reduction operations (`numel`, `sum`, `mean`)
@@ -294,6 +354,7 @@ The test suite is split into two categories:
   - Softmax
   - Tanh
   - LeakyReLU
+- JSON checkpoint support via get_config / from_config hooks (for supported modules)
 
 ---
 
@@ -303,13 +364,15 @@ The test suite is split into two categories:
 - CUDA-backed tensor operations (following validated CPU OpenMP parallelism)
 - CUDA acceleration for convolution layers
 - Performance optimizations and kernel fusion
-- Model serialization and checkpointing
+- Expand checkpoint compatibility (versioning, migration utilities, partial loading)
+- Add additional formats (optional): compressed JSON, msgpack, or safetensors-like layout
 - Advanced recurrent architectures:
   - LSTM
   - GRU
 - Fused recurrent kernels for improved performance
 - Sequence masking and variable-length sequence support
 - Bidirectional and multi-layer RNNs
+- Plan: “compression / chunking” or “binary format” (optional)
 
 ---
 
