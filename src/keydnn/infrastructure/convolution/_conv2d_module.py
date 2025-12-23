@@ -35,34 +35,22 @@ Example
 >>> y = conv(x)
 """
 
-import numpy as np
+from __future__ import annotations
+
 from typing import Optional, Tuple, Any, Dict
 
-from ...domain.device._device import Device
 from ..module._serialization_core import register_module
-from .._module import Module
+from ...domain.device._device import Device
+from ._conv2d_function import Conv2dFn
 from .._tensor import Tensor, Context
 from .._parameter import Parameter
+from .._module import Module
+
 from ..ops.conv2d_cpu import _pair
-from ._conv2d_function import Conv2dFn
-
-
-def _param_from_numpy(arr: np.ndarray, device=None) -> Parameter:
-    """
-    Create a trainable Parameter from a NumPy array.
-
-    Notes
-    -----
-    - If `device` is None, defaults to CPU.
-    - This function should be the single place where Conv2d parameter device
-      normalization happens, so callers can pass `device=None` safely.
-    """
-    if device is None:
-        device = Device("cpu")
-
-    p = Parameter(shape=arr.shape, device=device, requires_grad=True, ctx=None)
-    p.copy_from_numpy(arr.astype(np.float32, copy=False))
-    return p
+from ..ops._initializers_cpu import (
+    kaiming_normal_conv2d_weight,
+    param_zeros,
+)
 
 
 @register_module()
@@ -91,8 +79,10 @@ class Conv2d(Module):
         Whether to include a learnable bias term. Defaults to True.
     device : Device, optional
         Device on which parameters will be allocated.
-    dtype : np.dtype, optional
-        Data type used to initialize parameters. Defaults to np.float32.
+    dtype : Any, optional
+        Data type used to initialize parameters. Kept for backward compatibility.
+        This module does not interpret dtype directly; the CPU initializer
+        boundary normalizes it.
 
     Attributes
     ----------
@@ -124,7 +114,7 @@ class Conv2d(Module):
         padding: int | Tuple[int, int] = 0,
         bias: bool = True,
         device=None,
-        dtype=np.float32,
+        dtype: Any = None,
     ):
         """
         Initialize a Conv2d layer and its parameters.
@@ -142,17 +132,24 @@ class Conv2d(Module):
         self.stride = _pair(stride)
         self.padding = _pair(padding)
 
-        # He (Kaiming) initialization
-        fan_in = self.in_channels * k_h * k_w
-        scale = np.sqrt(2.0 / fan_in)
-        w_np = (
-            np.random.randn(out_channels, in_channels, k_h, k_w).astype(dtype)
-        ) * scale
-        self.weight: Parameter = _param_from_numpy(w_np, device=device)
+        # He (Kaiming) initialization is performed in the CPU initializer boundary.
+        self.weight: Parameter = kaiming_normal_conv2d_weight(
+            out_channels=self.out_channels,
+            in_channels=self.in_channels,
+            k_h=k_h,
+            k_w=k_w,
+            device=device,
+            dtype=dtype,
+        )
+        self.register_parameter("weight", self.weight)
 
         if bias:
-            b_np = np.zeros((out_channels,), dtype=dtype)
-            self.bias: Optional[Parameter] = _param_from_numpy(b_np, device=device)
+            self.bias: Optional[Parameter] = param_zeros(
+                (self.out_channels,),
+                device=device,
+                dtype=dtype,
+            )
+            self.register_parameter("bias", self.bias)
         else:
             self.bias = None
 
@@ -197,6 +194,7 @@ class Conv2d(Module):
             padding=self.padding,
         )
 
+        # Preserve autograd attachment semantics
         if Tensor._result_requires_grad(*parents):
             out.requires_grad = True
             out._set_ctx(ctx)
@@ -229,8 +227,8 @@ class Conv2d(Module):
             "bias": bool(self.bias is not None),
             # Serialize device via parameter (authoritative source)
             "device": str(self.weight.device),
-            # dtype is optional; safe default
-            "dtype": np.dtype(np.float32).str,
+            # Keep dtype JSON-safe without importing NumPy here
+            "dtype": "float32",
         }
 
     @classmethod
@@ -251,7 +249,6 @@ class Conv2d(Module):
         elif isinstance(device_cfg, str):
             device = Device(device_cfg)
         else:
-            # Already a Device-like object (rare in JSON path, but safe)
             device = device_cfg
 
         return cls(
@@ -262,5 +259,5 @@ class Conv2d(Module):
             padding=tuple(cfg["padding"]),
             bias=bool(cfg["bias"]),
             device=device,
-            dtype=np.dtype(cfg.get("dtype", np.float32)),
+            dtype=cfg.get("dtype", "float32"),
         )

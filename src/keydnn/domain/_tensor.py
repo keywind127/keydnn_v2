@@ -5,15 +5,20 @@ This module defines the domain-level interface for tensor-like objects using
 structural typing. The interface captures the minimal, backend-agnostic
 properties required for tensors to participate in computation graphs,
 modules, and optimization workflows.
+
+Notes
+-----
+Historically this protocol aimed to be minimal. In the current codebase, the
+infrastructure Tensor implementation exposes additional public operations
+(e.g., exp/max/broadcast_to/concat). This protocol mirrors that surface area
+so domain code can type against the full tensor API when desired.
 """
 
 from __future__ import annotations
 
 from typing import Any, Optional, Protocol, Sequence, Union, runtime_checkable
 
-from .device._device import Device
 from .device._device_protocol import DeviceLike
-
 
 Number = Union[int, float]
 
@@ -21,23 +26,24 @@ Number = Union[int, float]
 @runtime_checkable
 class ITensor(Protocol):
     """
-    Domain-level tensor interface.
+    Tensor interface.
 
     An `ITensor` represents a multi-dimensional array that participates in
     numerical computation and, optionally, automatic differentiation.
 
-    This interface defines the minimal contract required by the domain layer,
-    allowing concrete tensor implementations to vary across backends (e.g.,
-    NumPy, CUDA) without affecting higher-level logic.
+    This protocol uses structural typing (duck typing) so that different
+    concrete backends (e.g., NumPy, CUDA) can satisfy the same contract.
 
     Notes
     -----
-    - Structural typing (duck typing) is used instead of inheritance.
-    - This interface is intentionally minimal and may be extended by
-      infrastructure-level implementations.
-    - If autograd support is required by domain-level logic, the autograd-facing
-      hooks (e.g., `backward`, `grad`, `requires_grad`) should remain part of
-      the protocol; otherwise consider splitting them into a separate protocol.
+    - The protocol includes autograd-facing hooks (`backward`, `grad`,
+      `requires_grad`) because current domain/infrastructure code expects
+      them to exist.
+    - The protocol currently mirrors the public API of the NumPy-backed
+      `Tensor` implementation to keep typing consistent across layers.
+    - If you later want a stricter layering boundary, consider splitting this
+      into smaller protocols (e.g., `ITensorCore`, `ITensorAutograd`,
+      `ITensorOps`).
     """
 
     # ---------------------------------------------------------------------
@@ -47,9 +53,6 @@ class ITensor(Protocol):
     def shape(self) -> tuple[int, ...]:
         """
         Return the shape of the tensor.
-
-        The shape is represented as a tuple of integers, where each element
-        corresponds to the size of the tensor along a particular dimension.
 
         Returns
         -------
@@ -63,13 +66,10 @@ class ITensor(Protocol):
         """
         Return the device on which this tensor resides.
 
-        The device indicates where the tensor's underlying data is stored
-        and where computations involving this tensor should be executed.
-
         Returns
         -------
-        Device
-            The device associated with this tensor.
+        DeviceLike
+            The tensor's device placement descriptor.
         """
         ...
 
@@ -129,12 +129,15 @@ class ITensor(Protocol):
     # ---------------------------------------------------------------------
     def to_numpy(self) -> Any:
         """
-        Convert the tensor to a NumPy-compatible array (CPU-only in current backend).
+        Convert the tensor to a backend-native array object.
+
+        In the current NumPy backend, this returns `np.ndarray` and is only
+        available for CPU tensors.
 
         Returns
         -------
         Any
-            A backend-native array object. For a NumPy backend, this is `np.ndarray`.
+            Backend-native array (e.g., `np.ndarray`).
 
         Raises
         ------
@@ -145,14 +148,15 @@ class ITensor(Protocol):
 
     def copy_from_numpy(self, arr: Any) -> None:
         """
-        Copy data from a NumPy-compatible array into this tensor (CPU-only in current backend).
+        Copy data from a backend-native array object into this tensor.
 
-        The input array must match this tensor's shape.
+        In the current NumPy backend, the input is expected to be array-like
+        and shape-compatible.
 
         Parameters
         ----------
         arr : Any
-            Source array. For a NumPy backend, this is expected to be `np.ndarray`.
+            Source array-like object.
 
         Raises
         ------
@@ -183,7 +187,7 @@ class ITensor(Protocol):
 
     def fill(self, value: float) -> None:
         """
-        Fill the tensor with a scalar value (backend/device dependent).
+        Fill the tensor with a scalar value.
 
         Parameters
         ----------
@@ -281,39 +285,77 @@ class ITensor(Protocol):
         -------
         ITensor
             The stacked tensor.
+        """
+        ...
+
+    @staticmethod
+    def concat(tensors: Sequence["ITensor"], axis: int = 0) -> "ITensor":
+        """
+        Concatenate a sequence of tensors along an existing axis.
+
+        Parameters
+        ----------
+        tensors : Sequence[ITensor]
+            Input tensors to concatenate. Must be non-empty and compatible.
+        axis : int, optional
+            Axis along which to concatenate. Supports negative axes.
+
+        Returns
+        -------
+        ITensor
+            Concatenated tensor.
 
         Notes
         -----
-        Concrete implementations define device constraints and gradient routing rules.
+        If autograd is enabled, gradients are split along `axis` and routed back
+        to the corresponding parents.
+        """
+        ...
+
+    def broadcast_to(self, shape: tuple[int, ...]) -> "ITensor":
+        """
+        Broadcast this tensor to a target shape by explicit expansion.
+
+        Parameters
+        ----------
+        shape : tuple[int, ...]
+            Target shape to broadcast to.
+
+        Returns
+        -------
+        ITensor
+            Broadcasted tensor.
+
+        Notes
+        -----
+        This is an explicit broadcasting primitive used to keep binary ops strict
+        (i.e., no implicit broadcasting in add/mul/etc.). If autograd is enabled,
+        the backward pass reduces gradients by summing over broadcasted dimensions.
         """
         ...
 
     # ---------------------------------------------------------------------
     # Reductions and elementwise transforms
     # ---------------------------------------------------------------------
-    def sum(self, axis: Optional[int] = None) -> "ITensor":
+    def sum(self, axis: Optional[int] = None, keepdims: bool = False) -> "ITensor":
         """
         Sum elements of the tensor.
 
         Parameters
         ----------
-        axis : Optional[int]
-            - None: sum all elements -> scalar
-            - int: sum along the given axis -> tensor with that axis removed
+        axis : Optional[int], optional
+            Axis along which to sum. If None, sums all elements into a scalar.
+        keepdims : bool, optional
+            If True, retains reduced dimensions with size 1.
 
         Returns
         -------
         ITensor
-            If axis is None, returns a scalar tensor.
-            If axis is an int, returns a tensor with that axis removed.
+            Reduced tensor.
 
         Notes
         -----
-        If autograd is enabled, the backward rule is conceptually:
-        - axis is None:
-            d(sum(x))/dx = 1
-        - axis is int:
-            `grad_out` is broadcast back to input shape along the reduced axis.
+        If autograd is enabled, gradients are broadcast back to the input shape.
         """
         ...
 
@@ -349,6 +391,45 @@ class ITensor(Protocol):
         """
         ...
 
+    def exp(self) -> "ITensor":
+        """
+        Compute the elementwise exponential of the tensor.
+
+        Returns
+        -------
+        ITensor
+            A tensor of the same shape as `self` containing `exp(self)` elementwise.
+
+        Notes
+        -----
+        If autograd is enabled, the backward rule is conceptually:
+            d(exp(x))/dx = exp(x)
+        """
+        ...
+
+    def max(self, axis: int = -1, keepdims: bool = False) -> "ITensor":
+        """
+        Compute the maximum along an axis.
+
+        Parameters
+        ----------
+        axis : int, optional
+            Axis along which to compute the max. Supports negative axes.
+        keepdims : bool, optional
+            If True, retains reduced dimensions with size 1.
+
+        Returns
+        -------
+        ITensor
+            Tensor of max values.
+
+        Notes
+        -----
+        Many implementations route gradients to positions equal to the max.
+        Handling of ties is backend-defined (often a mask-based split).
+        """
+        ...
+
     # ---------------------------------------------------------------------
     # Matrix ops (2D) and transpose (2D)
     # ---------------------------------------------------------------------
@@ -368,8 +449,6 @@ class ITensor(Protocol):
 
         Notes
         -----
-        Concrete implementations may restrict supported devices/backends.
-
         If autograd is enabled and out = A @ B, then conceptually:
         - dL/dA = dL/dout @ B^T
         - dL/dB = A^T @ dL/dout
@@ -393,8 +472,6 @@ class ITensor(Protocol):
 
         Notes
         -----
-        Concrete implementations may restrict supported devices/backends.
-
         If autograd is enabled and out = A^T, then conceptually:
             dL/dA = (dL/dout)^T
         """
@@ -440,16 +517,6 @@ class ITensor(Protocol):
     def __radd__(self, other: Number) -> "ITensor":
         """
         Right-hand addition to support `scalar + tensor`.
-
-        Parameters
-        ----------
-        other : Number
-            Left-hand scalar operand.
-
-        Returns
-        -------
-        ITensor
-            Result of `other + self`.
         """
         ...
 
@@ -472,16 +539,6 @@ class ITensor(Protocol):
     def __rsub__(self, other: Number) -> "ITensor":
         """
         Right-hand subtraction to support `scalar - tensor`.
-
-        Parameters
-        ----------
-        other : Number
-            Left-hand scalar operand.
-
-        Returns
-        -------
-        ITensor
-            Result of `other - self`.
         """
         ...
 
@@ -504,16 +561,6 @@ class ITensor(Protocol):
     def __rmul__(self, other: Number) -> "ITensor":
         """
         Right-hand multiplication to support `scalar * tensor`.
-
-        Parameters
-        ----------
-        other : Number
-            Left-hand scalar operand.
-
-        Returns
-        -------
-        ITensor
-            Result of `other * self`.
         """
         ...
 
@@ -536,27 +583,12 @@ class ITensor(Protocol):
     def __rtruediv__(self, other: Number) -> "ITensor":
         """
         Right-hand division to support `scalar / tensor`.
-
-        Parameters
-        ----------
-        other : Number
-            Left-hand scalar operand.
-
-        Returns
-        -------
-        ITensor
-            Result of `other / self`.
         """
         ...
 
     def __gt__(self, other: Union["ITensor", Number]) -> "ITensor":
         """
         Elementwise greater-than comparison.
-
-        Parameters
-        ----------
-        other : Union[ITensor, Number]
-            Right-hand operand.
 
         Returns
         -------
@@ -603,11 +635,6 @@ class ITensor(Protocol):
         ----------
         ctx : Optional[Any]
             Backend-defined autograd context object. Use None to detach.
-
-        Notes
-        -----
-        This is an internal hook intended for use by differentiable operations
-        and the autograd engine.
         """
         ...
 
@@ -619,10 +646,6 @@ class ITensor(Protocol):
         -------
         Optional[Any]
             The backend-defined autograd context object, or None if absent.
-
-        Notes
-        -----
-        This is an internal hook intended for use by the autograd engine.
         """
         ...
 
@@ -634,11 +657,6 @@ class ITensor(Protocol):
         ----------
         g : ITensor
             Gradient to accumulate.
-
-        Notes
-        -----
-        This method is intended to be used by the autograd engine when writing
-        final accumulated gradients into leaf tensors.
         """
         ...
 
@@ -675,40 +693,5 @@ class ITensor(Protocol):
         -------
         ITensor
             The elementwise sum, not connected to the autograd graph.
-        """
-        ...
-
-    @staticmethod
-    def concat(tensors: Sequence["ITensor"], axis: int = 0) -> "ITensor":
-        """
-        Concatenate a sequence of tensors along an existing axis (CPU-only).
-
-        This is the differentiable counterpart of `np.concatenate`.
-
-        Requirements
-        ------------
-        - `tensors` must be non-empty
-        - all tensors must be CPU tensors
-        - all tensors must share the same device
-        - shapes must match on all dimensions except `axis`
-
-        Parameters
-        ----------
-        tensors : Sequence[ITensor]
-            Input tensors to concatenate.
-        axis : int, optional
-            Axis along which to concatenate. Supports negative axes.
-            Defaults to 0.
-
-        Returns
-        -------
-        ITensor
-            Concatenated tensor.
-
-        Notes
-        -----
-        Backward rule:
-        - Split `grad_out` along `axis` into slices matching each input's size
-          along that axis, and route each slice back to the corresponding parent.
         """
         ...

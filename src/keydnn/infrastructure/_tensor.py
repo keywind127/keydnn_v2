@@ -781,51 +781,6 @@ class Tensor(ITensor):
             n *= d
         return n
 
-    def sum(self) -> "Tensor":
-        """
-        Sum all elements of the tensor into a scalar.
-
-        Returns
-        -------
-        Tensor
-            A scalar tensor containing the sum of all elements.
-
-        Notes
-        -----
-        Backward rule:
-            d(sum(x))/dx = 1
-        """
-        if not self._device.is_cpu():
-            self._raise_device_not_supported("sum")
-
-        # Compute forward value
-        value = float(np.sum(self._data))
-        out = Tensor(shape=(), device=self.device, requires_grad=self.requires_grad)
-        out.copy_from_numpy(np.array(value, dtype=np.float32))
-
-        if self.requires_grad:
-
-            def backward_fn(grad_out: "Tensor"):
-                # grad_out is scalar; expand to input shape
-                grad = Tensor(
-                    shape=self.shape,
-                    device=self.device,
-                    requires_grad=False,
-                )
-                grad.copy_from_numpy(
-                    np.ones(self.shape, dtype=np.float32)
-                    * float(np.asarray(grad_out.to_numpy()))
-                )
-                return (grad,)
-
-            ctx = Context(
-                parents=(self,),
-                backward_fn=backward_fn,
-            )
-            out._set_ctx(ctx)
-
-        return out
-
     def mean(self) -> "Tensor":
         """
         Compute the mean of all elements in the tensor.
@@ -915,25 +870,6 @@ class Tensor(ITensor):
             out._set_ctx(ctx)
 
         return out
-
-    def copy_from(self, other: "Tensor") -> None:
-        """
-        Copy data from another tensor into this tensor (in-place).
-
-        Notes
-        -----
-        This method encapsulates backend-specific copying (CPU->CPU, CUDA->CUDA).
-        """
-        if self.device != other.device:
-            self._raise_device_not_supported("copy_from_cross_device")  # for now
-        if self.shape != other.shape:
-            raise ValueError(f"Shape mismatch: {self.shape} vs {other.shape}")
-
-        if self.device.is_cpu():
-            self._data[...] = other.to_numpy()
-            return
-
-        self._raise_device_not_supported("copy_from")
 
     # ----------------------------
     # Autograd engine (graph traversal)
@@ -1644,121 +1580,6 @@ class Tensor(ITensor):
         Convenience property for 2D transpose.
         """
         return self.transpose()
-
-    # ----------------------------
-    # Sum with axis
-    # ----------------------------
-    def sum(self, axis: Optional[int] = None) -> "Tensor":
-        """
-        Sum elements of the tensor.
-
-        Parameters
-        ----------
-        axis : Optional[int]
-            - None: sum all elements -> scalar (existing behavior)
-            - int: sum along the given axis -> tensor with that axis removed
-
-        Notes
-        -----
-        Backward rule:
-        - axis is None:
-            d(sum(x))/dx = 1
-        - axis is int:
-            grad_out is broadcast back to input shape along the reduced axis
-        """
-        if not self.device.is_cpu():
-            self._raise_device_not_supported("sum")
-
-        import numpy as np  # local import ok inside Tensor
-
-        # axis=None: keep your original behavior, but with the new signature
-        if axis is None:
-            value = float(np.sum(self._data))
-            out = Tensor(shape=(), device=self.device, requires_grad=self.requires_grad)
-            out.copy_from_numpy(np.array(value, dtype=np.float32))
-
-            if self.requires_grad:
-
-                def backward_fn(grad_out: "Tensor"):
-                    grad = Tensor(
-                        shape=self.shape,
-                        device=self.device,
-                        requires_grad=False,
-                    )
-                    grad.copy_from_numpy(
-                        np.ones(self.shape, dtype=np.float32)
-                        * float(np.asarray(grad_out.to_numpy()))
-                    )
-                    return (grad,)
-
-                ctx = Context(
-                    parents=(self,),
-                    backward_fn=backward_fn,
-                )
-                out._set_ctx(ctx)
-
-            return out
-
-        # axis=int: reduce along that axis
-        if not isinstance(axis, int):
-            raise TypeError(f"sum(axis=...) expects int or None, got {type(axis)!r}")
-
-        ndim = len(self.shape)
-        if ndim == 0:
-            raise ValueError("sum(axis=...) is not defined for scalar tensors")
-
-        # normalize negative axis
-        if axis < 0:
-            axis = axis + ndim
-        if axis < 0 or axis >= ndim:
-            raise ValueError(f"axis {axis} out of bounds for tensor with ndim {ndim}")
-
-        out_np = np.sum(self._data, axis=axis).astype(np.float32, copy=False)
-        out_shape = out_np.shape  # already reduced
-
-        out = Tensor(
-            shape=out_shape,
-            device=self.device,
-            requires_grad=self.requires_grad,
-            ctx=None,
-        )
-        out.copy_from_numpy(out_np)
-
-        if self.requires_grad:
-
-            def backward_fn(grad_out: "Tensor"):
-                if not grad_out.device.is_cpu():
-                    raise RuntimeError("grad_out must be CPU in current implementation")
-                if grad_out.shape != out_shape:
-                    raise ValueError(
-                        f"grad_out shape mismatch: expected {out_shape}, got {grad_out.shape}"
-                    )
-
-                g = grad_out.to_numpy()
-
-                # Re-insert the reduced axis as size-1, then broadcast to input shape.
-                g_exp = np.expand_dims(g, axis=axis)
-                g_broadcast = np.broadcast_to(g_exp, self.shape).astype(
-                    np.float32, copy=False
-                )
-
-                grad_parent = Tensor(
-                    shape=self.shape,
-                    device=self.device,
-                    requires_grad=False,
-                    ctx=None,
-                )
-                grad_parent.copy_from_numpy(g_broadcast)
-                return (grad_parent,)
-
-            ctx = Context(
-                parents=(self,),
-                backward_fn=backward_fn,
-            )
-            ctx.saved_meta["sum_axis"] = axis
-            out._set_ctx(ctx)
-
-        return out
 
     def copy_from(self, other: "Tensor") -> None:
         """
