@@ -1352,3 +1352,142 @@ class Tensor(ITensor):
             out._set_ctx(ctx)
 
         return out
+
+    @staticmethod
+    def concat(tensors: Sequence["Tensor"], axis: int = 0) -> "Tensor":
+        """
+        Concatenate a sequence of tensors along an existing axis (CPU-only).
+
+        This is the differentiable counterpart of `np.concatenate`.
+
+        Requirements
+        ------------
+        - `tensors` must be non-empty
+        - all tensors must be CPU tensors
+        - all tensors must share the same device
+        - shapes must match on all dimensions except `axis`
+
+        Parameters
+        ----------
+        tensors : Sequence[Tensor]
+            Input tensors to concatenate.
+        axis : int, optional
+            Axis along which to concatenate. Supports negative axes.
+            Defaults to 0.
+
+        Returns
+        -------
+        Tensor
+            Concatenated tensor.
+
+        Notes
+        -----
+        Backward rule:
+        - Split `grad_out` along `axis` into slices matching each input's size
+          along that axis, and route each slice back to the corresponding parent.
+        """
+        if len(tensors) == 0:
+            raise ValueError("Tensor.concat() requires a non-empty sequence")
+
+        first = tensors[0]
+        if not first.device.is_cpu():
+            first._raise_device_not_supported("concat")
+
+        dev = first.device
+        ref_shape = first.shape
+
+        # Validate ndim and normalize axis
+        ndim = len(ref_shape)
+        if ndim == 0:
+            raise ValueError("Tensor.concat() does not support scalar tensors (ndim=0)")
+
+        if axis < 0:
+            axis = axis + ndim
+        if axis < 0 or axis >= ndim:
+            raise ValueError(
+                f"axis {axis} out of bounds for concat with input ndim {ndim}"
+            )
+
+        # Validate devices and shapes (all dims except axis must match)
+        sizes_along_axis: list[int] = []
+        for i, t in enumerate(tensors):
+            if not t.device.is_cpu():
+                t._raise_device_not_supported("concat")
+            if str(t.device) != str(dev):
+                raise ValueError(
+                    f"Tensor.concat() requires all tensors on the same device; "
+                    f"tensors[0] is {dev!r} but tensors[{i}] is {t.device!r}"
+                )
+            if len(t.shape) != ndim:
+                raise ValueError(
+                    f"Tensor.concat() requires all tensors to have same ndim; "
+                    f"expected {ndim}, got {len(t.shape)} at index {i}"
+                )
+
+            for d in range(ndim):
+                if d == axis:
+                    continue
+                if t.shape[d] != ref_shape[d]:
+                    raise ValueError(
+                        "Tensor.concat() shape mismatch on non-concat dimension: "
+                        f"dim={d}, expected {ref_shape[d]}, got {t.shape[d]} at index {i}"
+                    )
+
+            sizes_along_axis.append(t.shape[axis])
+
+        # Forward
+        arrs = [t.to_numpy() for t in tensors]
+        out_np = np.concatenate(arrs, axis=axis).astype(np.float32, copy=False)
+
+        req = any(t.requires_grad for t in tensors)
+        out = Tensor(shape=out_np.shape, device=dev, requires_grad=req, ctx=None)
+        out.copy_from_numpy(out_np)
+
+        # Backward
+        if req:
+            # Build slice boundaries along axis
+            # e.g. sizes [2,3,1] -> offsets [0,2,5,6]
+            offsets = [0]
+            for s in sizes_along_axis:
+                offsets.append(offsets[-1] + int(s))
+
+            def backward_fn(grad_out: "Tensor"):
+                if not grad_out.device.is_cpu():
+                    raise RuntimeError("grad_out must be CPU in current implementation")
+
+                g = grad_out.to_numpy()
+                grads: list[Optional["Tensor"]] = []
+
+                for i, t in enumerate(tensors):
+                    if not t.requires_grad:
+                        grads.append(None)
+                        continue
+
+                    start = offsets[i]
+                    end = offsets[i + 1]
+
+                    # Build slicing object for all dims
+                    slicer = [slice(None)] * ndim
+                    slicer[axis] = slice(start, end)
+
+                    gi_np = g[tuple(slicer)].astype(np.float32, copy=False)
+
+                    gi = Tensor(
+                        shape=t.shape, device=dev, requires_grad=False, ctx=None
+                    )
+                    gi.copy_from_numpy(gi_np)
+                    grads.append(gi)
+
+                return tuple(grads)
+
+            ctx = Context(
+                parents=tuple(tensors),
+                backward_fn=backward_fn,
+            )
+            # Optional debug metadata
+            ctx.saved_meta["concat_axis"] = axis
+            ctx.saved_meta["concat_sizes"] = sizes_along_axis
+
+            out._set_ctx(ctx)
+
+        return out

@@ -609,3 +609,38 @@ class ITensor(Protocol):
             The elementwise sum, not connected to the autograd graph.
         """
         ...
+
+    @staticmethod
+    def concat(tensors: Sequence["ITensor"], axis: int = 0) -> "ITensor":
+        """
+        Concatenate a sequence of tensors along an existing axis (CPU-only).
+
+        This is the differentiable counterpart of `np.concatenate`.
+
+        Requirements
+        ------------
+        - `tensors` must be non-empty
+        - all tensors must be CPU tensors
+        - all tensors must share the same device
+        - shapes must match on all dimensions except `axis`
+
+        Parameters
+        ----------
+        tensors : Sequence[ITensor]
+            Input tensors to concatenate.
+        axis : int, optional
+            Axis along which to concatenate. Supports negative axes.
+            Defaults to 0.
+
+        Returns
+        -------
+        ITensor
+            Concatenated tensor.
+
+        Notes
+        -----
+        Backward rule:
+        - Split `grad_out` along `axis` into slices matching each input's size
+          along that axis, and route each slice back to the corresponding parent.
+        """
+        ...
