@@ -36,12 +36,15 @@ Domain code is backend-agnostic and contains no NumPy or CUDA logic.
 Provides concrete implementations of domain contracts:
 
 - `Tensor` — NumPy-backed CPU tensor (with CUDA placeholder)
+  - Tensor concatenation (`Tensor.concat`) with autograd support
 - `Context` — backward propagation context for dynamic computation graphs
 - `Parameter` — trainable tensor with gradient semantics
 - `Module` — base class for neural network layers
 - `Model` — top-level network abstraction with inference utilities
 - `Sequential` — ordered container for composing multi-layer models
 - `Linear` — fully connected (dense) layer implementation
+- `BatchNorm1d` — feature-wise batch normalization for dense / sequence models
+- `BatchNorm2d` — channel-wise batch normalization for convolutional models
 - `Flatten` — reshape layer bridging spatial outputs to dense layers
 - `Conv2d` — 2D convolution layer (NCHW)
   - Naive NumPy reference implementation (forward + backward)
@@ -55,6 +58,7 @@ Provides concrete implementations of domain contracts:
 - `RNN` — sequence-level RNN module
   - Executes `RNNCell` over time-major sequences
   - Supports Backpropagation Through Time (BPTT) via chained autograd contexts
+- Supports Keras-style bidirectional execution via `Bidirectional`
 - Pooling layers:
   - `MaxPool2d`
   - `AvgPool2d`
@@ -110,6 +114,7 @@ For compute-intensive CPU kernels (Conv2D, Pool2D), KeyDNN optionally enables
 **OpenMP-based intra-kernel parallelism** in the native C++ backend.
 
 Design rationale:
+
 - Python multiprocessing introduces high overhead from process creation,
   inter-process communication, and tensor marshaling.
 - Native kernels invoked via `ctypes` already execute outside the Python GIL.
@@ -117,6 +122,7 @@ Design rationale:
   without crossing the Python/C boundary.
 
 Behavioral characteristics:
+
 - OpenMP provides additional speedups (up to ~3×) for sufficiently large
   Conv2D workloads.
 - For small tensor shapes, thread scheduling overhead may dominate and
@@ -168,18 +174,19 @@ Three implementations were compared:
 3. Native C++ kernels compiled as shared libraries and loaded via `ctypes`
 
 Benchmarks measure **forward Conv2D only**, isolating kernel performance by:
+
 - Pre-padding inputs outside the timed region
 - Preallocating outputs outside the timed region
 - Loading the native shared library once per run
 
 Representative results on CPU (float32, bias enabled):
 
-| Case        | Shape (N,C_in,H,W → C_out) | Speedup vs Python | Speedup vs NumPy |
-|-------------|-----------------------------|------------------:|-----------------:|
-| mnist-ish  | 1×8×28×28 → 8               | ~370×             | ~42×             |
-| tiny       | 1×8×16×16 → 8               | ~460×             | ~59×             |
-| small      | 1×16×32×32 → 16             | ~340×             | ~21×             |
-| downsample | 1×8×28×28 → 8 (stride=2)    | ~480×             | ~56×             |
+| Case       | Shape (N,C_in,H,W → C_out) | Speedup vs Python | Speedup vs NumPy |
+| ---------- | -------------------------- | ----------------: | ---------------: |
+| mnist-ish  | 1×8×28×28 → 8              |             ~370× |             ~42× |
+| tiny       | 1×8×16×16 → 8              |             ~460× |             ~59× |
+| small      | 1×16×32×32 → 16            |             ~340× |             ~21× |
+| downsample | 1×8×28×28 → 8 (stride=2)   |             ~480× |             ~56× |
 
 These results highlight three distinct performance regimes:
 
@@ -239,6 +246,7 @@ A checkpoint JSON has the form:
   }
 }
 ```
+
 - `arch` stores a recursive module configuration tree (`type`, `config`, `children`)
 - `state` stores trainable tensors serialized as base64-encoded raw bytes
 - Stateless modules (e.g., activations/pooling/flatten) serialize via config only
@@ -247,11 +255,11 @@ A checkpoint JSON has the form:
 
 ```python=
 from keydnn.infrastructure._models import Sequential
-from keydnn.infrastructure._conv2d_module import Conv2d
+from keydnn.infrastructure.convolution._conv2d_module import Conv2d
 from keydnn.infrastructure._linear import Linear
 from keydnn.infrastructure.pooling._pooling_module import MaxPool2d
-from keydnn.infrastructure.nn._flatten_module import Flatten
-from keydnn.infrastructure._activations_module import ReLU, Softmax
+from keydnn.infrastructure._flatten_module import Flatten
+from keydnn.infrastructure._activations import ReLU, Softmax
 
 model = Sequential(
     Conv2d(in_channels=1, out_channels=8, kernel_size=3, padding=1),
@@ -317,12 +325,16 @@ The test suite is split into two categories:
 - `Flatten` layer for reshaping (N, C, H, W) → (N, C*H*W)
 - 2D convolution layer (`Conv2d`) with configurable kernel size, stride, padding, and optional bias
 - 2D pooling layers (`MaxPool2d`, `AvgPool2d`, `GlobalAvgPool2d`)
+- Batch normalization layers:
+  - BatchNorm1d (dense / sequence features)
+  - BatchNorm2d (convolutional channels)
 - CPU Conv2D and Pool2D forward/backward kernels with reference and native implementations
 - Autograd-compatible pooling functions with correct gradient routing
 - Model checkpointing: JSON save/load (architecture config + base64-encoded weights)
 - Regression and classification loss functions (SSE, MSE, BCE, CCE)
 - Softmax activation module with numerically stable forward and efficient backward
 - Tensor reduction operations (`numel`, `sum`, `mean`)
+- Tensor concatenation (`Tensor.concat`) with backward gradient splitting
 - Dynamic computation graph metadata via `Context`
 - Domain-level interfaces using `Protocol` (duck typing)
 - Comprehensive unit tests for contracts and behavior
@@ -333,17 +345,21 @@ The test suite is split into two categories:
   - `RNNCell` with tanh nonlinearity
   - `RNN` sequence module with Backpropagation Through Time (BPTT)
   - Gradient propagation through time via dynamic autograd graphs
+  - Keras-style bidirectional execution via `Bidirectional(RNN)`
 
 ---
 
 ### Supported Layers
 
 - Linear (fully connected)
+- BatchNorm1d
+- BatchNorm2d
 - Flatten
 - Conv2d (2D convolution, NCHW)
 - Recurrent:
   - RNNCell (vanilla tanh)
   - RNN (sequence module)
+  - Bidirectional (wrapper for RNN modules)
 - Pooling layers:
   - MaxPool2d
   - AvgPool2d
@@ -371,7 +387,7 @@ The test suite is split into two categories:
   - GRU
 - Fused recurrent kernels for improved performance
 - Sequence masking and variable-length sequence support
-- Bidirectional and multi-layer RNNs
+- Multi-layer (stacked) RNNs
 - Plan: “compression / chunking” or “binary format” (optional)
 
 ---
