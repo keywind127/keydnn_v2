@@ -40,11 +40,11 @@ from typing import Optional, Any, Dict
 
 import numpy as np
 
-from ..domain.device._device import Device
-from ..infrastructure._tensor import Tensor, Context
-from ..infrastructure._parameter import Parameter
-from ..infrastructure._module import Module
-from ..infrastructure.module._serialization_core import register_module
+from ...domain.device._device import Device
+from .._tensor import Tensor, Context
+from .._parameter import Parameter
+from .._module import Module
+from ..module._serialization_core import register_module
 
 
 def tensor_from_numpy(

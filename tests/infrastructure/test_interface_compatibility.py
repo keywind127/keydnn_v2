@@ -7,7 +7,7 @@ def _make_cpu_device():
     Try to construct a CPU Device without assuming one specific API.
     Edit this if your Device API is strict.
     """
-    from src.keydnn.domain.device._device import Device  # adjust import if needed
+    from src.keydnn.domain.device._device import Device
 
     if hasattr(Device, "cpu") and callable(getattr(Device, "cpu")):
         return Device.cpu()
@@ -49,7 +49,7 @@ def _construct(cls, **candidates):
 
 
 def _make_tensor():
-    from keydnn.infrastructure._tensor import Tensor  # adjust path if needed
+    from src.keydnn.infrastructure._tensor import Tensor
 
     device = _make_cpu_device()
 
@@ -74,7 +74,7 @@ def _make_tensor():
 
 
 def _make_parameter():
-    from keydnn.infrastructure._parameter import Parameter
+    from src.keydnn.infrastructure._parameter import Parameter
 
     device = _make_cpu_device()
 
@@ -100,7 +100,7 @@ def _make_parameter():
 
 class TestITensorProtocolCompatibility(unittest.TestCase):
     def test_tensor_is_compatible_with_itensor_protocol(self):
-        from keydnn.domain._tensor import ITensor  # adjust import if needed
+        from src.keydnn.domain._tensor import ITensor
 
         t = _make_tensor()
 
@@ -118,7 +118,7 @@ class TestITensorProtocolCompatibility(unittest.TestCase):
 
 class TestIParameterProtocolCompatibility(unittest.TestCase):
     def test_parameter_is_compatible_with_iparameter_protocol(self):
-        from keydnn.domain._parameter import IParameter  # adjust import if needed
+        from src.keydnn.domain._parameter import IParameter
 
         p = _make_parameter()
 
@@ -144,8 +144,8 @@ class TestIParameterProtocolCompatibility(unittest.TestCase):
         If you defined `class IParameter(ITensor, Protocol)`,
         then Parameter should satisfy ITensor as well.
         """
-        from keydnn.domain._tensor import ITensor  # adjust import if needed
-        from keydnn.domain._parameter import IParameter  # adjust import if needed
+        from src.keydnn.domain._tensor import ITensor
+        from src.keydnn.domain._parameter import IParameter
 
         p = _make_parameter()
 

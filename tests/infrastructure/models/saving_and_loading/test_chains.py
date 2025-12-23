@@ -10,7 +10,7 @@ import numpy as np
 from src.keydnn.infrastructure._tensor import Tensor
 from src.keydnn.infrastructure._models import Sequential
 from src.keydnn.infrastructure._linear import Linear
-from src.keydnn.infrastructure._conv2d_module import Conv2d
+from src.keydnn.infrastructure.convolution._conv2d_module import Conv2d
 from src.keydnn.infrastructure.pooling._pooling_module import (
     MaxPool2d,
 )
@@ -22,7 +22,7 @@ from src.keydnn.infrastructure._activations import (
     Sigmoid,
     Softmax,
 )
-from src.keydnn.infrastructure._rnn_module import RNN
+from src.keydnn.infrastructure.recurrent._rnn_module import RNN
 
 
 def _tensor_from_numpy(arr: np.ndarray, *, device) -> Tensor:

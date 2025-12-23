@@ -26,7 +26,7 @@ if sys.platform.startswith("win") and MINGW_BIN:
 
 # Import your ctypes wrapper.
 # Adjust the import path if your module name differs.
-from keydnn.infrastructure.native.python.maxpool2d_ctypes import (
+from src.keydnn.infrastructure.native.python.maxpool2d_ctypes import (
     load_keydnn_native,
     maxpool2d_forward_f32_ctypes,
 )

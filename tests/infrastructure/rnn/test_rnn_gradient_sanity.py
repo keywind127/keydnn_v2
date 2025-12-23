@@ -3,7 +3,7 @@ import numpy as np
 
 from src.keydnn.domain.device._device import Device
 from src.keydnn.infrastructure._tensor import Tensor
-from src.keydnn.infrastructure._rnn_module import RNN
+from src.keydnn.infrastructure.recurrent._rnn_module import RNN
 
 
 def _tensor_from_numpy(arr: np.ndarray, device: Device, requires_grad: bool) -> Tensor:

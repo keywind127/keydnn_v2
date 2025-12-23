@@ -9,7 +9,7 @@ import numpy as np
 
 from src.keydnn.infrastructure._tensor import Tensor
 from src.keydnn.infrastructure._models import Sequential
-from src.keydnn.infrastructure._rnn_module import RNN
+from src.keydnn.infrastructure.recurrent._rnn_module import RNN
 
 
 class TestModelSaveLoadRNNJSON(unittest.TestCase):

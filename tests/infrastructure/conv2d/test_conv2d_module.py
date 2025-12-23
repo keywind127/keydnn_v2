@@ -3,7 +3,7 @@ import numpy as np
 
 from src.keydnn.domain.device._device import Device
 from src.keydnn.infrastructure._tensor import Tensor
-from src.keydnn.infrastructure._conv2d_module import Conv2d
+from src.keydnn.infrastructure.convolution._conv2d_module import Conv2d
 from src.keydnn.infrastructure.ops.conv2d_cpu import (
     conv2d_forward_cpu,
     conv2d_backward_cpu,

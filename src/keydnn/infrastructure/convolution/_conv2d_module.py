@@ -38,13 +38,13 @@ Example
 import numpy as np
 from typing import Optional, Tuple, Any, Dict
 
-from ..domain.device._device import Device
-from .module._serialization_core import register_module
-from ._module import Module
-from ._tensor import Tensor, Context
-from ._parameter import Parameter
-from .ops.conv2d_cpu import _pair
-from ._function import Conv2dFn
+from ...domain.device._device import Device
+from ..module._serialization_core import register_module
+from .._module import Module
+from .._tensor import Tensor, Context
+from .._parameter import Parameter
+from ..ops.conv2d_cpu import _pair
+from .._function import Conv2dFn
 
 
 def _param_from_numpy(arr: np.ndarray, device=None) -> Parameter:
