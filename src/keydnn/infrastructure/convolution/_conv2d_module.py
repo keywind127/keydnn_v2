@@ -44,7 +44,7 @@ from .._module import Module
 from .._tensor import Tensor, Context
 from .._parameter import Parameter
 from ..ops.conv2d_cpu import _pair
-from .._function import Conv2dFn
+from ._conv2d_function import Conv2dFn
 
 
 def _param_from_numpy(arr: np.ndarray, device=None) -> Parameter:

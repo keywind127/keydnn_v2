@@ -1,105 +1,113 @@
 """
 Core activation and elementwise function implementations.
 
-This module contains infrastructure-level implementations of common
-differentiable functions used in neural networks, expressed in a
-function-style autograd API:
+This module provides infrastructure-level implementations of common
+differentiable elementwise functions used in neural networks, exposed through a
+function-style autograd API.
 
-- Each differentiable operation is implemented as a `Function` subclass
-  with `forward(ctx, ...)` and `backward(ctx, grad_out)` static methods.
-- A `Context` instance is used to store tensors and metadata required for
-  the backward computation (`save_for_backward`, `saved_meta`).
-- Public functional wrappers (e.g., `exp`) are responsible for:
-  - validating inputs,
-  - constructing the `Context` and wiring `backward_fn`,
-  - invoking `forward`,
-  - attaching the context to outputs when gradients are required.
+Architecture
+------------
+Each differentiable operation is implemented as a `Function` subclass with:
+
+- `forward(ctx, ...)`:
+    Performs the forward computation and saves any tensors/metadata needed for
+    backpropagation via `ctx.save_for_backward(...)` and `ctx.saved_meta`.
+
+- `backward(ctx, grad_out)`:
+    Computes gradients w.r.t. the forward inputs using the saved tensors and
+    metadata, returning gradients in the same input order.
+
+Public functional wrappers
+--------------------------
+Where present (e.g., `exp`), a public wrapper is responsible for:
+
+- validating inputs and normalizing arguments,
+- constructing a `Context` with `(parents=..., backward_fn=...)`,
+- invoking the corresponding `Function.forward`,
+- attaching the context to the output tensor when gradients are required.
+
+Backend and semantic constraints
+--------------------------------
+- Current implementations target the CPU backend.
+- Most operations are expressed via existing `Tensor` primitives (e.g., `+`, `-`,
+  `*`, `/`, comparisons), allowing autograd graphs to be composed from smaller
+  building blocks.
+- Some ops (e.g., `SoftmaxFn`) rely on axis-aware tensor utilities and may
+  require CPU-only pathways in the current backend.
 
 Notes
 -----
-- All computations are CPU-only for now and rely on NumPy via `Tensor.to_numpy()`
-  and `Tensor.copy_from_numpy()`.
-- These functions assume elementwise semantics and do not implement broadcasting
-  beyond what the underlying tensor ops support.
-- Some functions (e.g., `SigmoidFn.forward`) are composed from other primitive
-  ops (e.g., `exp`) to reuse autograd wiring.
+- Unless otherwise stated, these functions are elementwise and rely on the
+  underlying `Tensor` operation semantics for shape compatibility.
+- Several operations cache forward outputs (e.g., `exp(x)`, `sigmoid(x)`) to
+  compute gradients efficiently in the backward pass.
 """
 
-from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Tuple
 
-import numpy as np
-
-from ..domain._function import Function
 from ._tensor import Tensor, Context
+from ..domain._function import Function
 
 
 class ExpFn(Function):
     """
-    Elementwise exponential function.
+    Elementwise exponential primitive.
 
-    Implements:
+    Computes the elementwise exponential:
 
         out = exp(x)
 
-    Backward:
+    and defines the derivative:
 
-        d(exp(x))/dx = exp(x) = out
+        d(out)/dx = exp(x) = out
 
-    Notes
-    -----
-    This implementation saves the output tensor in the context to reuse it in
-    the backward pass.
+    Implementation details
+    ----------------------
+    The forward pass saves the output tensor `out` in the context so the backward
+    pass can reuse it directly without recomputing `exp(x)`.
     """
 
     @staticmethod
     def forward(ctx, x: Tensor) -> Tensor:
         """
-        Compute the elementwise exponential of `x`.
+        Compute `exp(x)` elementwise and save the output for backward.
 
         Parameters
         ----------
         ctx : Context
-            Autograd context used to save tensors for backward.
+            Autograd context used to store tensors required by the backward pass.
         x : Tensor
             Input tensor.
 
         Returns
         -------
         Tensor
-            Output tensor containing `exp(x)` elementwise.
+            Tensor containing `exp(x)` elementwise.
         """
-        # Create output tensor
-        out = Tensor(
-            shape=x.shape,
-            device=x.device,
-            requires_grad=x.requires_grad,
-        )
-
-        # Forward computation (CPU only for now)
-        out.copy_from_numpy(np.exp(x.to_numpy()))
-
-        # Save for backward
+        out = x.exp()
         ctx.save_for_backward(out)
-
         return out
 
     @staticmethod
     def backward(ctx, grad_out: Tensor) -> Tensor:
         """
-        Compute the gradient of the loss with respect to `x`.
+        Compute the gradient with respect to the input of `exp`.
+
+        Given out = exp(x), the gradient is:
+
+            dL/dx = dL/dout * out
 
         Parameters
         ----------
         ctx : Context
-            Context containing saved tensors from the forward pass.
+            Context populated by `forward`, containing the saved output tensor.
         grad_out : Tensor
-            Gradient of the loss with respect to the output of exp(x).
+            Upstream gradient dL/dout.
 
         Returns
         -------
         Tensor
-            Gradient of the loss with respect to the input `x`.
+            Gradient dL/dx.
         """
         (out,) = ctx.saved_tensors
         return grad_out * out
@@ -107,11 +115,13 @@ class ExpFn(Function):
 
 def exp(x: Tensor) -> Tensor:
     """
-    Compute the elementwise exponential of a tensor with autograd support.
+    Functional wrapper for elementwise exponential with autograd wiring.
 
-    This is the public functional wrapper around `ExpFn`. It constructs the
-    `Context`, wires the backward function, invokes `ExpFn.forward`, and
-    attaches the context to the output when gradients are required.
+    This wrapper:
+    - validates the input type,
+    - constructs a `Context` with the correct parent set,
+    - executes `ExpFn.forward`,
+    - attaches the context to the output if gradients are required.
 
     Parameters
     ----------
@@ -121,7 +131,7 @@ def exp(x: Tensor) -> Tensor:
     Returns
     -------
     Tensor
-        Output tensor `exp(x)`.
+        Tensor containing `exp(x)` elementwise.
 
     Raises
     ------
@@ -146,38 +156,39 @@ def exp(x: Tensor) -> Tensor:
 
 class SigmoidFn(Function):
     """
-    Sigmoid activation function.
+    Sigmoid activation primitive.
 
-    Implements:
+    Computes the sigmoid function:
 
         sigmoid(x) = 1 / (1 + exp(-x))
 
-    Backward:
+    with derivative:
 
         d(sigmoid)/dx = sigmoid(x) * (1 - sigmoid(x))
 
-    Notes
-    -----
-    The forward pass is expressed using existing primitive ops (`exp`, negation,
-    addition, division) so the computation graph is built compositionally.
+    Implementation details
+    ----------------------
+    The forward pass is expressed using existing primitives (negation, addition,
+    division) and the `exp` wrapper. The output is saved for an efficient
+    backward computation.
     """
 
     @staticmethod
     def forward(ctx, x: Tensor) -> Tensor:
         """
-        Compute the sigmoid activation.
+        Compute `sigmoid(x)` elementwise and save the output for backward.
 
         Parameters
         ----------
         ctx : Context
-            Autograd context used to save tensors for backward.
+            Autograd context used to store tensors required by the backward pass.
         x : Tensor
             Input tensor.
 
         Returns
         -------
         Tensor
-            Output tensor containing sigmoid(x) elementwise.
+            Tensor containing `sigmoid(x)` elementwise.
         """
         out = 1 / (1 + exp(-x))
         ctx.save_for_backward(out)
@@ -186,19 +197,23 @@ class SigmoidFn(Function):
     @staticmethod
     def backward(ctx, grad_out: Tensor) -> Tensor:
         """
-        Compute the gradient of the loss with respect to the input `x`.
+        Compute the gradient with respect to the input of `sigmoid`.
+
+        Given y = sigmoid(x), the gradient is:
+
+            dL/dx = dL/dy * y * (1 - y)
 
         Parameters
         ----------
         ctx : Context
-            Context containing saved tensors from the forward pass.
+            Context populated by `forward`, containing the saved output tensor.
         grad_out : Tensor
-            Gradient of the loss with respect to the sigmoid output.
+            Upstream gradient dL/dy.
 
         Returns
         -------
         Tensor
-            Gradient of the loss with respect to the input `x`.
+            Gradient dL/dx.
         """
         (out,) = ctx.saved_tensors
         return grad_out * out * (1 - out)
@@ -206,37 +221,39 @@ class SigmoidFn(Function):
 
 class ReLUFn(Function):
     """
-    ReLU activation function.
+    ReLU (Rectified Linear Unit) activation primitive.
 
-    Implements:
+    Computes:
 
         relu(x) = max(0, x)
 
-    Backward:
+    with derivative:
 
-        d(relu)/dx = 1 if x > 0 else 0
+        d(relu)/dx = 1  if x > 0
+                   = 0  otherwise
 
-    Notes
-    -----
-    The forward pass uses a mask computed via `x > 0`, saved for backward.
+    Implementation details
+    ----------------------
+    The forward pass constructs a mask via `(x > 0)`, saves it in the context,
+    and multiplies the input by the mask.
     """
 
     @staticmethod
     def forward(ctx, x: Tensor) -> Tensor:
         """
-        Compute the ReLU activation.
+        Compute `relu(x)` elementwise and save the activation mask for backward.
 
         Parameters
         ----------
         ctx : Context
-            Autograd context used to save tensors for backward.
+            Autograd context used to store tensors required by the backward pass.
         x : Tensor
             Input tensor.
 
         Returns
         -------
         Tensor
-            Output tensor containing relu(x) elementwise.
+            Tensor containing `relu(x)` elementwise.
         """
         mask = x > 0
         ctx.save_for_backward(mask)
@@ -245,19 +262,19 @@ class ReLUFn(Function):
     @staticmethod
     def backward(ctx, grad_out: Tensor) -> Tensor:
         """
-        Compute the gradient of the loss with respect to the input `x`.
+        Compute the gradient with respect to the input of `relu`.
 
         Parameters
         ----------
         ctx : Context
-            Context containing saved tensors from the forward pass.
+            Context populated by `forward`, containing the saved mask tensor.
         grad_out : Tensor
-            Gradient of the loss with respect to the ReLU output.
+            Upstream gradient dL/d(relu(x)).
 
         Returns
         -------
         Tensor
-            Gradient of the loss with respect to the input `x`.
+            Gradient dL/dx.
         """
         (mask,) = ctx.saved_tensors
         return grad_out * mask
@@ -265,49 +282,46 @@ class ReLUFn(Function):
 
 class LeakyReLUFn(Function):
     """
-    Leaky ReLU activation function.
+    Leaky ReLU activation primitive.
 
-    Implements:
+    Computes:
 
-        f(x) = x               if x > 0
-             = alpha * x       otherwise
+        f(x) = x          if x > 0
+             = alpha * x  otherwise
 
-    Parameters
-    ----------
-    alpha : float, optional
-        Slope for negative inputs. Defaults to 0.01.
+    where `alpha` is a small positive slope for negative inputs.
 
-    Notes
-    -----
-    The forward pass saves both positive and negative masks, and stores `alpha`
-    in `ctx.saved_meta` for use during backward.
+    Implementation details
+    ----------------------
+    - The forward pass builds `pos_mask` and `neg_mask` using comparisons and
+      saves both masks in the context.
+    - The scalar `alpha` is stored in `ctx.saved_meta` for use during backward.
     """
 
     @staticmethod
     def forward(ctx, x: Tensor, alpha: float = 0.01) -> Tensor:
         """
-        Compute the Leaky ReLU activation.
+        Compute `leaky_relu(x)` elementwise and save masks/alpha for backward.
 
         Parameters
         ----------
         ctx : Context
-            Autograd context used to save tensors for backward.
+            Autograd context used to store tensors/metadata required by backward.
         x : Tensor
             Input tensor.
         alpha : float, optional
-            Negative slope coefficient.
+            Negative slope coefficient. Defaults to 0.01.
 
         Returns
         -------
         Tensor
-            Output tensor containing leaky_relu(x) elementwise.
+            Tensor containing `leaky_relu(x)` elementwise.
         """
         pos_mask = x > 0
         neg_mask = 1 - pos_mask
 
         out = x * pos_mask + x * neg_mask * alpha
 
-        # Save masks and alpha for backward
         ctx.save_for_backward(pos_mask, neg_mask)
         ctx.saved_meta["alpha"] = alpha
 
@@ -316,19 +330,19 @@ class LeakyReLUFn(Function):
     @staticmethod
     def backward(ctx, grad_out: Tensor) -> Tensor:
         """
-        Compute the gradient of the loss with respect to the input `x`.
+        Compute the gradient with respect to the input of `leaky_relu`.
 
         Parameters
         ----------
         ctx : Context
-            Context containing saved tensors and metadata from the forward pass.
+            Context populated by `forward`, containing masks and `alpha`.
         grad_out : Tensor
-            Gradient of the loss with respect to the LeakyReLU output.
+            Upstream gradient dL/d(leaky_relu(x)).
 
         Returns
         -------
         Tensor
-            Gradient of the loss with respect to the input `x`.
+            Gradient dL/dx.
         """
         pos_mask, neg_mask = ctx.saved_tensors
         alpha = ctx.saved_meta["alpha"]
@@ -339,65 +353,61 @@ class LeakyReLUFn(Function):
 
 class TanhFn(Function):
     """
-    Hyperbolic tangent activation function.
+    Hyperbolic tangent activation primitive.
 
-    Implements tanh using an exp-based identity:
+    Computes tanh using an exp-based identity:
 
         tanh(x) = (exp(x) - exp(-x)) / (exp(x) + exp(-x))
 
-    Backward:
+    with derivative:
 
         d(tanh)/dx = 1 - tanh(x)^2
 
-    Notes
-    -----
-    The forward pass saves the output `tanh(x)` for an efficient backward
-    computation.
+    Implementation details
+    ----------------------
+    The forward pass saves `tanh(x)` to compute the backward pass efficiently
+    without re-evaluating exponentials.
     """
 
     @staticmethod
     def forward(ctx, x: Tensor) -> Tensor:
         """
-        Compute the hyperbolic tangent activation.
+        Compute `tanh(x)` elementwise and save the output for backward.
 
         Parameters
         ----------
         ctx : Context
-            Autograd context used to save tensors for backward.
+            Autograd context used to store tensors required by the backward pass.
         x : Tensor
             Input tensor.
 
         Returns
         -------
         Tensor
-            Output tensor containing tanh(x) elementwise.
+            Tensor containing `tanh(x)` elementwise.
         """
-        # Using exp-based definition (since exp is already implemented)
         e_pos = exp(x)
         e_neg = exp(-x)
-
         out = (e_pos - e_neg) / (e_pos + e_neg)
-
-        # Save output for backward: d/dx = 1 - tanh(x)^2
         ctx.save_for_backward(out)
         return out
 
     @staticmethod
     def backward(ctx, grad_out: Tensor) -> Tensor:
         """
-        Compute the gradient of the loss with respect to the input `x`.
+        Compute the gradient with respect to the input of `tanh`.
 
         Parameters
         ----------
         ctx : Context
-            Context containing saved tensors from the forward pass.
+            Context populated by `forward`, containing the saved tanh output.
         grad_out : Tensor
-            Gradient of the loss with respect to the tanh output.
+            Upstream gradient dL/d(tanh(x)).
 
         Returns
         -------
         Tensor
-            Gradient of the loss with respect to the input `x`.
+            Gradient dL/dx.
         """
         (out,) = ctx.saved_tensors
         return grad_out * (1 - out * out)
@@ -405,357 +415,118 @@ class TanhFn(Function):
 
 class SoftmaxFn(Function):
     """
-    Softmax operation over a specified tensor dimension.
+    Softmax operation over a specified tensor axis.
 
-    This function computes the softmax of the input tensor along the given
-    axis, producing a probability distribution that sums to 1 along that
-    dimension.
+    Softmax maps arbitrary real-valued scores to a probability distribution that
+    sums to 1 along the selected axis.
+
+    Numerically stable formulation
+    ------------------------------
+    The implementation subtracts the per-axis maximum before exponentiation:
+
+        y = exp(x - max(x)) / sum(exp(x - max(x)))
+
+    Backward
+    --------
+    The backward pass is implemented as a Jacobian–vector product (JVP) without
+    explicitly materializing the full softmax Jacobian:
+
+        dx = y * (g - sum(g * y, axis))
 
     Notes
     -----
-    - The implementation uses a numerically stable formulation by subtracting
-      the maximum value along the softmax axis prior to exponentiation.
-    - This operation is currently implemented using NumPy to avoid requiring
-      axis-aware reduction operations in the `Tensor` API.
-    - The backward pass is implemented as a Jacobian–vector product (JVP),
-      avoiding explicit construction of the full softmax Jacobian.
+    - This implementation assumes axis-aware reduction and alignment helpers exist
+      on `Tensor` (e.g., `max(..., keepdims=True)`, `sum(..., keepdims=True)`,
+      `broadcast_to(...)`).
+    - The operation is currently restricted to CPU, consistent with the current
+      backend capabilities.
     """
 
     @staticmethod
     def forward(ctx: Context, x: Tensor, *, axis: int = -1) -> Tensor:
         """
-        Compute the softmax of the input tensor along a specified axis.
+        Compute softmax over the specified axis.
 
         Parameters
         ----------
         ctx : Context
-            Autograd context used to store intermediate values for backward.
+            Autograd context used to save tensors/metadata required by backward.
         x : Tensor
-            Input tensor whose values will be normalized using softmax.
+            Input tensor.
         axis : int, optional
-            Dimension along which softmax is computed. Defaults to the last
-            dimension (`-1`).
+            Axis along which to compute softmax. Negative values are interpreted
+            relative to the last dimension. Defaults to -1.
 
         Returns
         -------
         Tensor
-            A tensor of the same shape as `x`, where values along the specified
-            axis form a probability distribution (sum to 1).
+            Tensor of the same shape as `x`, containing softmax probabilities
+            along the specified axis.
 
         Raises
         ------
         ValueError
-            If the specified axis is invalid for the input tensor shape.
+            If the axis is out of bounds for the input tensor.
         RuntimeError
-            If called on a non-CPU tensor.
-
-        Notes
-        -----
-        - The returned tensor does not require gradients by default; gradient
-          tracking is handled by the enclosing `Module` wrapper when needed.
-        - The output tensor is saved in the context for use during the backward
-          pass.
+            If the operation is not supported on the tensor's device.
         """
         if not x.device.is_cpu():
             x._raise_device_not_supported("softmax")
 
-        x_np = x.to_numpy()
-
         # Normalize axis
-        axis_ = axis if axis >= 0 else x_np.ndim + axis
-        if axis_ < 0 or axis_ >= x_np.ndim:
-            raise ValueError(f"Invalid softmax axis {axis} for ndim={x_np.ndim}")
+        ndim = len(x.shape)
+        axis_ = axis if axis >= 0 else ndim + axis
+        if axis_ < 0 or axis_ >= ndim:
+            raise ValueError(f"Invalid softmax axis {axis} for ndim={ndim}")
 
-        # Stable softmax
-        x_shift = x_np - np.max(x_np, axis=axis_, keepdims=True)
-        exp_x = np.exp(x_shift)
-        y_np = exp_x / np.sum(exp_x, axis=axis_, keepdims=True)
+        # Stable softmax via Tensor ops:
+        # x_shift = x - max(x, axis, keepdims=True)
+        m = x.max(axis=axis_, keepdims=True)  # shape has 1 on axis_
+        m_full = m.broadcast_to(x.shape)  # explicit alignment
+        x_shift = x - m_full
 
-        y = Tensor(shape=y_np.shape, device=x.device, requires_grad=False)
-        y.copy_from_numpy(y_np.astype(np.float32))
+        exp_x = exp(x_shift)
+        denom = exp_x.sum(axis=axis_, keepdims=True)
+        denom_full = denom.broadcast_to(x.shape)
 
-        # Save output for backward (most convenient)
+        y = exp_x / denom_full
+
         ctx.save_for_backward(y)
         ctx.saved_meta["axis"] = axis_
-
         return y
 
     @staticmethod
     def backward(ctx: Context, grad_out: Tensor) -> Tuple[Tensor]:
         """
-        Compute gradients of the softmax operation with respect to the input.
+        Compute the gradient with respect to the input of softmax.
 
         Parameters
         ----------
         ctx : Context
-            Autograd context populated during the forward pass.
+            Context populated by `forward`, containing the saved softmax output
+            and the normalized axis.
         grad_out : Tensor
-            Gradient of the loss with respect to the softmax output. Must have
-            the same shape as the forward output.
+            Upstream gradient dL/dy, with the same shape as the softmax output.
 
         Returns
         -------
-        tuple[Tensor]
-            A single-element tuple containing the gradient with respect to the
-            input tensor `x`.
+        Tuple[Tensor]
+            A single-element tuple `(dx,)` where `dx` is the gradient dL/dx.
 
         Notes
         -----
-        The gradient is computed using the softmax Jacobian–vector product:
+        This uses the identity:
 
-            dx = y * (g - sum(g * y, axis))
+            dx = y * (g - sum(g*y, axis))
 
-        where:
-        - `y` is the softmax output,
-        - `g` is the upstream gradient (`grad_out`).
-
-        This formulation avoids explicit construction of the full Jacobian and
-        ensures that gradients along the softmax axis sum to zero.
+        which is a Jacobian–vector product and avoids explicit Jacobian
+        construction.
         """
         (y,) = ctx.saved_tensors
         axis = int(ctx.saved_meta["axis"])
 
-        if not grad_out.device.is_cpu():
-            grad_out._raise_device_not_supported("softmax_backward")
-
-        y_np = y.to_numpy()
-        g_np = grad_out.to_numpy()
-
-        # Jacobian-vector product for softmax:
         # dx = y * (g - sum(g*y, axis))
-        dot = np.sum(g_np * y_np, axis=axis, keepdims=True)
-        dx_np = y_np * (g_np - dot)
-
-        dx = Tensor(shape=dx_np.shape, device=y.device, requires_grad=False)
-        dx.copy_from_numpy(dx_np.astype(np.float32))
+        gy = grad_out * y
+        dot = gy.sum(axis=axis, keepdims=True).broadcast_to(y.shape)
+        dx = y * (grad_out - dot)
         return (dx,)
-
-
-from typing import Sequence
-
-import numpy as np
-
-from ._tensor import Tensor, Context
-from ..infrastructure.ops.conv2d_cpu import (
-    conv2d_forward_cpu,
-    conv2d_backward_cpu,
-    _pair,
-)
-
-
-def _tensor_from_numpy(
-    arr: np.ndarray, *, device, requires_grad: bool = False
-) -> Tensor:
-    """
-    Construct a KeyDNN `Tensor` from a NumPy array.
-
-    This helper allocates a new `Tensor` on the specified device, copies the
-    provided NumPy array into its underlying storage, and returns the tensor.
-
-    Parameters
-    ----------
-    arr : np.ndarray
-        Source NumPy array. The created tensor will have the same shape as
-        `arr`. The array is converted to float32 during the copy step (via
-        `Tensor.copy_from_numpy`).
-    device : Device
-        Target device placement for the created tensor.
-    requires_grad : bool, optional
-        Whether the returned tensor should participate in autograd and
-        accumulate gradients. Defaults to False.
-
-    Returns
-    -------
-    Tensor
-        A newly allocated tensor containing a copy of `arr`.
-
-    Notes
-    -----
-    - This helper is intended for internal use in operator implementations,
-      where NumPy kernels produce intermediate arrays that must be wrapped as
-      framework tensors.
-    - The returned tensor is created with `ctx=None` (i.e., no history). If it
-      needs to participate in autograd, the caller should attach a `Context`
-      to the operation output tensor after constructing it.
-    """
-    t = Tensor(shape=arr.shape, device=device, requires_grad=requires_grad, ctx=None)
-    t.copy_from_numpy(arr)
-    return t
-
-
-class Conv2dFn(Function):
-    """
-    Autograd-enabled 2D convolution primitive (NCHW).
-
-    `Conv2dFn` implements the differentiable Conv2D operator used by the higher-
-    level `Conv2d` module. It performs the numerical computation via CPU
-    reference kernels and integrates with KeyDNN's autograd engine by:
-
-    - Saving required tensors into `ctx.saved_tensors` during the forward pass
-      (input, weights, optional bias).
-    - Saving non-tensor hyperparameters into `ctx.saved_meta` (stride, padding,
-      bias presence).
-    - Returning gradients aligned exactly with the `Context.parents` ordering.
-
-    Tensor layout
-    -------------
-    - Input `x`:      (N, C_in, H, W)
-    - Weight `w`:     (C_out, C_in, K_h, K_w)
-    - Bias `b`:       (C_out,) or None
-    - Output `y`:     (N, C_out, H_out, W_out)
-
-    Current limitations
-    -------------------
-    - CPU-only (NumPy) backend.
-    - Dense convolution only (no dilation, groups, or other advanced options).
-    - Assumes NCHW layout and integer stride/padding.
-    """
-
-    @staticmethod
-    def forward(
-        ctx: Context,
-        x: Tensor,
-        weight: Tensor,
-        bias: Optional[Tensor],
-        *,
-        stride: int | Tuple[int, int] = 1,
-        padding: int | Tuple[int, int] = 0,
-    ) -> Tensor:
-        """
-        Compute the forward pass of a 2D convolution and record context for backward.
-
-        Parameters
-        ----------
-        ctx : Context
-            Autograd context used to save tensors and metadata required for the
-            backward computation.
-        x : Tensor
-            Input tensor of shape (N, C_in, H, W).
-        weight : Tensor
-            Convolution kernel weights of shape (C_out, C_in, K_h, K_w).
-        bias : Optional[Tensor]
-            Optional bias tensor of shape (C_out,). If None, no bias is added.
-        stride : int or tuple[int, int], optional
-            Convolution stride. If an integer is provided, the same stride is
-            used for both height and width. Defaults to 1.
-        padding : int or tuple[int, int], optional
-            Zero-padding applied to the input. If an integer is provided,
-            symmetric padding is applied to both height and width. Defaults to 0.
-
-        Returns
-        -------
-        Tensor
-            Output tensor of shape (N, C_out, H_out, W_out).
-
-        Notes
-        -----
-        - Tensors needed for backward are saved via `ctx.save_for_backward`.
-          Since `saved_tensors` must contain only tensors, `bias` is saved only
-          when it is not None.
-        - Hyperparameters are stored in `ctx.saved_meta`:
-            - 'has_bias': bool
-            - 'stride': tuple[int, int]
-            - 'padding': tuple[int, int]
-        - The output tensor's `requires_grad` is set based on whether any
-          inputs (x, weight, bias) require gradients. The caller (typically the
-          module) is responsible for attaching the `Context` to the output.
-        """
-        stride2 = _pair(stride)
-        padding2 = _pair(padding)
-
-        x_np = x.to_numpy()
-        w_np = weight.to_numpy()
-        b_np = None if bias is None else bias.to_numpy()
-
-        y_np = conv2d_forward_cpu(x_np, w_np, b_np, stride=stride2, padding=padding2)
-
-        # Save tensors + meta for backward
-        ctx.save_for_backward(x, weight)
-        if bias is not None:
-            ctx.save_for_backward(bias)
-
-        ctx.saved_meta["has_bias"] = bias is not None
-        ctx.saved_meta["stride"] = stride2
-        ctx.saved_meta["padding"] = padding2
-
-        out_req = Tensor._result_requires_grad(x, weight) or (
-            bias is not None and bias.requires_grad
-        )
-        out = _tensor_from_numpy(y_np, device=x.device, requires_grad=out_req)
-        return out
-
-    @staticmethod
-    def backward(ctx: Context, grad_out: Tensor) -> Sequence[Optional[Tensor]]:
-        """
-        Compute gradients for Conv2D with respect to inputs, weights, and bias.
-
-        Parameters
-        ----------
-        ctx : Context
-            Autograd context populated during the forward pass. Must contain:
-            - saved_tensors: [x, weight] + [bias if has_bias]
-            - saved_meta: keys 'has_bias', 'stride', 'padding'
-        grad_out : Tensor
-            Gradient with respect to the Conv2D output, of shape
-            (N, C_out, H_out, W_out).
-
-        Returns
-        -------
-        Sequence[Optional[Tensor]]
-            Gradients aligned with `ctx.parents` order. Entries may be None
-            for parents that do not require gradients.
-
-            - If bias was used: (grad_x, grad_w, grad_b)
-            - If bias was not used: (grad_x, grad_w)
-
-        Notes
-        -----
-        - This method must return exactly one gradient entry per parent in the
-          same order as `ctx.parents`. Your autograd engine validates this.
-        - The returned gradient tensors do not track gradients themselves
-          (`requires_grad=False`) because they are used only for accumulation
-          into leaf tensors/parameters.
-        - This implementation respects `requires_grad` on each parent and
-          returns None when a parent does not require gradients to reduce
-          unnecessary allocations.
-        """
-        has_bias: bool = bool(ctx.saved_meta["has_bias"])
-        stride: Tuple[int, int] = ctx.saved_meta["stride"]
-        padding: Tuple[int, int] = ctx.saved_meta["padding"]
-
-        # Unpack saved tensors
-        # saved_tensors = [x, weight] + [bias if has_bias]
-        x = ctx.saved_tensors[0]
-        weight = ctx.saved_tensors[1]
-        bias = ctx.saved_tensors[2] if has_bias else None
-
-        x_np = x.to_numpy()
-        w_np = weight.to_numpy()
-        b_np = None if bias is None else bias.to_numpy()
-        go_np = grad_out.to_numpy()
-
-        grad_x_np, grad_w_np, grad_b_np = conv2d_backward_cpu(
-            x_np, w_np, b_np, go_np, stride=stride, padding=padding
-        )
-
-        # Respect requires_grad flags: if a parent doesn't require grad, return None
-        grad_x = None
-        if x.requires_grad:
-            grad_x = _tensor_from_numpy(grad_x_np, device=x.device, requires_grad=False)
-
-        grad_w = None
-        if weight.requires_grad:
-            grad_w = _tensor_from_numpy(
-                grad_w_np, device=weight.device, requires_grad=False
-            )
-
-        grad_b = None
-        if bias is not None and bias.requires_grad:
-            assert grad_b_np is not None
-            grad_b = _tensor_from_numpy(
-                grad_b_np, device=bias.device, requires_grad=False
-            )
-
-        if has_bias:
-            return (grad_x, grad_w, grad_b)
-        return (grad_x, grad_w)

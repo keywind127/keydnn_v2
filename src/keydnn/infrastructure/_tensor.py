@@ -1804,3 +1804,248 @@ class Tensor(ITensor):
             raise NotImplementedError("CUDA copy_from not yet implemented")
 
         raise RuntimeError(f"Unsupported device type: {self.device}")
+
+    def exp(self) -> "Tensor":
+        """
+        Compute the elementwise exponential of the tensor.
+
+        Returns
+        -------
+        Tensor
+            A tensor of the same shape as `self` with exp applied elementwise.
+
+        Notes
+        -----
+        Backward rule:
+            d(exp(x))/dx = exp(x)
+        """
+        if not self.device.is_cpu():
+            self._raise_device_not_supported("exp")
+
+        out = Tensor(
+            shape=self.shape, device=self.device, requires_grad=self.requires_grad
+        )
+        out.copy_from_numpy(np.exp(self.to_numpy()).astype(np.float32, copy=False))
+
+        if self.requires_grad:
+            # Save output to reuse in backward
+            ctx = Context(
+                parents=(self,),
+                backward_fn=lambda grad_out: (grad_out * out,),
+            )
+            out._set_ctx(ctx)
+
+        return out
+
+    def sum(self, axis: Optional[int] = None, keepdims: bool = False) -> "Tensor":
+        """
+        Sum elements of the tensor.
+
+        Parameters
+        ----------
+        axis : Optional[int], optional
+            Axis along which to sum. If None, sums all elements into a scalar.
+        keepdims : bool, optional
+            If True, retains reduced dimensions with size 1.
+
+        Returns
+        -------
+        Tensor
+            Reduced tensor.
+
+        Notes
+        -----
+        Backward rule:
+            Gradient is broadcast back to input shape.
+        """
+        if not self.device.is_cpu():
+            self._raise_device_not_supported("sum")
+
+        x_np = self.to_numpy()
+        if axis is None:
+            value = np.sum(x_np)
+            out_shape = () if not keepdims else tuple(1 for _ in self.shape)
+        else:
+            if not isinstance(axis, int):
+                raise TypeError("axis must be int or None")
+            ndim = x_np.ndim
+            axis_ = axis if axis >= 0 else ndim + axis
+            if axis_ < 0 or axis_ >= ndim:
+                raise ValueError(f"axis {axis} out of bounds for ndim {ndim}")
+            value = np.sum(x_np, axis=axis_, keepdims=keepdims)
+            out_shape = value.shape
+
+        out = Tensor(
+            shape=out_shape, device=self.device, requires_grad=self.requires_grad
+        )
+        out.copy_from_numpy(np.asarray(value, dtype=np.float32))
+
+        if self.requires_grad:
+
+            def backward_fn(grad_out: "Tensor"):
+                if not grad_out.device.is_cpu():
+                    raise RuntimeError("grad_out must be CPU in current implementation")
+
+                g = np.asarray(grad_out.to_numpy(), dtype=np.float32)
+
+                # Expand grad to input shape
+                if axis is None:
+                    grad_np = np.ones(self.shape, dtype=np.float32) * float(
+                        np.asarray(g)
+                    )
+                else:
+                    # If keepdims=False, need to re-insert the reduced axis
+                    if not keepdims:
+                        g = np.expand_dims(g, axis=axis_)
+
+                    grad_np = np.ones(self.shape, dtype=np.float32) * g
+
+                grad = Tensor(shape=self.shape, device=self.device, requires_grad=False)
+                grad.copy_from_numpy(grad_np)
+                return (grad,)
+
+            ctx = Context(parents=(self,), backward_fn=backward_fn)
+            ctx.saved_meta["axis"] = axis
+            ctx.saved_meta["keepdims"] = keepdims
+            out._set_ctx(ctx)
+
+        return out
+
+    def max(self, axis: int = -1, keepdims: bool = False) -> "Tensor":
+        """
+        Compute the maximum along an axis (CPU-only).
+
+        Parameters
+        ----------
+        axis : int, optional
+            Axis along which to compute the max. Defaults to -1.
+        keepdims : bool, optional
+            If True, retains reduced dimensions with size 1.
+
+        Returns
+        -------
+        Tensor
+            Tensor of max values.
+
+        Notes
+        -----
+        Backward rule:
+            Gradient is routed to positions equal to the max (ties split by mask),
+            i.e., dx = grad_out * 1[x == max(x)].
+        """
+        if not self.device.is_cpu():
+            self._raise_device_not_supported("max")
+
+        x_np = self.to_numpy()
+        ndim = x_np.ndim
+        axis_ = axis if axis >= 0 else ndim + axis
+        if axis_ < 0 or axis_ >= ndim:
+            raise ValueError(f"axis {axis} out of bounds for ndim {ndim}")
+
+        m_np = np.max(x_np, axis=axis_, keepdims=keepdims).astype(
+            np.float32, copy=False
+        )
+        out = Tensor(
+            shape=m_np.shape, device=self.device, requires_grad=self.requires_grad
+        )
+        out.copy_from_numpy(m_np)
+
+        if self.requires_grad:
+            # Save input and max output for backward mask
+            def backward_fn(grad_out: "Tensor"):
+                if not grad_out.device.is_cpu():
+                    raise RuntimeError("grad_out must be CPU in current implementation")
+
+                g = grad_out.to_numpy().astype(np.float32, copy=False)
+
+                # If keepdims=False, expand dims for mask alignment
+                m = m_np
+                g_aligned = g
+                if not keepdims:
+                    m = np.expand_dims(m, axis=axis_)
+                    g_aligned = np.expand_dims(g_aligned, axis=axis_)
+
+                mask = (x_np == m).astype(np.float32)
+                grad_np = mask * g_aligned
+
+                grad = Tensor(shape=self.shape, device=self.device, requires_grad=False)
+                grad.copy_from_numpy(grad_np.astype(np.float32, copy=False))
+                return (grad,)
+
+            ctx = Context(parents=(self,), backward_fn=backward_fn)
+            ctx.saved_meta["axis"] = axis_
+            ctx.saved_meta["keepdims"] = keepdims
+            out._set_ctx(ctx)
+
+        return out
+
+    def broadcast_to(self, shape: tuple[int, ...]) -> "Tensor":
+        """
+        Broadcast this tensor to a target shape by explicit expansion (CPU-only).
+
+        Parameters
+        ----------
+        shape : tuple[int, ...]
+            Target shape to broadcast to.
+
+        Returns
+        -------
+        Tensor
+            Broadcasted tensor (materialized copy).
+
+        Notes
+        -----
+        - This is an explicit, opt-in broadcasting primitive to keep binary ops strict.
+        - Backward reduces gradients by summing over broadcasted dimensions.
+        """
+        if not self.device.is_cpu():
+            self._raise_device_not_supported("broadcast_to")
+
+        src = self.to_numpy()
+        try:
+            out_np = np.broadcast_to(src, shape).astype(np.float32, copy=False)
+        except Exception as e:
+            raise ValueError(f"Cannot broadcast shape {self.shape} to {shape}") from e
+
+        req = self.requires_grad
+        out = Tensor(shape=shape, device=self.device, requires_grad=req, ctx=None)
+        out.copy_from_numpy(out_np)
+
+        if req:
+            src_shape = self.shape
+
+            def backward_fn(grad_out: "Tensor"):
+                if not grad_out.device.is_cpu():
+                    raise RuntimeError("grad_out must be CPU in current implementation")
+
+                g = grad_out.to_numpy().astype(np.float32, copy=False)
+
+                # Align src_shape to target rank by left-padding with ones
+                src_rank = len(src_shape)
+                tgt_rank = len(shape)
+                padded_src = (1,) * (tgt_rank - src_rank) + src_shape
+
+                # Sum over axes that were broadcasted (src dim == 1 and target dim > 1)
+                reduce_axes = []
+                for i, (sd, td) in enumerate(zip(padded_src, shape)):
+                    if sd == 1 and td != 1:
+                        reduce_axes.append(i)
+
+                if reduce_axes:
+                    g = np.sum(g, axis=tuple(reduce_axes), keepdims=True)
+
+                # Remove left padding dims to return to src_shape
+                if tgt_rank != src_rank:
+                    for _ in range(tgt_rank - src_rank):
+                        g = np.squeeze(g, axis=0)
+
+                grad = Tensor(shape=src_shape, device=self.device, requires_grad=False)
+                grad.copy_from_numpy(g.astype(np.float32, copy=False))
+                return (grad,)
+
+            ctx = Context(parents=(self,), backward_fn=backward_fn)
+            ctx.saved_meta["broadcast_from"] = src_shape
+            ctx.saved_meta["broadcast_to"] = shape
+            out._set_ctx(ctx)
+
+        return out
