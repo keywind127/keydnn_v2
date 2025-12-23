@@ -55,10 +55,22 @@ Provides concrete implementations of domain contracts:
 - `RNNCell` — vanilla recurrent neural network cell (tanh activation)
   - NumPy-based forward and backward
   - Autograd-compatible via dynamic computation graphs
-- `RNN` — sequence-level RNN module
-  - Executes `RNNCell` over time-major sequences
-  - Supports Backpropagation Through Time (BPTT) via chained autograd contexts
-- Supports Keras-style bidirectional execution via `Bidirectional`
+- Recurrent neural network layers:
+  - `RNNCell` — vanilla tanh recurrent cell
+  - `LSTMCell` — long short-term memory cell (input/forget/output gates)
+  - `GRUCell` — gated recurrent unit cell
+  - NumPy-based forward and backward implementations
+  - Full autograd support via dynamic computation graphs
+- Sequence-level recurrent modules:
+  - `RNN`
+  - `LSTM`
+  - `GRU`
+  - Time-major execution with Backpropagation Through Time (BPTT)
+  - Keras-compatible `return_sequences` / `return_state` semantics
+- Keras-style bidirectional execution via `Bidirectional`
+  - Generic wrapper supporting `RNN`, `LSTM`, and `GRU`
+  - Forward/backward layer cloning
+  - Correct backward-time alignment
 - Pooling layers:
   - `MaxPool2d`
   - `AvgPool2d`
@@ -341,11 +353,21 @@ The test suite is split into two categories:
 - Reverse-mode automatic differentiation (autograd) with dynamic computation graphs
 - End-to-end model training via backpropagation and optimizers
 - Sequential model composition with parameter discovery
-- Vanilla recurrent neural networks (RNN)
-  - `RNNCell` with tanh nonlinearity
-  - `RNN` sequence module with Backpropagation Through Time (BPTT)
-  - Gradient propagation through time via dynamic autograd graphs
-  - Keras-style bidirectional execution via `Bidirectional(RNN)`
+- Recurrent neural networks:
+  - `RNNCell`, `LSTMCell`, `GRUCell`
+  - `RNN`, `LSTM`, `GRU` sequence modules
+  - Time-major execution with Backpropagation Through Time (BPTT)
+  - Keras-compatible `return_sequences` / `return_state` semantics
+  - Generic `Bidirectional` wrapper supporting RNN, LSTM, and GRU
+  - Gradient propagation across time and both directions
+  ```python
+  from keydnn.infrastructure.recurrent import LSTM, GRU, Bidirectional
+
+  model = Bidirectional(
+      LSTM(input_size=16, hidden_size=32, return_sequences=True),
+      return_sequences=True
+  )
+  ```
 
 ---
 
@@ -357,9 +379,9 @@ The test suite is split into two categories:
 - Flatten
 - Conv2d (2D convolution, NCHW)
 - Recurrent:
-  - RNNCell (vanilla tanh)
-  - RNN (sequence module)
-  - Bidirectional (wrapper for RNN modules)
+  - RNNCell, LSTMCell, GRUCell
+  - RNN, LSTM, GRU
+  - Bidirectional (generic wrapper for recurrent modules)
 - Pooling layers:
   - MaxPool2d
   - AvgPool2d
@@ -383,8 +405,9 @@ The test suite is split into two categories:
 - Expand checkpoint compatibility (versioning, migration utilities, partial loading)
 - Add additional formats (optional): compressed JSON, msgpack, or safetensors-like layout
 - Advanced recurrent architectures:
-  - LSTM
-  - GRU
+  - Multi-layer (stacked) RNN / LSTM / GRU
+  - Sequence masking and variable-length sequence support
+  - Fused recurrent kernels for performance
 - Fused recurrent kernels for improved performance
 - Sequence masking and variable-length sequence support
 - Multi-layer (stacked) RNNs
