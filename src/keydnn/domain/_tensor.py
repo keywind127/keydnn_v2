@@ -291,19 +291,29 @@ class ITensor(Protocol):
     # ---------------------------------------------------------------------
     # Reductions and elementwise transforms
     # ---------------------------------------------------------------------
-    def sum(self) -> "ITensor":
+    def sum(self, axis: Optional[int] = None) -> "ITensor":
         """
-        Sum all elements of the tensor into a scalar.
+        Sum elements of the tensor.
+
+        Parameters
+        ----------
+        axis : Optional[int]
+            - None: sum all elements -> scalar
+            - int: sum along the given axis -> tensor with that axis removed
 
         Returns
         -------
         ITensor
-            A scalar tensor containing the sum of all elements.
+            If axis is None, returns a scalar tensor.
+            If axis is an int, returns a tensor with that axis removed.
 
         Notes
         -----
         If autograd is enabled, the backward rule is conceptually:
+        - axis is None:
             d(sum(x))/dx = 1
+        - axis is int:
+            `grad_out` is broadcast back to input shape along the reduced axis.
         """
         ...
 
@@ -336,6 +346,64 @@ class ITensor(Protocol):
         -----
         If autograd is enabled, the backward rule is conceptually:
             d(log(x))/dx = 1 / x
+        """
+        ...
+
+    # ---------------------------------------------------------------------
+    # Matrix ops (2D) and transpose (2D)
+    # ---------------------------------------------------------------------
+    def matmul(self, other: "ITensor") -> "ITensor":
+        """
+        Matrix multiplication (2D): out = self @ other.
+
+        Parameters
+        ----------
+        other : ITensor
+            Right-hand operand.
+
+        Returns
+        -------
+        ITensor
+            The matrix product with shape (N, M) for (N, K) @ (K, M).
+
+        Notes
+        -----
+        Concrete implementations may restrict supported devices/backends.
+
+        If autograd is enabled and out = A @ B, then conceptually:
+        - dL/dA = dL/dout @ B^T
+        - dL/dB = A^T @ dL/dout
+        """
+        ...
+
+    def __matmul__(self, other: "ITensor") -> "ITensor":
+        """
+        Operator overload for matrix multiplication: self @ other.
+        """
+        ...
+
+    def transpose(self) -> "ITensor":
+        """
+        2D transpose: out[i, j] = self[j, i].
+
+        Returns
+        -------
+        ITensor
+            The transposed tensor with shape (C, R) for input shape (R, C).
+
+        Notes
+        -----
+        Concrete implementations may restrict supported devices/backends.
+
+        If autograd is enabled and out = A^T, then conceptually:
+            dL/dA = (dL/dout)^T
+        """
+        ...
+
+    @property
+    def T(self) -> "ITensor":
+        """
+        Convenience property for 2D transpose (equivalent to `transpose()`).
         """
         ...
 

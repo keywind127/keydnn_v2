@@ -1,58 +1,65 @@
 """
 Linear (fully-connected) layer implementation.
 
-This module defines an infrastructure-level `Linear` layer that implements the
-domain-level `IModule` contract via the `Module` base class.
-
-The layer computes an affine transformation:
+This module provides an infrastructure-level `Linear` layer for KeyDNN. It is a
+trainable `Module` (and is registered for serialization via `register_module`)
+that performs an affine projection of 2D, batch-major inputs:
 
     y = x @ W^T + b
 
-where:
-- x has shape (batch, in_features)
-- W has shape (out_features, in_features)
-- b has shape (out_features,) or is omitted if bias=False
+Shape conventions
+-----------------
+- x : (batch, in_features)
+- W : (out_features, in_features)
+- b : (out_features,)  (optional; omitted if bias=False)
+- y : (batch, out_features)
+
+Computation and backend constraints
+-----------------------------------
+- CPU-only (current NumPy-backed Tensor storage).
+- Input must be 2D. Higher-rank inputs are not implicitly flattened.
+- Bias addition avoids implicit broadcasting by explicitly expanding `b` to
+  (batch, out_features) using `Tensor.stack`.
 
 Autograd integration
 --------------------
-If any of the participating tensors require gradients, `Linear.forward` attaches
-a `Context` to the output tensor. The context stores parents and a `backward_fn`
-that computes gradients for:
-- input x
-- weight W
-- bias b (if present)
+`forward()` computes results using Tensor operations (e.g., `@`, `.T`, `+`) and,
+when gradients are required, attaches a *legacy* `Context` to a fresh output
+tensor. The context uses parents ordered as:
+- (x, weight) if bias is disabled
+- (x, weight, bias) if bias is enabled
 
-Important limitations
----------------------
-- This implementation currently supports CPU execution only (NumPy backend).
-- Broadcasting is not used; shapes must match the expected 2D input format.
-- For autograd wiring, the input `x` must be an infrastructure `Tensor`
-  (not just an `ITensor`) so that it can carry `ctx` and `grad` state.
+The backward rule for out = x @ W^T (+ b) is:
+- dL/dx = dL/dout @ W
+- dL/dW = (dL/dout)^T @ x
+- dL/db = sum(dL/dout, axis=0)
+
+Design note
+-----------
+Parameter initialization is isolated in `_reset_parameters()` and currently uses
+NumPy (Xavier/Glorot uniform for weights, zeros for bias). This allows future
+replacement with a device-aware RNG/initializer without changing constructor
+logic.
 """
 
 from __future__ import annotations
 
-from typing import Optional, Sequence, Any, Dict
-
-import numpy as np
-
+from typing import Optional, Any, Dict
 
 from .module._serialization_core import register_module
 from ._module import Module
 from ._parameter import Parameter
 from ._tensor import Tensor, Context
 from ..domain.device._device import Device
-from ..domain._tensor import ITensor
 
 
 @register_module()
 class Linear(Module):
     """
-    Fully connected (dense) layer: y = x @ W^T + b.
+    Fully-connected (dense) layer performing an affine transform: y = x @ W^T + b.
 
-    Parameters are stored as trainable `Parameter` instances:
-    - weight: shape (out_features, in_features)
-    - bias:   shape (out_features,) or None
+    This layer projects 2D batch-major inputs from `in_features` to `out_features`
+    using a learnable weight matrix and an optional bias vector.
 
     Parameters
     ----------
@@ -63,7 +70,7 @@ class Linear(Module):
     bias : bool, optional
         If True, include a learnable bias term. Defaults to True.
     device : Optional[Device], optional
-        Device placement. Defaults to CPU if not provided.
+        Device placement for parameters and outputs. Defaults to CPU if not provided.
 
     Attributes
     ----------
@@ -85,8 +92,9 @@ class Linear(Module):
 
     Notes
     -----
-    Weight initialization uses Xavier/Glorot uniform to break symmetry
-    (critical for learning problems like XOR). Bias is initialized to zeros.
+    - Weight initialization uses Xavier/Glorot uniform.
+    - Bias (when enabled) is initialized to zeros.
+    - Current implementation is CPU-only and expects 2D inputs.
     """
 
     def __init__(
@@ -99,6 +107,10 @@ class Linear(Module):
         """
         Initialize a Linear layer and register its parameters.
 
+        This constructor validates sizes, allocates `Parameter` storage for weights
+        (and optional bias), registers parameters for state management, and then
+        initializes parameter values via `_reset_parameters()`.
+
         Parameters
         ----------
         in_features : int
@@ -106,7 +118,7 @@ class Linear(Module):
         out_features : int
             Number of output features per example.
         bias : bool, optional
-            If True, include a learnable bias term.
+            If True, include a learnable bias term. Defaults to True.
         device : Optional[Device], optional
             Device placement. Defaults to CPU if not provided.
 
@@ -123,7 +135,42 @@ class Linear(Module):
         self.out_features = int(out_features)
         self.device = device if device is not None else Device("cpu")
 
-        # --- initialize weights (Xavier/Glorot uniform) ---
+        # Allocate parameters (storage + metadata)
+        self.weight = Parameter(
+            shape=(self.out_features, self.in_features),
+            device=self.device,
+            requires_grad=True,
+        )
+        self.register_parameter("weight", self.weight)
+
+        if bias:
+            self.bias = Parameter(
+                shape=(self.out_features,),
+                device=self.device,
+                requires_grad=True,
+            )
+            self.register_parameter("bias", self.bias)
+        else:
+            self.bias = None
+
+        # Initialize values
+        self._reset_parameters()
+
+    def _reset_parameters(self) -> None:
+        """
+        Initialize learnable parameters.
+
+        Weights are initialized with Xavier/Glorot uniform and bias (if present)
+        is initialized to zeros. The initializer currently uses NumPy to generate
+        CPU arrays, then copies them into parameter storage.
+
+        Notes
+        -----
+        This method is intentionally isolated so it can be replaced by a device-aware
+        RNG initializer in the future (e.g., CUDA kernels, seeded generators).
+        """
+        import numpy as np  # keep numpy dependency localized to initialization
+
         limit = float(np.sqrt(6.0 / (self.in_features + self.out_features)))
         w_np = np.random.uniform(
             low=-limit,
@@ -131,38 +178,33 @@ class Linear(Module):
             size=(self.out_features, self.in_features),
         ).astype(np.float32)
 
-        self.weight = Parameter(
-            shape=(self.out_features, self.in_features),
-            device=self.device,
-            requires_grad=True,
-        )
         self.weight.copy_from_numpy(w_np)
-        self.register_parameter("weight", self.weight)
 
-        # --- initialize bias ---
-        if bias:
+        if self.bias is not None:
             b_np = np.zeros((self.out_features,), dtype=np.float32)
-            self.bias = Parameter(
-                shape=(self.out_features,),
-                device=self.device,
-                requires_grad=True,
-            )
             self.bias.copy_from_numpy(b_np)
-            self.register_parameter("bias", self.bias)
-        else:
-            self.bias = None
 
-    def forward(self, x: ITensor) -> Tensor:
+    def forward(self, x: Tensor) -> Tensor:
         """
-        Compute the forward pass of the Linear layer.
+        Apply the affine transform to a 2D input tensor.
 
-        Given input `x` of shape (batch, in_features), compute:
+        The forward pass computes:
+            y = x @ W^T (+ b)
 
-            y = x @ W^T + b
+        where `x` must have shape (batch, in_features). Bias addition is performed
+        without implicit broadcasting by explicitly expanding `b` across the batch
+        dimension using `Tensor.stack`.
+
+        Autograd behavior
+        -----------------
+        If gradients are required for any of (x, weight, bias), this method attaches
+        a legacy `Context` to a fresh output tensor whose parents are exactly:
+        - (x, weight) if bias is disabled
+        - (x, weight, bias) if bias is enabled
 
         Parameters
         ----------
-        x : ITensor
+        x : Tensor
             Input tensor of shape (batch, in_features).
 
         Returns
@@ -173,11 +215,7 @@ class Linear(Module):
         Raises
         ------
         ValueError
-            If the input is not 2D, or if its feature dimension does not match
-            `self.in_features`.
-        TypeError
-            If gradient wiring is needed and `x` is not an infrastructure `Tensor`
-            (because it cannot carry autograd context).
+            If `x` is not 2D or if its second dimension does not match `in_features`.
         """
         # --- validate input shape ---
         x_shape = x.shape
@@ -190,114 +228,68 @@ class Linear(Module):
                 f"Linear expects in_features={self.in_features}, got {x_shape[1]}"
             )
 
-        # --- compute (CPU) ---
-        x_np = x.to_numpy()
-        w_np = self.weight.to_numpy()
-        y_np = x_np @ w_np.T
-        if self.bias is not None:
-            y_np = y_np + self.bias.to_numpy()
-
         # --- decide whether output should track gradients ---
-        x_req = bool(getattr(x, "requires_grad", False))
+        x_req = bool(x.requires_grad)
         w_req = bool(self.weight.requires_grad)
         b_req = bool(self.bias is not None and self.bias.requires_grad)
         req = x_req or w_req or b_req
 
-        # --- build output tensor (always via shape+copy, which your Tensor supports) ---
-        out = Tensor(shape=y_np.shape, device=self.device, requires_grad=req)
-        out.copy_from_numpy(y_np.astype(np.float32, copy=False))
+        # --- compute forward using Tensor ops only ---
+        y = x @ self.weight.T  # (batch, out_features)
 
-        # --- autograd wiring (Context) ---
-        if req:
-            if not isinstance(x, Tensor):
-                raise TypeError(
-                    "Linear.forward(): to attach autograd Context, x must be an infrastructure Tensor "
-                    "(so it can hold grad/ctx). Got ITensor without ctx."
-                )
+        if self.bias is not None:
+            # No broadcasting: expand bias to 2D by stacking along batch axis.
+            batch = x_shape[0]
+            b2d = Tensor.stack([self.bias] * batch, axis=0)  # (batch, out_features)
+            y = y + b2d
 
-            def _make_grad(device: Device, arr: np.ndarray) -> Tensor:
-                """
-                Create a gradient Tensor from a NumPy array using public APIs.
+        # --- return early if no autograd needed ---
+        if not req:
+            return y
 
-                Parameters
-                ----------
-                device : Device
-                    Target device for the gradient tensor.
-                arr : np.ndarray
-                    Gradient values to load.
+        # --- attach legacy Context with parents (x, weight, bias?) ---
+        # Create a fresh output tensor so its ctx is exactly what Linear defines.
+        out = Tensor(shape=y.shape, device=self.device, requires_grad=True)
+        out.copy_from(y)
 
-                Returns
-                -------
-                Tensor
-                    A newly created tensor holding the given gradient values.
-                """
-                t = Tensor(shape=arr.shape, device=device, requires_grad=False)
-                t.copy_from_numpy(arr.astype(np.float32, copy=False))
-                return t
+        def backward_fn(grad_out: Tensor):
+            """
+            Compute gradients for Linear's parents given gradient at the output.
 
-            def backward_fn(grad_out: Tensor) -> Sequence[Optional[Tensor]]:
-                """
-                Compute gradients for the Linear operation.
+            Parameters
+            ----------
+            grad_out : Tensor
+                Gradient w.r.t. the output of this layer, shape (batch, out_features).
 
-                Parameters
-                ----------
-                grad_out : Tensor
-                    Gradient of the loss with respect to the layer output `y`,
-                    with shape (batch, out_features).
+            Returns
+            -------
+            tuple[Optional[Tensor], ...]
+                Gradients for (x, weight) or (x, weight, bias) depending on whether
+                bias is enabled. Non-required gradients may be returned as None.
+            """
+            x_saved, w_saved = ctx.saved_tensors
 
-                Returns
-                -------
-                Sequence[Optional[Tensor]]
-                    Gradients with respect to each parent listed in `ctx.parents`,
-                    in the same order. Entries may be None for parents that do not
-                    require gradients.
+            grad_x = None
+            grad_w = None
+            grad_b = None
 
-                Notes
-                -----
-                The computed gradients (without broadcasting) are:
-                - dL/dx = dL/dy @ W
-                - dL/dW = (dL/dy)^T @ x
-                - dL/db = sum(dL/dy over batch)
-                """
-                go = grad_out.to_numpy()
+            if x_saved.requires_grad:
+                grad_x = grad_out @ w_saved  # (batch, in_features)
 
-                # Saved tensors
-                x_saved, w_saved = ctx.saved_tensors
-                x_arr = x_saved.to_numpy()  # (batch, in_features)
-                w_arr = w_saved.to_numpy()  # (out_features, in_features)
+            if w_saved.requires_grad:
+                grad_w = grad_out.T @ x_saved  # (out_features, in_features)
 
-                grad_x = None
-                grad_w = None
-                grad_b = None
+            if self.bias is not None and self.bias.requires_grad:
+                grad_b = grad_out.sum(axis=0)  # (out_features,)
 
-                # dL/dx = dL/dy @ W
-                if x_saved.requires_grad:
-                    gx = go @ w_arr  # (batch, in_features)
-                    grad_x = _make_grad(x_saved.device, gx)
+            if self.bias is None:
+                return (grad_x, grad_w)
+            return (grad_x, grad_w, grad_b)
 
-                # dL/dW = (dL/dy)^T @ x
-                if w_saved.requires_grad:
-                    gw = go.T @ x_arr  # (out_features, in_features)
-                    grad_w = _make_grad(w_saved.device, gw)
-
-                # dL/db = sum over batch
-                if self.bias is not None and self.bias.requires_grad:
-                    gb = go.sum(axis=0)  # (out_features,)
-                    grad_b = _make_grad(self.bias.device, gb)
-
-                if self.bias is None:
-                    return (grad_x, grad_w)
-                return (grad_x, grad_w, grad_b)
-
-            parents = (
-                [x, self.weight] if self.bias is None else [x, self.weight, self.bias]
-            )
-            ctx = Context(parents=parents, backward_fn=backward_fn)
-
-            # Save for backward: x and weight are sufficient
-            ctx.save_for_backward(x, self.weight)
-
-            out._set_ctx(ctx)
+        parents = (x, self.weight) if self.bias is None else (x, self.weight, self.bias)
+        ctx = Context(parents=parents, backward_fn=backward_fn)
+        ctx.save_for_backward(x, self.weight)
+        out._set_ctx(ctx)
 
         return out
 
@@ -308,11 +300,15 @@ class Linear(Module):
         """
         Return a JSON-serializable configuration for reconstructing this layer.
 
-        Notes
-        -----
-        This configuration captures constructor-level hyperparameters only.
-        Trainable parameters (weights/bias) are serialized separately by the
-        checkpoint/state_dict mechanism.
+        The returned configuration contains constructor-level hyperparameters only.
+        Trainable parameter values (weights/bias) are expected to be handled by the
+        checkpoint/state mechanism.
+
+        Returns
+        -------
+        Dict[str, Any]
+            A JSON-serializable dict containing `in_features`, `out_features`, `bias`,
+            and `device` (as a string).
         """
         return {
             "in_features": int(self.in_features),
@@ -328,10 +324,18 @@ class Linear(Module):
         """
         Construct a Linear layer from a configuration dict.
 
-        Notes
-        -----
         This reconstructs the module structure (hyperparameters). Weights are
-        expected to be loaded afterward from the checkpoint state.
+        expected to be loaded afterward from the checkpoint/state.
+
+        Parameters
+        ----------
+        cfg : Dict[str, Any]
+            Configuration dictionary produced by `get_config()`.
+
+        Returns
+        -------
+        Linear
+            A newly constructed `Linear` instance with matching hyperparameters.
         """
         dev = cfg.get("device", "cpu")
         return cls(

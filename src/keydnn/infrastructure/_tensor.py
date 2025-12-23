@@ -1491,3 +1491,316 @@ class Tensor(ITensor):
             out._set_ctx(ctx)
 
         return out
+
+        # ----------------------------
+
+    # Matrix ops (2D)
+    # ----------------------------
+    def matmul(self, other: "Tensor") -> "Tensor":
+        """
+        Matrix multiplication (2D): out = self @ other.
+
+        Requirements
+        ------------
+        - CPU-only
+        - both operands must be 2D
+        - inner dimensions must match: (N, K) @ (K, M) -> (N, M)
+
+        Backward
+        --------
+        If out = A @ B, then:
+        - dL/dA = dL/dout @ B^T
+        - dL/dB = A^T @ dL/dout
+        """
+        if not self.device.is_cpu() or not other.device.is_cpu():
+            self._raise_device_not_supported("matmul")
+
+        if len(self.shape) != 2 or len(other.shape) != 2:
+            raise ValueError(
+                f"matmul requires 2D tensors, got {self.shape} and {other.shape}"
+            )
+
+        n, k1 = self.shape
+        k2, m = other.shape
+        if k1 != k2:
+            raise ValueError(
+                f"matmul shape mismatch: {self.shape} @ {other.shape} (inner dims {k1} vs {k2})"
+            )
+
+        req = self._result_requires_grad(self, other)
+
+        out = Tensor(shape=(n, m), device=self.device, requires_grad=req, ctx=None)
+        out.copy_from_numpy(self.to_numpy() @ other.to_numpy())
+
+        if req:
+
+            def backward_fn(grad_out: "Tensor"):
+                if not grad_out.device.is_cpu():
+                    raise RuntimeError("grad_out must be CPU in current implementation")
+                if grad_out.shape != (n, m):
+                    raise ValueError(
+                        f"grad_out shape mismatch: expected {(n, m)}, got {grad_out.shape}"
+                    )
+
+                grad_a = None
+                grad_b = None
+
+                # dA = dOut @ B^T
+                if self.requires_grad:
+                    ga_np = grad_out.to_numpy() @ other.to_numpy().T
+                    grad_a = Tensor(
+                        shape=self.shape,
+                        device=self.device,
+                        requires_grad=False,
+                        ctx=None,
+                    )
+                    grad_a.copy_from_numpy(ga_np)
+
+                # dB = A^T @ dOut
+                if other.requires_grad:
+                    gb_np = self.to_numpy().T @ grad_out.to_numpy()
+                    grad_b = Tensor(
+                        shape=other.shape,
+                        device=other.device,
+                        requires_grad=False,
+                        ctx=None,
+                    )
+                    grad_b.copy_from_numpy(gb_np)
+
+                return (grad_a, grad_b)
+
+            ctx = Context(
+                parents=(self, other),
+                backward_fn=backward_fn,
+            )
+            out._set_ctx(ctx)
+
+        return out
+
+    def __matmul__(self, other: "Tensor") -> "Tensor":
+        """
+        Operator overload for matrix multiplication: self @ other.
+        """
+        if not isinstance(other, Tensor):
+            raise TypeError(f"@ only supports Tensor operands, got {type(other)!r}")
+        return self.matmul(other)
+
+    # ----------------------------
+    # Transpose (2D)
+    # ----------------------------
+    def transpose(self) -> "Tensor":
+        """
+        2D transpose: out[i, j] = self[j, i].
+
+        Requirements
+        ------------
+        - CPU-only
+        - input must be 2D
+
+        Backward
+        --------
+        If out = A^T, then dL/dA = (dL/dout)^T
+        """
+        if not self.device.is_cpu():
+            self._raise_device_not_supported("transpose")
+
+        if len(self.shape) != 2:
+            raise ValueError(f"transpose requires a 2D tensor, got shape={self.shape}")
+
+        r, c = self.shape
+        req = self.requires_grad
+
+        out = Tensor(shape=(c, r), device=self.device, requires_grad=req, ctx=None)
+        out.copy_from_numpy(self.to_numpy().T)
+
+        if req:
+
+            def backward_fn(grad_out: "Tensor"):
+                if not grad_out.device.is_cpu():
+                    raise RuntimeError("grad_out must be CPU in current implementation")
+                if grad_out.shape != (c, r):
+                    raise ValueError(
+                        f"grad_out shape mismatch: expected {(c, r)}, got {grad_out.shape}"
+                    )
+
+                g_np = grad_out.to_numpy().T  # back to (r, c)
+                grad_parent = Tensor(
+                    shape=self.shape, device=self.device, requires_grad=False, ctx=None
+                )
+                grad_parent.copy_from_numpy(g_np)
+                return (grad_parent,)
+
+            ctx = Context(
+                parents=(self,),
+                backward_fn=backward_fn,
+            )
+            out._set_ctx(ctx)
+
+        return out
+
+    @property
+    def T(self) -> "Tensor":
+        """
+        Convenience property for 2D transpose.
+        """
+        return self.transpose()
+
+    # ----------------------------
+    # Sum with axis
+    # ----------------------------
+    def sum(self, axis: Optional[int] = None) -> "Tensor":
+        """
+        Sum elements of the tensor.
+
+        Parameters
+        ----------
+        axis : Optional[int]
+            - None: sum all elements -> scalar (existing behavior)
+            - int: sum along the given axis -> tensor with that axis removed
+
+        Notes
+        -----
+        Backward rule:
+        - axis is None:
+            d(sum(x))/dx = 1
+        - axis is int:
+            grad_out is broadcast back to input shape along the reduced axis
+        """
+        if not self.device.is_cpu():
+            self._raise_device_not_supported("sum")
+
+        import numpy as np  # local import ok inside Tensor
+
+        # axis=None: keep your original behavior, but with the new signature
+        if axis is None:
+            value = float(np.sum(self._data))
+            out = Tensor(shape=(), device=self.device, requires_grad=self.requires_grad)
+            out.copy_from_numpy(np.array(value, dtype=np.float32))
+
+            if self.requires_grad:
+
+                def backward_fn(grad_out: "Tensor"):
+                    grad = Tensor(
+                        shape=self.shape,
+                        device=self.device,
+                        requires_grad=False,
+                    )
+                    grad.copy_from_numpy(
+                        np.ones(self.shape, dtype=np.float32)
+                        * float(np.asarray(grad_out.to_numpy()))
+                    )
+                    return (grad,)
+
+                ctx = Context(
+                    parents=(self,),
+                    backward_fn=backward_fn,
+                )
+                out._set_ctx(ctx)
+
+            return out
+
+        # axis=int: reduce along that axis
+        if not isinstance(axis, int):
+            raise TypeError(f"sum(axis=...) expects int or None, got {type(axis)!r}")
+
+        ndim = len(self.shape)
+        if ndim == 0:
+            raise ValueError("sum(axis=...) is not defined for scalar tensors")
+
+        # normalize negative axis
+        if axis < 0:
+            axis = axis + ndim
+        if axis < 0 or axis >= ndim:
+            raise ValueError(f"axis {axis} out of bounds for tensor with ndim {ndim}")
+
+        out_np = np.sum(self._data, axis=axis).astype(np.float32, copy=False)
+        out_shape = out_np.shape  # already reduced
+
+        out = Tensor(
+            shape=out_shape,
+            device=self.device,
+            requires_grad=self.requires_grad,
+            ctx=None,
+        )
+        out.copy_from_numpy(out_np)
+
+        if self.requires_grad:
+
+            def backward_fn(grad_out: "Tensor"):
+                if not grad_out.device.is_cpu():
+                    raise RuntimeError("grad_out must be CPU in current implementation")
+                if grad_out.shape != out_shape:
+                    raise ValueError(
+                        f"grad_out shape mismatch: expected {out_shape}, got {grad_out.shape}"
+                    )
+
+                g = grad_out.to_numpy()
+
+                # Re-insert the reduced axis as size-1, then broadcast to input shape.
+                g_exp = np.expand_dims(g, axis=axis)
+                g_broadcast = np.broadcast_to(g_exp, self.shape).astype(
+                    np.float32, copy=False
+                )
+
+                grad_parent = Tensor(
+                    shape=self.shape,
+                    device=self.device,
+                    requires_grad=False,
+                    ctx=None,
+                )
+                grad_parent.copy_from_numpy(g_broadcast)
+                return (grad_parent,)
+
+            ctx = Context(
+                parents=(self,),
+                backward_fn=backward_fn,
+            )
+            ctx.saved_meta["sum_axis"] = axis
+            out._set_ctx(ctx)
+
+        return out
+
+    def copy_from(self, other: "Tensor") -> None:
+        """
+        Copy data from another tensor into this tensor (in-place).
+
+        This is the canonical tensor-to-tensor copy operation and should be preferred
+        over `to_numpy()` + `copy_from_numpy()` in internal framework code.
+
+        Parameters
+        ----------
+        other : Tensor
+            Source tensor.
+
+        Raises
+        ------
+        ValueError
+            If shapes do not match.
+        RuntimeError
+            If devices are incompatible or unsupported.
+        """
+        if not isinstance(other, Tensor):
+            raise TypeError(f"copy_from expects a Tensor, got {type(other)!r}")
+
+        if self.shape != other.shape:
+            raise ValueError(f"Shape mismatch: {self.shape} vs {other.shape}")
+
+        if str(self.device) != str(other.device):
+            raise RuntimeError(
+                f"Device mismatch in copy_from: {self.device} vs {other.device}"
+            )
+
+        # ---- CPU backend ----
+        if self.device.is_cpu():
+            # IMPORTANT:
+            # We do not attach ctx, do not propagate requires_grad.
+            self._data[...] = other._data
+            return
+
+        # ---- CUDA backend (future) ----
+        if self.device.is_cuda():
+            # Placeholder for:
+            # cudaMemcpy / async copy / stream-aware copy
+            raise NotImplementedError("CUDA copy_from not yet implemented")
+
+        raise RuntimeError(f"Unsupported device type: {self.device}")
