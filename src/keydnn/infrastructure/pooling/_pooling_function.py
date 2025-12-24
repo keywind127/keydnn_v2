@@ -1,228 +1,176 @@
 """
-Autograd `Function` implementations for 2D pooling (CPU backend).
+Autograd `Function` adapters for 2D pooling (CPU backend).
 
-This module bridges the NumPy CPU pooling kernels in `ops.pool2d_cpu` with the
-KeyDNN autograd system (`Tensor`, `Context`). Each pooling operator is
-implemented as a `Function` with:
+This module connects the CPU pooling primitives in `ops.pool2d_cpu_ext` to the
+KeyDNN autograd runtime (`Tensor`, `Context`, `Function`). Each pooling operator
+is implemented as a `Function` subclass that:
 
-- `forward(ctx, ...)` that computes the output tensor and saves any information
-  required for gradient computation.
-- `backward(ctx, grad_out)` that computes gradients with respect to the input
-  tensor(s), returning them in the same order as `ctx.parents`.
+- implements `forward(ctx, ...)` to compute the output tensor, and
+- implements `backward(ctx, grad_out)` to compute gradients w.r.t. inputs.
+
+The forward path normalizes pooling hyperparameters (`kernel_size`, `stride`,
+`padding`) using `_pair`, and saves the minimal information needed for backward
+into `ctx.saved_tensors` and `ctx.saved_meta`.
 
 Implemented operators
 ---------------------
-- `MaxPool2dFn`:
-    Stores argmax indices from the forward pass to route gradients correctly.
-- `AvgPool2dFn`:
+- `MaxPool2dFn`
+    Uses argmax indices from the forward pass to scatter gradients back to the
+    maximal elements in each pooling window.
+- `AvgPool2dFn`
     Distributes output gradients uniformly over each pooling window.
-- `GlobalAvgPool2dFn`:
-    Reduces spatial dimensions and distributes gradients evenly over H*W.
+- `GlobalAvgPool2dFn`
+    Averages over spatial dimensions (H, W) and distributes gradients evenly
+    across all H*W positions per channel.
 
 Design notes
 ------------
-- All implementations assume **NCHW** layout.
-- These functions are CPU-only because they rely on NumPy kernels.
-- The returned tensors use `_tensor_from_numpy` to remain consistent with
-  the rest of the codebase (no dependency on a global `from_numpy` helper).
-- Backward methods respect `requires_grad` and return `None` for inputs that
-  do not require gradients.
+- Assumes **NCHW** layout: (N, C, H, W).
+- CPU-only in the current implementation; these functions rely on NumPy kernels.
+- The actual numeric work is performed by `ops.pool2d_cpu_ext` wrappers, which
+  hide NumPy boundaries behind the `Tensor` API (`to_numpy`, `Tensor._from_numpy`).
+- For backward compatibility, outputs explicitly mirror the input's
+  `requires_grad` flag (`y.requires_grad = x.requires_grad`) instead of relying
+  on kernel wrappers to set it.
 """
 
 from __future__ import annotations
 
 from typing import Optional, Sequence, Tuple
-import numpy as np
 
-from .._tensor import Tensor, Context
 from .._function import Function
-from ..ops.pool2d_cpu import (
-    _pair,
-    maxpool2d_forward_cpu,
-    maxpool2d_backward_cpu,
-    avgpool2d_forward_cpu,
-    avgpool2d_backward_cpu,
-    global_avgpool2d_forward_cpu,
-    global_avgpool2d_backward_cpu,
+from .._tensor import Tensor, Context
+from ..ops.pool2d_cpu import _pair
+from ..ops.pool2d_cpu_ext import (
+    maxpool2d_forward,
+    maxpool2d_backward,
+    avgpool2d_forward,
+    avgpool2d_backward,
+    global_avgpool2d_forward,
+    global_avgpool2d_backward,
 )
-
-
-def _tensor_from_numpy(
-    arr: np.ndarray, *, device, requires_grad: bool = False
-) -> Tensor:
-    """
-    Create a `Tensor` on the given device and copy NumPy data into it.
-
-    Parameters
-    ----------
-    arr : np.ndarray
-        Source array containing the desired tensor data.
-    device
-        Target device placement for the tensor (e.g., `Device("cpu")`).
-    requires_grad : bool, optional
-        Whether the created tensor should participate in autograd.
-        Defaults to False.
-
-    Returns
-    -------
-    Tensor
-        A new tensor with shape matching `arr.shape` whose storage is populated
-        by copying data from `arr`.
-
-    Notes
-    -----
-    - This helper enforces the codebase convention of allocating a tensor first
-      and then copying data via `copy_from_numpy`.
-    - The resulting tensor has `ctx=None` (no autograd history attached here).
-    """
-    t = Tensor(shape=arr.shape, device=device, requires_grad=requires_grad, ctx=None)
-    t.copy_from_numpy(arr)
-    return t
 
 
 class MaxPool2dFn(Function):
     """
-    Autograd-enabled MaxPool2D operation.
+    Autograd-enabled 2D max pooling operation (CPU backend).
 
-    The forward pass performs windowed max pooling over spatial dimensions and
-    records argmax indices so that the backward pass can route gradients to the
-    exact input locations that produced each pooled output value.
+    The forward pass computes max pooling over the spatial dimensions (H, W)
+    and stores argmax metadata required to route gradients during backward.
 
     Saved context
     -------------
     - `saved_tensors`: [x]
     - `saved_meta`:
-        - "x_shape": original input shape
+        - "x_shape": input shape (N, C, H, W)
         - "kernel_size": (k_h, k_w)
         - "stride": (s_h, s_w)
         - "padding": (p_h, p_w)
-        - "argmax_idx": argmax indices from the forward pass
-
-    Notes
-    -----
-    - Operates on NCHW tensors.
-    - CPU-only (NumPy).
+        - "argmax_idx": backend-defined indices from forward
     """
 
     @staticmethod
     def forward(
-        ctx: Context,
-        x: Tensor,
-        *,
-        kernel_size: int | Tuple[int, int],
-        stride: Optional[int | Tuple[int, int]] = None,
-        padding: int | Tuple[int, int] = 0,
+        ctx: Context, x: Tensor, *, kernel_size, stride=None, padding=0
     ) -> Tensor:
         """
-        Compute max pooling output and save metadata for backward.
+        Compute 2D max pooling and save metadata for backward.
 
         Parameters
         ----------
         ctx : Context
-            Autograd context used to store tensors and metadata for backward.
+            Autograd context for storing tensors/metadata required by backward.
         x : Tensor
             Input tensor of shape (N, C, H, W).
-        kernel_size : int or tuple[int, int]
+        kernel_size : int | tuple[int, int]
             Pooling window size.
-        stride : int or tuple[int, int] or None, optional
-            Pooling stride. If None, defaults to `kernel_size`.
-        padding : int or tuple[int, int], optional
-            Spatial padding applied before pooling.
+        stride : int | tuple[int, int] | None, optional
+            Stride between pooling windows. If None, defaults to `kernel_size`.
+        padding : int | tuple[int, int], optional
+            Zero-padding applied to spatial dimensions before pooling.
 
         Returns
         -------
         Tensor
-            Output tensor of shape (N, C, H_out, W_out).
+            Output tensor of pooled values.
 
         Notes
         -----
-        - Argmax indices are stored in `ctx.saved_meta["argmax_idx"]` as a NumPy
-          array to avoid creating additional autograd edges.
+        The returned tensor's `requires_grad` mirrors `x.requires_grad` to preserve
+        legacy behavior in the current codebase.
         """
         k = _pair(kernel_size)
         s = _pair(kernel_size if stride is None else stride)
         p = _pair(padding)
 
-        y_np, argmax_idx = maxpool2d_forward_cpu(
-            x.to_numpy(), kernel_size=k, stride=s, padding=p
-        )
+        y, argmax_idx = maxpool2d_forward(x, kernel_size=k, stride=s, padding=p)
 
         ctx.save_for_backward(x)
         ctx.saved_meta["x_shape"] = x.shape
         ctx.saved_meta["kernel_size"] = k
         ctx.saved_meta["stride"] = s
         ctx.saved_meta["padding"] = p
-        ctx.saved_meta["argmax_idx"] = argmax_idx  # numpy array (meta)
+        ctx.saved_meta["argmax_idx"] = argmax_idx
 
-        out = _tensor_from_numpy(y_np, device=x.device, requires_grad=x.requires_grad)
-        return out
+        # keep legacy requires_grad behavior
+        y.requires_grad = x.requires_grad
+        return y
 
     @staticmethod
     def backward(ctx: Context, grad_out: Tensor) -> Sequence[Optional[Tensor]]:
         """
-        Backpropagate gradients through max pooling.
+        Backpropagate gradients through 2D max pooling.
 
         Parameters
         ----------
         ctx : Context
             Context containing saved tensors and metadata from the forward pass.
         grad_out : Tensor
-            Gradient with respect to the output, shape (N, C, H_out, W_out).
+            Gradient with respect to the pooled output.
 
         Returns
         -------
         Sequence[Optional[Tensor]]
-            A single-element tuple `(grad_x,)` where `grad_x` has shape
-            (N, C, H, W), or `(None,)` if the input does not require gradients.
-
-        Notes
-        -----
-        - The gradient is routed only to the input positions that were maxima
-          during the forward pass.
+            A single-element tuple `(grad_x,)` where `grad_x` matches the input
+            shape, or `(None,)` if the input does not require gradients.
         """
         (x,) = ctx.saved_tensors
-        x_shape = ctx.saved_meta["x_shape"]
-        k = ctx.saved_meta["kernel_size"]
-        s = ctx.saved_meta["stride"]
-        p = ctx.saved_meta["padding"]
-        argmax_idx = ctx.saved_meta["argmax_idx"]
-
         if not x.requires_grad:
             return (None,)
 
-        gx_np = maxpool2d_backward_cpu(
-            grad_out.to_numpy(),
-            argmax_idx,
-            x_shape=x_shape,
-            kernel_size=k,
-            stride=s,
-            padding=p,
+        gx = maxpool2d_backward(
+            grad_out,
+            argmax_idx=ctx.saved_meta["argmax_idx"],
+            x_shape=ctx.saved_meta["x_shape"],
+            kernel_size=ctx.saved_meta["kernel_size"],
+            stride=ctx.saved_meta["stride"],
+            padding=ctx.saved_meta["padding"],
         )
-        gx = _tensor_from_numpy(gx_np, device=x.device, requires_grad=False)
         return (gx,)
 
 
 class AvgPool2dFn(Function):
     """
-    Autograd-enabled AvgPool2D operation.
+    Autograd-enabled 2D average pooling operation (CPU backend).
 
-    The forward pass performs windowed average pooling over spatial dimensions.
-    The backward pass distributes gradients uniformly across each pooling window.
+    The forward pass performs windowed average pooling over the spatial
+    dimensions. The backward pass distributes gradients uniformly over each
+    pooling window according to the forward configuration.
 
     Saved context
     -------------
     - `saved_tensors`: [x]
     - `saved_meta`:
-        - "x_shape": original input shape
+        - "x_shape": input shape (N, C, H, W)
         - "kernel_size": (k_h, k_w)
         - "stride": (s_h, s_w)
         - "padding": (p_h, p_w)
 
     Notes
     -----
-    - Operates on NCHW tensors.
-    - Uses zero-padding and averages over the full kernel area.
-    - CPU-only (NumPy).
+    - Assumes NCHW layout.
+    - CPU-only: relies on NumPy kernels under `ops.pool2d_cpu_ext`.
+    - Preserves legacy `requires_grad` behavior by mirroring from `x`.
     """
 
     @staticmethod
@@ -235,20 +183,20 @@ class AvgPool2dFn(Function):
         padding: int | Tuple[int, int] = 0,
     ) -> Tensor:
         """
-        Compute average pooling output and save metadata for backward.
+        Compute 2D average pooling and save metadata for backward.
 
         Parameters
         ----------
         ctx : Context
-            Autograd context used to store tensors and metadata for backward.
+            Autograd context for storing tensors/metadata required by backward.
         x : Tensor
             Input tensor of shape (N, C, H, W).
-        kernel_size : int or tuple[int, int]
+        kernel_size : int | tuple[int, int]
             Pooling window size.
-        stride : int or tuple[int, int] or None, optional
-            Pooling stride. If None, defaults to `kernel_size`.
-        padding : int or tuple[int, int], optional
-            Spatial padding applied before pooling.
+        stride : int | tuple[int, int] | None, optional
+            Stride between pooling windows. If None, defaults to `kernel_size`.
+        padding : int | tuple[int, int], optional
+            Zero-padding applied to spatial dimensions before pooling.
 
         Returns
         -------
@@ -259,7 +207,7 @@ class AvgPool2dFn(Function):
         s = _pair(kernel_size if stride is None else stride)
         p = _pair(padding)
 
-        y_np = avgpool2d_forward_cpu(x.to_numpy(), kernel_size=k, stride=s, padding=p)
+        y = avgpool2d_forward(x, kernel_size=k, stride=s, padding=p)
 
         ctx.save_for_backward(x)
         ctx.saved_meta["x_shape"] = x.shape
@@ -267,13 +215,14 @@ class AvgPool2dFn(Function):
         ctx.saved_meta["stride"] = s
         ctx.saved_meta["padding"] = p
 
-        out = _tensor_from_numpy(y_np, device=x.device, requires_grad=x.requires_grad)
-        return out
+        # Preserve legacy behavior: output requires_grad mirrors input grad participation
+        y.requires_grad = x.requires_grad
+        return y
 
     @staticmethod
     def backward(ctx: Context, grad_out: Tensor) -> Sequence[Optional[Tensor]]:
         """
-        Backpropagate gradients through average pooling.
+        Backpropagate gradients through 2D average pooling.
 
         Parameters
         ----------
@@ -289,47 +238,41 @@ class AvgPool2dFn(Function):
             (N, C, H, W), or `(None,)` if the input does not require gradients.
         """
         (x,) = ctx.saved_tensors
-        x_shape = ctx.saved_meta["x_shape"]
-        k = ctx.saved_meta["kernel_size"]
-        s = ctx.saved_meta["stride"]
-        p = ctx.saved_meta["padding"]
-
         if not x.requires_grad:
             return (None,)
 
-        gx_np = avgpool2d_backward_cpu(
-            grad_out.to_numpy(),
-            x_shape=x_shape,
-            kernel_size=k,
-            stride=s,
-            padding=p,
+        gx = avgpool2d_backward(
+            grad_out,
+            x_shape=ctx.saved_meta["x_shape"],
+            kernel_size=ctx.saved_meta["kernel_size"],
+            stride=ctx.saved_meta["stride"],
+            padding=ctx.saved_meta["padding"],
         )
-        gx = _tensor_from_numpy(gx_np, device=x.device, requires_grad=False)
         return (gx,)
 
 
 class GlobalAvgPool2dFn(Function):
     """
-    Autograd-enabled Global Average Pooling (GAP) operation.
+    Autograd-enabled global average pooling (GAP) over 2D spatial dims (CPU backend).
 
-    Global average pooling reduces each channel to a single spatial value by
-    averaging over height and width:
+    Global average pooling reduces the spatial dimensions by averaging:
 
         (N, C, H, W) -> (N, C, 1, 1)
 
-    The backward pass distributes gradients uniformly across all H*W input
-    positions per channel.
+    The backward pass distributes gradients uniformly across all H*W positions
+    per channel.
 
     Saved context
     -------------
     - `saved_tensors`: [x]
     - `saved_meta`:
-        - "x_shape": original input shape
+        - "x_shape": input shape (N, C, H, W)
 
     Notes
     -----
-    - Operates on NCHW tensors.
-    - CPU-only (NumPy).
+    - Assumes NCHW layout.
+    - CPU-only: relies on NumPy kernels under `ops.pool2d_cpu_ext`.
+    - Preserves legacy `requires_grad` behavior by mirroring from `x`.
     """
 
     @staticmethod
@@ -340,7 +283,7 @@ class GlobalAvgPool2dFn(Function):
         Parameters
         ----------
         ctx : Context
-            Autograd context used to store tensors and metadata for backward.
+            Autograd context for storing tensors/metadata required by backward.
         x : Tensor
             Input tensor of shape (N, C, H, W).
 
@@ -349,13 +292,14 @@ class GlobalAvgPool2dFn(Function):
         Tensor
             Output tensor of shape (N, C, 1, 1).
         """
-        y_np = global_avgpool2d_forward_cpu(x.to_numpy())
+        y = global_avgpool2d_forward(x)
 
         ctx.save_for_backward(x)
         ctx.saved_meta["x_shape"] = x.shape
 
-        out = _tensor_from_numpy(y_np, device=x.device, requires_grad=x.requires_grad)
-        return out
+        # Preserve legacy behavior: output requires_grad mirrors input grad participation
+        y.requires_grad = x.requires_grad
+        return y
 
     @staticmethod
     def backward(ctx: Context, grad_out: Tensor) -> Sequence[Optional[Tensor]]:
@@ -367,7 +311,7 @@ class GlobalAvgPool2dFn(Function):
         ctx : Context
             Context containing saved tensors and metadata from the forward pass.
         grad_out : Tensor
-            Gradient with respect to output, shape (N, C, 1, 1).
+            Gradient with respect to the output, shape (N, C, 1, 1).
 
         Returns
         -------
@@ -379,8 +323,8 @@ class GlobalAvgPool2dFn(Function):
         if not x.requires_grad:
             return (None,)
 
-        gx_np = global_avgpool2d_backward_cpu(
-            grad_out.to_numpy(), x_shape=ctx.saved_meta["x_shape"]
+        gx = global_avgpool2d_backward(
+            grad_out,
+            x_shape=ctx.saved_meta["x_shape"],
         )
-        gx = _tensor_from_numpy(gx_np, device=x.device, requires_grad=False)
         return (gx,)

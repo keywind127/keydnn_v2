@@ -1870,3 +1870,120 @@ class Tensor(ITensor):
             out._set_ctx(ctx)
 
         return out
+
+    def item(self) -> float:
+        """
+        Return the value of a scalar (or single-element) CPU tensor as a Python float.
+
+        Raises
+        ------
+        RuntimeError
+            If called on a non-CPU tensor.
+        ValueError
+            If the tensor is not scalar and does not contain exactly 1 element.
+        """
+        if not self.device.is_cpu():
+            self._raise_device_not_supported("item")
+
+        # Accept scalar shape () OR any shape with exactly one element.
+        if self.shape == ():
+            # _data is a 0-d ndarray on CPU
+            return float(self._data)  # type: ignore[arg-type]
+        if self.numel() != 1:
+            raise ValueError(
+                f"Tensor.item() requires a scalar/1-element tensor, got shape={self.shape}"
+            )
+
+        # For (1,) or (1,1,...) tensors
+        return float(self._data.reshape(-1)[0])
+
+    def sqrt(self) -> "Tensor":
+        """
+        Elementwise square root.
+
+        Returns
+        -------
+        Tensor
+            A tensor with the same shape as `self`, containing sqrt(self) elementwise.
+
+        Notes
+        -----
+        - CPU-only for now.
+        - NumPy is used only inside Tensor to perform the actual numeric kernel.
+        - Autograd: if `self.requires_grad` is True, attaches a Context with parent (self,).
+        """
+        if not self.device.is_cpu():
+            self._raise_device_not_supported("sqrt")
+
+        x_np = self.to_numpy()
+        y_np = np.sqrt(x_np).astype(np.float32, copy=False)
+
+        out = Tensor(
+            shape=self.shape, device=self.device, requires_grad=self.requires_grad
+        )
+        out.copy_from_numpy(y_np)
+
+        if self.requires_grad:
+            # Save output for backward (so we don't recompute sqrt).
+            def backward_fn(grad_out: "Tensor") -> Sequence[Optional["Tensor"]]:
+                if not grad_out.device.is_cpu():
+                    grad_out._raise_device_not_supported("sqrt_backward")
+
+                # d/dx sqrt(x) = 0.5 / sqrt(x) = 0.5 / out
+                # Use numpy here because we're inside Tensor (your requirement).
+                go = grad_out.to_numpy().astype(np.float32, copy=False)
+                y = out.to_numpy().astype(np.float32, copy=False)
+
+                # Be careful about division-by-zero; follow numpy semantics.
+                gx_np = (go * (0.5 / y)).astype(np.float32, copy=False)
+
+                gx = Tensor(shape=self.shape, device=self.device, requires_grad=False)
+                gx.copy_from_numpy(gx_np)
+                return (gx,)
+
+            ctx = Context(parents=(self,), backward_fn=backward_fn)
+            # Store `out` for backward (reused derivative)
+            ctx.save_for_backward(out)
+            out._set_ctx(ctx)
+
+        return out
+
+    @staticmethod
+    def _from_numpy(arr: ITensor, *, device, requires_grad: bool = False) -> "Tensor":
+        """
+        Construct a Tensor from a NumPy array.
+
+        This is a low-level factory method that creates a new `Tensor` with
+        storage allocated on the specified device and initializes its contents
+        by copying data from a NumPy array.
+
+        Parameters
+        ----------
+        arr : np.ndarray
+            Source NumPy array containing the tensor data. The array's shape
+            determines the shape of the resulting tensor.
+        device : Device
+            Target device on which the tensor should be created.
+        requires_grad : bool, optional
+            Whether the resulting tensor should participate in automatic
+            differentiation. Defaults to False.
+
+        Returns
+        -------
+        Tensor
+            A newly created tensor whose contents are copied from `arr`.
+
+        Notes
+        -----
+        - This method centralizes the NumPy → Tensor boundary inside the `Tensor`
+        implementation to keep higher-level code NumPy-free.
+        - The input array is copied into the tensor's internal storage; subsequent
+        modifications to `arr` do not affect the tensor.
+        - No autograd context is attached during construction. Gradient tracking
+        begins only when this tensor is used in differentiable operations.
+        """
+        t = Tensor(
+            shape=arr.shape, device=device, requires_grad=requires_grad, ctx=None
+        )
+        t.copy_from_numpy(arr)
+        return t

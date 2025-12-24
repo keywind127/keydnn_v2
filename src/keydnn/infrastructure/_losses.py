@@ -27,7 +27,6 @@ These losses return scalar tensors and are intended to be used as the final
 operation before invoking backpropagation.
 """
 
-import numpy as np
 from typing import Tuple
 from ._function import Function
 from ._tensor import Tensor, Context
@@ -36,25 +35,8 @@ from ._tensor import Tensor, Context
 def _scalar_to_float(t: Tensor) -> float:
     """
     Extract a Python scalar from a scalar Tensor.
-
-    Parameters
-    ----------
-    t : Tensor
-        A scalar tensor (shape `()` or equivalent) residing on the CPU.
-
-    Returns
-    -------
-    float
-        The scalar value stored in the tensor.
-
-    Notes
-    -----
-    This helper exists to bridge scalar gradient values (`grad_out`) with
-    KeyDNN's current non-broadcasting Tensor semantics. It is intentionally
-    used inside backward passes where scalar multiplication of higher-rank
-    tensors is required.
     """
-    return float(np.asarray(t.to_numpy()).reshape(-1)[0])
+    return t.item()
 
 
 class SSEFn(Function):

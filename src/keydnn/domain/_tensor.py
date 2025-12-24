@@ -695,3 +695,63 @@ class ITensor(Protocol):
             The elementwise sum, not connected to the autograd graph.
         """
         ...
+
+    def item(self) -> float:
+        """
+        Return the value of a scalar (or single-element) CPU tensor as a Python float.
+
+        Raises
+        ------
+        RuntimeError
+            If called on a non-CPU tensor.
+        ValueError
+            If the tensor is not scalar and does not contain exactly 1 element.
+        """
+        ...
+
+    def sqrt(self) -> "ITensor":
+        """
+        Elementwise square root.
+
+        Returns
+        -------
+        Tensor
+            A tensor with the same shape as `self`, containing sqrt(self) elementwise.
+        """
+        ...
+
+    @staticmethod
+    def _from_numpy(arr: ITensor, *, device, requires_grad: bool = False) -> "ITensor":
+        """
+        Create a tensor from a NumPy-compatible array.
+
+        This is a low-level construction utility intended for use by backend
+        implementations and internal framework code. The returned tensor is
+        initialized with data copied from the provided array and placed on
+        the specified device.
+
+        Parameters
+        ----------
+        arr : Any
+            A NumPy-compatible array object containing the source data.
+            Concrete implementations may require this to be an `np.ndarray`.
+        device : DeviceLike
+            Target device on which the tensor should be created.
+        requires_grad : bool, optional
+            Whether the resulting tensor should participate in automatic
+            differentiation. Defaults to False.
+
+        Returns
+        -------
+        ITensor
+            A newly created tensor containing the data from `arr`.
+
+        Notes
+        -----
+        - This method is intentionally underscored to signal that it is not
+        part of the public, user-facing tensor API.
+        - Implementations may copy or cast the input data as required by the
+        backend (e.g., enforcing `float32` dtype on CPU).
+        - Autograd context is not attached during construction; any gradient
+        tracking begins from subsequent differentiable operations.
+        """

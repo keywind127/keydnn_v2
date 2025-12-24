@@ -6,14 +6,18 @@ instances in-place using their accumulated gradients.
 
 Design notes
 ------------
-- Optimizers operate on `Parameter` objects and read gradients from `p.grad`.
+- Optimizers operate exclusively on `Parameter` / `Tensor` objects and read
+  gradients from `p.grad`.
 - Parameters with `grad is None` are skipped to support partial graphs and
   frozen weights.
 - Updates are applied by writing directly into parameter storage via
-  `copy_from`, keeping the optimizer independent from any autograd
-  execution engine details.
-- Current implementations target the NumPy CPU backend. CUDA support may be
-  added once tensor kernels and device-aware gradient storage are available.
+  `copy_from`, keeping optimizers independent from the autograd execution
+  engine and graph construction details.
+- Optimizer math is expressed entirely in terms of Tensor operations;
+  backend-specific numerical implementations (e.g., NumPy) are encapsulated
+  within Tensor methods only.
+- Current implementations are CPU-only. CUDA support may be added once
+  device-aware Tensor kernels and gradient storage are available.
 """
 
 from __future__ import annotations
@@ -21,8 +25,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable, Sequence, Tuple, Dict
 
-import numpy as np
-
+from ._tensor import Tensor
 from ._parameter import Parameter
 
 
@@ -286,46 +289,50 @@ class Adam:
             if g is None:
                 continue
 
+            # Keep legacy behavior: CPU-only for now
             if not p.device.is_cpu() or not g.device.is_cpu():
                 p._raise_device_not_supported("adam_step")
 
             pid = id(p)
-            p_np = p.to_numpy().astype(np.float32, copy=False)
-            g_np = g.to_numpy().astype(np.float32, copy=False)
-
-            # Classical L2 weight decay (coupled)
-            if self.weight_decay != 0.0:
-                g_np = g_np + (self.weight_decay * p_np)
-
             st = self._state.get(pid)
             if st is None:
-                st = {
-                    "t": 0,
-                    "m": np.zeros_like(p_np, dtype=np.float32),
-                    "v": np.zeros_like(p_np, dtype=np.float32),
-                }
+                # m, v should NOT require grad (optimizer state)
+                m = Tensor(shape=p.shape, device=p.device, requires_grad=False)
+                v = Tensor(shape=p.shape, device=p.device, requires_grad=False)
+                m.fill(0.0)
+                v.fill(0.0)
+                st = {"t": 0, "m": m, "v": v}
                 self._state[pid] = st
 
             st["t"] = int(st["t"]) + 1
             t = int(st["t"])
-            m = st["m"]  # type: ignore[assignment]
-            v = st["v"]  # type: ignore[assignment]
+            m: Tensor = st["m"]  # type: ignore[assignment]
+            v: Tensor = st["v"]  # type: ignore[assignment]
 
-            # Update moments
-            m[...] = (b1 * m) + ((1.0 - b1) * g_np)
-            v[...] = (b2 * v) + ((1.0 - b2) * (g_np * g_np))
+            # Classical L2 weight decay (coupled): g <- g + wd * p
+            if self.weight_decay != 0.0:
+                g_eff = g + (self.weight_decay * p)
+            else:
+                g_eff = g
 
-            # Bias correction
+            # m = b1*m + (1-b1)*g
+            # v = b2*v + (1-b2)*(g*g)
+            m_new = (b1 * m) + ((1.0 - b1) * g_eff)
+            v_new = (b2 * v) + ((1.0 - b2) * (g_eff * g_eff))
+
+            # write state in-place
+            m.copy_from(m_new)
+            v.copy_from(v_new)
+
+            # bias correction
+            # NOTE: these are Python scalars; that’s fine.
             m_hat = m / (1.0 - (b1**t))
             v_hat = v / (1.0 - (b2**t))
 
-            # Parameter update
-            update = self.lr * (m_hat / (np.sqrt(v_hat) + self.eps))
-            new_p = p_np - update
+            # update = lr * m_hat / (sqrt(v_hat) + eps)
+            # requires Tensor.sqrt() (or equivalent)
+            denom = v_hat.sqrt() + self.eps
+            step = self.lr * (m_hat / denom)
 
-            # Write back to parameter storage (CPU-only)
-            tmp = Parameter(
-                shape=p.shape, device=p.device, requires_grad=False
-            )  # or Tensor
-            tmp.copy_from_numpy(new_p)
-            p.copy_from(tmp)
+            # p <- p - step
+            p.copy_from(p - step)
