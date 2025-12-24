@@ -83,6 +83,7 @@
     <CudaCompile Include="kernel.cu" />
     <CudaCompile Include="keydnn_avgpool2d_cuda.cu" />
     <CudaCompile Include="keydnn_cuda_utils.cu" />
+    <CudaCompile Include="keydnn_global_avgpool2d_cuda.cu" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
