@@ -1,3 +1,4 @@
+# python and c++ native
 __pycache__
 *.egg-info
 dist
@@ -13,3 +14,17 @@ dist
 *.json
 src/keydnn/infrastructure/tensor/*
 !src/keydnn/infrastructure/tensor/_tensor_context.py
+# Visual Studio cache / user state
+.vs/
+*.user
+*.userosscache
+*.suo
+*.VC.db
+*.VC.opendb
+# Build output directories
+Debug/
+Release/
+x64/
+x86/
+ARM/
+ARM64/
