@@ -81,6 +81,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <CudaCompile Include="kernel.cu" />
+    <CudaCompile Include="keydnn_avgpool2d_cuda.cu" />
     <CudaCompile Include="keydnn_cuda_utils.cu" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
