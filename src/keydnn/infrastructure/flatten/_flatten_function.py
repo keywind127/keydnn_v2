@@ -22,43 +22,9 @@ Design notes
 from __future__ import annotations
 
 from typing import Optional, Sequence, Tuple
-import numpy as np
 
 from .._tensor import Tensor, Context
 from .._function import Function
-
-
-def _tensor_from_numpy(
-    arr: np.ndarray, *, device, requires_grad: bool = False
-) -> Tensor:
-    """
-    Create a `Tensor` on the given device and copy NumPy data into it.
-
-    Parameters
-    ----------
-    arr : np.ndarray
-        Source array containing tensor data.
-    device
-        Target device placement (e.g., CPU device).
-    requires_grad : bool, optional
-        Whether the created tensor should participate in autograd.
-        Defaults to False.
-
-    Returns
-    -------
-    Tensor
-        A new tensor with `shape == arr.shape` whose underlying storage is
-        populated from `arr`.
-
-    Notes
-    -----
-    This helper follows the codebase pattern of:
-    1) allocate tensor storage via `Tensor(shape=..., device=...)`
-    2) populate storage via `copy_from_numpy(...)`
-    """
-    t = Tensor(shape=arr.shape, device=device, requires_grad=requires_grad, ctx=None)
-    t.copy_from_numpy(arr)
-    return t
 
 
 class FlattenFn(Function):
@@ -114,14 +80,18 @@ class FlattenFn(Function):
         - The original input shape is saved to `ctx.saved_meta["orig_shape"]`
           so that the backward pass can reshape gradients correctly.
         """
-        x_np = x.to_numpy()
-        N = x_np.shape[0]
-        out_np = x_np.reshape(N, -1)
+        if len(x.shape) < 1:
+            raise ValueError("Flatten expects at least 1D input")
+
+        N = x.shape[0]
+        feature_dim = 1
+        for d in x.shape[1:]:
+            feature_dim *= d
 
         ctx.save_for_backward(x)
         ctx.saved_meta["orig_shape"] = x.shape
 
-        out = _tensor_from_numpy(out_np, device=x.device, requires_grad=x.requires_grad)
+        out = x.reshape((N, feature_dim))
         return out
 
     @staticmethod
@@ -152,7 +122,5 @@ class FlattenFn(Function):
             return (None,)
 
         orig_shape: Tuple[int, ...] = ctx.saved_meta["orig_shape"]
-        grad_np = grad_out.to_numpy().reshape(orig_shape)
-
-        grad_x = _tensor_from_numpy(grad_np, device=x.device, requires_grad=False)
+        grad_x = grad_out.reshape(orig_shape)
         return (grad_x,)

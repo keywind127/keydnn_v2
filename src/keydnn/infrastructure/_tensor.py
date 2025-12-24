@@ -1987,3 +1987,82 @@ class Tensor(ITensor):
         )
         t.copy_from_numpy(arr)
         return t
+
+    @staticmethod
+    def rand(shape, *, device, requires_grad: bool = False) -> "Tensor":
+        """
+        Create a tensor filled with uniform random values in [0, 1) on the given device.
+
+        Notes
+        -----
+        - CPU-only for now.
+        - Random generation is intentionally implemented inside Tensor so higher-level
+        modules (e.g., Dropout) do not depend on NumPy directly.
+        """
+        if not device.is_cpu():
+            # match your existing CPU-only policy
+            raise RuntimeError("rand is only supported for CPU tensors for now.")
+
+        # NumPy is allowed here by your rule: only inside Tensor.
+        import numpy as np
+
+        arr = np.random.rand(*shape).astype(np.float32, copy=False)
+        t = Tensor(shape=shape, device=device, requires_grad=requires_grad, ctx=None)
+        t.copy_from_numpy(arr)
+        return t
+
+    @staticmethod
+    def full(
+        shape,
+        fill_value: float,
+        *,
+        device,
+        requires_grad: bool = False,
+    ) -> "Tensor":
+        """
+        Create a tensor filled with a constant value.
+
+        This is a convenience factory that allocates a new tensor on the requested
+        device and fills all elements with `fill_value`.
+
+        Parameters
+        ----------
+        shape
+            Desired tensor shape. May be any shape accepted by NumPy (including
+            `()` for a scalar tensor).
+        fill_value : float
+            Constant value to write into every element.
+        device
+            Target device placement. Currently only CPU is supported.
+        requires_grad : bool, optional
+            Whether the returned tensor should participate in autograd.
+            Defaults to False.
+
+        Returns
+        -------
+        Tensor
+            A newly allocated tensor with the given shape, filled with `fill_value`.
+
+        Raises
+        ------
+        RuntimeError
+            If `device` is not CPU.
+
+        Notes
+        -----
+        - NumPy is used internally to generate the initial filled buffer.
+        Higher-level code should prefer calling `Tensor.full(...)` rather than
+        allocating NumPy arrays directly.
+        - The returned tensor is created with `ctx=None` (no autograd history).
+        """
+        if not device.is_cpu():
+            raise RuntimeError("full is only supported for CPU tensors for now.")
+
+        import numpy as np
+
+        arr = np.full(shape, fill_value, dtype=np.float32)
+        t = Tensor(
+            shape=arr.shape, device=device, requires_grad=requires_grad, ctx=None
+        )
+        t.copy_from_numpy(arr)
+        return t

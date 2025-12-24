@@ -22,8 +22,6 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-import numpy as np
-
 from .._module import Module
 from .._tensor import Context, Tensor
 from ..module._serialization_core import register_module
@@ -96,28 +94,33 @@ class Dropout(Module):
             return x
 
         if not x.device.is_cpu():
-            # Keep behavior consistent with other CPU-only ops
             raise RuntimeError("Dropout is only supported for CPU tensors for now.")
 
         keep_prob = 1.0 - self.p
+        if keep_prob <= 0.0:
+            raise ValueError("Dropout keep_prob must be > 0.")
 
-        x_np = x.to_numpy()
-        mask_np = (np.random.rand(*x.shape) < keep_prob).astype(np.float32)
-        mask_np /= keep_prob  # inverted dropout scaling
+        r = Tensor.rand(x.shape, device=x.device)  # [0,1)
 
-        mask = Tensor(shape=x.shape, device=x.device, requires_grad=False, ctx=None)
-        mask.copy_from_numpy(mask_np)
+        # scalar -> Tensor, then broadcast to match r (avoid Tensor < float)
+        kp = Tensor.full((), keep_prob, device=x.device, requires_grad=False)
+        kp = kp.broadcast_to(x.shape)
 
-        req = x.requires_grad
-        out = Tensor(shape=x.shape, device=x.device, requires_grad=req, ctx=None)
-        out.copy_from_numpy(x_np * mask_np)
+        mask = r < kp
+        mask = mask / kp  # inverted dropout scaling
+
+        req = bool(x.requires_grad)
+
+        y = x * mask
+
+        out = Tensor(shape=y.shape, device=y.device, requires_grad=req, ctx=None)
+        out.copy_from(y)
 
         if req:
             ctx = Context(
                 parents=(x,),
                 backward_fn=lambda grad_out: (grad_out * mask,),
             )
-            # Saved for debugging and introspection consistency
             ctx.saved_tensors.append(mask)
             out._set_ctx(ctx)
 

@@ -34,8 +34,6 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-import numpy as np
-
 from ...domain.device._device import Device
 from .._module import Module
 from .._parameter import Parameter
@@ -113,7 +111,7 @@ class BatchNorm1d(Module):
         affine : bool, default=True
             Whether to include learnable affine parameters (gamma, beta).
         """
-        super().__init__()  # <-- REQUIRED (sets _parameters/_modules)
+        super().__init__()
 
         self.num_features = int(num_features)
         self.device = device
@@ -122,18 +120,12 @@ class BatchNorm1d(Module):
         self.affine = bool(affine)
         self.training = True
 
-        # buffers
-        self.running_mean = Tensor(
-            (self.num_features,), self.device, requires_grad=False, ctx=None
+        # buffers (no NumPy here)
+        self.running_mean = Tensor.full(
+            (self.num_features,), 0.0, device=self.device, requires_grad=False
         )
-        self.running_var = Tensor(
-            (self.num_features,), self.device, requires_grad=False, ctx=None
-        )
-        self.running_mean.copy_from_numpy(
-            np.zeros((self.num_features,), dtype=np.float32)
-        )
-        self.running_var.copy_from_numpy(
-            np.ones((self.num_features,), dtype=np.float32)
+        self.running_var = Tensor.full(
+            (self.num_features,), 1.0, device=self.device, requires_grad=False
         )
 
         # affine params
@@ -143,8 +135,16 @@ class BatchNorm1d(Module):
             )
             self.beta = Parameter((self.num_features,), self.device, requires_grad=True)
 
-            self.gamma.copy_from_numpy(np.ones((self.num_features,), dtype=np.float32))
-            self.beta.copy_from_numpy(np.zeros((self.num_features,), dtype=np.float32))
+            self.gamma.copy_from(
+                Tensor.full(
+                    (self.num_features,), 1.0, device=self.device, requires_grad=False
+                )
+            )
+            self.beta.copy_from(
+                Tensor.full(
+                    (self.num_features,), 0.0, device=self.device, requires_grad=False
+                )
+            )
         else:
             self.gamma = None
             self.beta = None
@@ -178,7 +178,6 @@ class BatchNorm1d(Module):
             raise RuntimeError("BatchNorm1d is only supported for CPU tensors for now.")
 
         if x.device != self.device:
-            # Keep it strict for now (consistent with other modules)
             raise ValueError(
                 f"Device mismatch: x is {x.device}, module is {self.device}"
             )
@@ -192,45 +191,60 @@ class BatchNorm1d(Module):
         if C != self.num_features:
             raise ValueError(f"Expected num_features={self.num_features}, got C={C}")
 
-        x_np = x.to_numpy()
-
+        # --- stats ---
         if self.training:
-            mean = x_np.mean(axis=0)
-            var = x_np.var(axis=0)
+            mean = x.sum(axis=0) * (1.0 / float(N))  # (C,)
+            x_centered = x - mean.broadcast_to(x.shape)
+            var = (x_centered * x_centered).sum(axis=0) * (1.0 / float(N))  # (C,)
 
-            # Update running stats
-            rm = self.running_mean.to_numpy()
-            rv = self.running_var.to_numpy()
-            self.running_mean.copy_from_numpy(
-                (1.0 - self.momentum) * rm + self.momentum * mean
+            # Update running stats WITHOUT graph history
+            mean_det = Tensor(
+                shape=mean.shape, device=self.device, requires_grad=False, ctx=None
             )
-            self.running_var.copy_from_numpy(
-                (1.0 - self.momentum) * rv + self.momentum * var
+            var_det = Tensor(
+                shape=var.shape, device=self.device, requires_grad=False, ctx=None
             )
+            mean_det.copy_from(mean)
+            var_det.copy_from(var)
+
+            new_rm = (
+                1.0 - self.momentum
+            ) * self.running_mean + self.momentum * mean_det
+            new_rv = (1.0 - self.momentum) * self.running_var + self.momentum * var_det
+            self.running_mean.copy_from(new_rm)
+            self.running_var.copy_from(new_rv)
         else:
-            mean = self.running_mean.to_numpy()
-            var = self.running_var.to_numpy()
+            mean = self.running_mean
+            var = self.running_var
 
-        inv_std = 1.0 / np.sqrt(var + self.eps)
-        x_hat = (x_np - mean) * inv_std
+            x_centered = x - mean.broadcast_to(x.shape)
+
+        inv_std = 1.0 / (var + self.eps).sqrt()  # (C,)
+        inv_std_bc = inv_std.broadcast_to(x.shape)  # (N,C)
+        x_hat = x_centered * inv_std_bc  # (N,C)
 
         if self.affine:
-            gamma_np = self.gamma.to_numpy()
-            beta_np = self.beta.to_numpy()
-            y_np = gamma_np * x_hat + beta_np
+            assert self.gamma is not None and self.beta is not None
+            gamma_bc = self.gamma.broadcast_to(x.shape)
+            beta_bc = self.beta.broadcast_to(x.shape)
+            y = gamma_bc * x_hat + beta_bc
         else:
-            y_np = x_hat
+            y = x_hat
 
         req = x.requires_grad or (
-            self.affine and (self.gamma.requires_grad or self.beta.requires_grad)
+            self.affine
+            and (
+                (self.gamma is not None and self.gamma.requires_grad)
+                or (self.beta is not None and self.beta.requires_grad)
+            )
         )
+
+        # Fresh output tensor: BN defines ctx (avoid inheriting op ctx chain)
         out = Tensor(shape=x.shape, device=self.device, requires_grad=req, ctx=None)
-        out.copy_from_numpy(y_np)
+        out.copy_from(y)
 
         if req:
-            parents = (x,)
-            if self.affine:
-                parents = (x, self.gamma, self.beta)
+            parents = (x,) if not self.affine else (x, self.gamma, self.beta)
 
             def backward_fn(grad_out: Tensor):
                 """
@@ -248,51 +262,47 @@ class BatchNorm1d(Module):
                     - (dx,) if affine=False
                     - (dx, dgamma, dbeta) if affine=True
                 """
-                g = grad_out.to_numpy()  # (N, C)
+                g = grad_out  # (N,C)
 
-                # If affine: grad wrt x_hat is g * gamma, else just g
                 if self.affine:
-                    gamma_np_local = self.gamma.to_numpy()
-                    dxhat = g * gamma_np_local
+                    assert self.gamma is not None and self.beta is not None
+                    dxhat = g * self.gamma.broadcast_to(x.shape)
                 else:
                     dxhat = g
 
-                # BatchNorm backward (for x) using x_hat and inv_std
-                # dx = (1/N) * inv_std * (N*dxhat - sum(dxhat) - x_hat*sum(dxhat*x_hat))
-                sum_dxhat = dxhat.sum(axis=0)
-                sum_dxhat_xhat = (dxhat * x_hat).sum(axis=0)
+                sum_dxhat = dxhat.sum(axis=0).broadcast_to(x.shape)  # (N,C)
+                sum_dxhat_xhat = (
+                    (dxhat * x_hat).sum(axis=0).broadcast_to(x.shape)
+                )  # (N,C)
 
                 dx = (
-                    (1.0 / N)
-                    * inv_std
-                    * (N * dxhat - sum_dxhat - x_hat * sum_dxhat_xhat)
+                    (1.0 / float(N))
+                    * inv_std_bc
+                    * (float(N) * dxhat - sum_dxhat - x_hat * sum_dxhat_xhat)
                 )
 
                 dx_t = Tensor(
                     shape=x.shape, device=self.device, requires_grad=False, ctx=None
                 )
-                dx_t.copy_from_numpy(dx)
+                dx_t.copy_from(dx)
 
                 if not self.affine:
                     return (dx_t,)
 
-                dgamma = (g * x_hat).sum(axis=0)
-                dbeta = g.sum(axis=0)
+                dgamma = (g * x_hat).sum(axis=0)  # (C,)
+                dbeta = g.sum(axis=0)  # (C,)
 
                 dgamma_t = Tensor(
-                    shape=self.gamma.shape,
+                    shape=dgamma.shape,
                     device=self.device,
                     requires_grad=False,
                     ctx=None,
                 )
                 dbeta_t = Tensor(
-                    shape=self.beta.shape,
-                    device=self.device,
-                    requires_grad=False,
-                    ctx=None,
+                    shape=dbeta.shape, device=self.device, requires_grad=False, ctx=None
                 )
-                dgamma_t.copy_from_numpy(dgamma.astype(np.float32, copy=False))
-                dbeta_t.copy_from_numpy(dbeta.astype(np.float32, copy=False))
+                dgamma_t.copy_from(dgamma)
+                dbeta_t.copy_from(dbeta)
 
                 return (dx_t, dgamma_t, dbeta_t)
 
@@ -414,7 +424,7 @@ class BatchNorm2d(Module):
         affine : bool, default=True
             Whether to include learnable affine parameters (gamma, beta).
         """
-        super().__init__()  # IMPORTANT: creates _parameters/_modules for auto-registration
+        super().__init__()
 
         self.num_features = int(num_features)
         self.device = device
@@ -423,40 +433,30 @@ class BatchNorm2d(Module):
         self.affine = bool(affine)
         self.training = True
 
-        # Running stats (buffers)
-        self.running_mean = Tensor(
-            shape=(self.num_features,),
-            device=self.device,
-            requires_grad=False,
-            ctx=None,
+        self.running_mean = Tensor.full(
+            (self.num_features,), 0.0, device=self.device, requires_grad=False
         )
-        self.running_var = Tensor(
-            shape=(self.num_features,),
-            device=self.device,
-            requires_grad=False,
-            ctx=None,
-        )
-        self.running_mean.copy_from_numpy(
-            np.zeros((self.num_features,), dtype=np.float32)
-        )
-        self.running_var.copy_from_numpy(
-            np.ones((self.num_features,), dtype=np.float32)
+        self.running_var = Tensor.full(
+            (self.num_features,), 1.0, device=self.device, requires_grad=False
         )
 
-        # Affine parameters
         if self.affine:
             self.gamma = Parameter(
-                shape=(self.num_features,),
-                device=self.device,
-                requires_grad=True,
+                shape=(self.num_features,), device=self.device, requires_grad=True
             )
             self.beta = Parameter(
-                shape=(self.num_features,),
-                device=self.device,
-                requires_grad=True,
+                shape=(self.num_features,), device=self.device, requires_grad=True
             )
-            self.gamma.copy_from_numpy(np.ones((self.num_features,), dtype=np.float32))
-            self.beta.copy_from_numpy(np.zeros((self.num_features,), dtype=np.float32))
+            self.gamma.copy_from(
+                Tensor.full(
+                    (self.num_features,), 1.0, device=self.device, requires_grad=False
+                )
+            )
+            self.beta.copy_from(
+                Tensor.full(
+                    (self.num_features,), 0.0, device=self.device, requires_grad=False
+                )
+            )
         else:
             self.gamma = None
             self.beta = None
@@ -503,42 +503,53 @@ class BatchNorm2d(Module):
         if C != self.num_features:
             raise ValueError(f"Expected num_features={self.num_features}, got C={C}")
 
-        x_np = x.to_numpy()  # (N,C,H,W)
+        m = float(N * H * W)
 
-        # Compute stats per-channel over (N,H,W)
-        axes = (0, 2, 3)
+        def _bc_c_to_nchw(t_c: Tensor) -> Tensor:
+            # (C,) -> (1,C,1,1) -> (N,C,H,W)
+            return t_c.reshape((1, C, 1, 1)).broadcast_to(x.shape)
 
         if self.training:
-            mean = x_np.mean(axis=axes)  # (C,)
-            var = x_np.var(axis=axes)  # (C,)
+            # mean over (N,H,W) per channel:
+            mean = x.sum(axis=0).sum(axis=1).sum(axis=1) * (1.0 / m)  # (C,)
+            mean_bc = _bc_c_to_nchw(mean)
+            x_centered = x - mean_bc
+            var = (x_centered * x_centered).sum(axis=0).sum(axis=1).sum(axis=1) * (
+                1.0 / m
+            )  # (C,)
 
-            # Update running stats
-            rm = self.running_mean.to_numpy()
-            rv = self.running_var.to_numpy()
-            self.running_mean.copy_from_numpy(
-                (1.0 - self.momentum) * rm + self.momentum * mean
+            mean_det = Tensor(
+                shape=mean.shape, device=self.device, requires_grad=False, ctx=None
             )
-            self.running_var.copy_from_numpy(
-                (1.0 - self.momentum) * rv + self.momentum * var
+            var_det = Tensor(
+                shape=var.shape, device=self.device, requires_grad=False, ctx=None
             )
+            mean_det.copy_from(mean)
+            var_det.copy_from(var)
+
+            new_rm = (
+                1.0 - self.momentum
+            ) * self.running_mean + self.momentum * mean_det
+            new_rv = (1.0 - self.momentum) * self.running_var + self.momentum * var_det
+            self.running_mean.copy_from(new_rm)
+            self.running_var.copy_from(new_rv)
         else:
-            mean = self.running_mean.to_numpy()
-            var = self.running_var.to_numpy()
+            mean = self.running_mean
+            var = self.running_var
+            mean_bc = _bc_c_to_nchw(mean)
+            x_centered = x - mean_bc
 
-        inv_std = 1.0 / np.sqrt(var + self.eps)  # (C,)
-
-        # Broadcast to (N,C,H,W)
-        mean_bc = mean.reshape(1, C, 1, 1)
-        inv_std_bc = inv_std.reshape(1, C, 1, 1)
-
-        x_hat = (x_np - mean_bc) * inv_std_bc  # (N,C,H,W)
+        inv_std = 1.0 / (var + self.eps).sqrt()  # (C,)
+        inv_std_bc = _bc_c_to_nchw(inv_std)  # (N,C,H,W)
+        x_hat = x_centered * inv_std_bc  # (N,C,H,W)
 
         if self.affine:
-            gamma_np = self.gamma.to_numpy().reshape(1, C, 1, 1)
-            beta_np = self.beta.to_numpy().reshape(1, C, 1, 1)
-            y_np = gamma_np * x_hat + beta_np
+            assert self.gamma is not None and self.beta is not None
+            gamma_bc = _bc_c_to_nchw(self.gamma)
+            beta_bc = _bc_c_to_nchw(self.beta)
+            y = gamma_bc * x_hat + beta_bc
         else:
-            y_np = x_hat
+            y = x_hat
 
         req = x.requires_grad or (
             self.affine
@@ -549,13 +560,10 @@ class BatchNorm2d(Module):
         )
 
         out = Tensor(shape=x.shape, device=self.device, requires_grad=req, ctx=None)
-        out.copy_from_numpy(y_np.astype(np.float32, copy=False))
+        out.copy_from(y)
 
         if req:
             parents = (x,) if not self.affine else (x, self.gamma, self.beta)
-
-            # m = number of elements per channel used in normalization
-            m = float(N * H * W)
 
             def backward_fn(grad_out: Tensor):
                 """
@@ -573,48 +581,51 @@ class BatchNorm2d(Module):
                     - (dx,) if affine=False
                     - (dx, dgamma, dbeta) if affine=True
                 """
-                g = grad_out.to_numpy().astype(np.float32, copy=False)  # (N,C,H,W)
+                g = grad_out  # (N,C,H,W)
 
                 if self.affine:
-                    gamma_np_local = (
-                        self.gamma.to_numpy()
-                        .astype(np.float32, copy=False)
-                        .reshape(1, C, 1, 1)
-                    )
-                    dxhat = g * gamma_np_local
+                    assert self.gamma is not None and self.beta is not None
+                    dxhat = g * _bc_c_to_nchw(self.gamma)
                 else:
                     dxhat = g
 
-                # sums over (N,H,W) per channel => keepdims for broadcast
-                sum_dxhat = dxhat.sum(axis=axes, keepdims=True)  # (1,C,1,1)
-                sum_dxhat_xhat = (dxhat * x_hat).sum(
-                    axis=axes, keepdims=True
-                )  # (1,C,1,1)
+                # sum over (N,H,W): do it via chaining sums
+                sum_dxhat = dxhat.sum(axis=0).sum(axis=1).sum(axis=1)  # (C,)
+                sum_dxhat_xhat = (
+                    (dxhat * x_hat).sum(axis=0).sum(axis=1).sum(axis=1)
+                )  # (C,)
+
+                sum_dxhat_bc = _bc_c_to_nchw(sum_dxhat)
+                sum_dxhat_xhat_bc = _bc_c_to_nchw(sum_dxhat_xhat)
 
                 dx = (
                     (1.0 / m)
                     * inv_std_bc
-                    * (m * dxhat - sum_dxhat - x_hat * sum_dxhat_xhat)
+                    * (m * dxhat - sum_dxhat_bc - x_hat * sum_dxhat_xhat_bc)
                 )
+
                 dx_t = Tensor(
                     shape=x.shape, device=self.device, requires_grad=False, ctx=None
                 )
-                dx_t.copy_from_numpy(dx.astype(np.float32, copy=False))
+                dx_t.copy_from(dx)
 
                 if not self.affine:
                     return (dx_t,)
 
-                dgamma = (g * x_hat).sum(axis=axes)  # (C,)
-                dbeta = g.sum(axis=axes)  # (C,)
+                dgamma = (g * x_hat).sum(axis=0).sum(axis=1).sum(axis=1)  # (C,)
+                dbeta = g.sum(axis=0).sum(axis=1).sum(axis=1)  # (C,)
 
                 dgamma_t = Tensor(
-                    shape=(C,), device=self.device, requires_grad=False, ctx=None
+                    shape=dgamma.shape,
+                    device=self.device,
+                    requires_grad=False,
+                    ctx=None,
                 )
                 dbeta_t = Tensor(
-                    shape=(C,), device=self.device, requires_grad=False, ctx=None
+                    shape=dbeta.shape, device=self.device, requires_grad=False, ctx=None
                 )
-                dgamma_t.copy_from_numpy(dgamma.astype(np.float32, copy=False))
-                dbeta_t.copy_from_numpy(dbeta.astype(np.float32, copy=False))
+                dgamma_t.copy_from(dgamma)
+                dbeta_t.copy_from(dbeta)
 
                 return (dx_t, dgamma_t, dbeta_t)
 
