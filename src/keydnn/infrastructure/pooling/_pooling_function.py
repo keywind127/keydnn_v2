@@ -38,8 +38,10 @@ from __future__ import annotations
 
 from typing import Optional, Sequence, Tuple
 
+from ..tensor._tensor_context import Context
+
 from .._function import Function
-from .._tensor import Tensor, Context
+from .._tensor import Tensor
 from ..ops.pool2d_cpu import _pair
 from ..ops.pool2d_cpu_ext import (
     maxpool2d_forward,

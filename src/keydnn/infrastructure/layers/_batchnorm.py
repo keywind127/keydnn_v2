@@ -34,10 +34,12 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
+from ..tensor._tensor_context import Context
+
 from ...domain.device._device import Device
 from .._module import Module
 from .._parameter import Parameter
-from .._tensor import Context, Tensor
+from .._tensor import Tensor
 from ..module._serialization_core import register_module
 
 

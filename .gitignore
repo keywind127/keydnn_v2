@@ -11,3 +11,5 @@ dist
 *.exe
 *.log
 *.json
+src/keydnn/infrastructure/tensor/*
+!src/keydnn/infrastructure/tensor/_tensor_context.py

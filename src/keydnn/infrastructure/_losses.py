@@ -28,8 +28,10 @@ operation before invoking backpropagation.
 """
 
 from typing import Tuple
+
+from .tensor._tensor_context import Context
 from ._function import Function
-from ._tensor import Tensor, Context
+from ._tensor import Tensor
 
 
 def _scalar_to_float(t: Tensor) -> float:

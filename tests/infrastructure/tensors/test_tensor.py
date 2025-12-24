@@ -2,7 +2,8 @@ from unittest import TestCase
 import unittest
 import numpy as np
 
-from src.keydnn.infrastructure._tensor import Tensor, Context
+from src.keydnn.infrastructure.tensor._tensor_context import Context
+from src.keydnn.infrastructure._tensor import Tensor
 from src.keydnn.domain.device._device import Device
 
 

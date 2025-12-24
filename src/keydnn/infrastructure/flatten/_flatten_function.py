@@ -23,7 +23,9 @@ from __future__ import annotations
 
 from typing import Optional, Sequence, Tuple
 
-from .._tensor import Tensor, Context
+from ..tensor._tensor_context import Context
+
+from .._tensor import Tensor
 from .._function import Function
 
 

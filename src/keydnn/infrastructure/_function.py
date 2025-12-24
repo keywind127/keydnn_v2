@@ -45,7 +45,9 @@ Notes
 
 from typing import Tuple
 
-from ._tensor import Tensor, Context
+from .tensor._tensor_context import Context
+
+from ._tensor import Tensor
 from ..domain._function import Function
 
 

@@ -6,12 +6,6 @@ domain-level `ITensor` protocol and stores data on a specified `Device`.
 Currently, CPU tensors are backed by NumPy arrays, while CUDA tensors are
 represented by a placeholder string (until a CUDA backend is implemented).
 
-It also defines `Context`, a lightweight record attached to tensors produced
-by differentiable operations. The context stores:
-- parent tensors (inputs to the operation),
-- a backward function that maps `grad_out` to gradients for each parent, and
-- any saved tensors or metadata required to compute those gradients.
-
 Design notes
 ------------
 - This file sits in the infrastructure layer: it imports NumPy and concrete
@@ -25,68 +19,16 @@ Design notes
 
 from __future__ import annotations
 
-from typing import Any, Union, Callable, Optional, Sequence
-from dataclasses import dataclass, field
+from typing import Any, Union, Optional, Sequence
 
 import numpy as np
 
 from ..domain._tensor import ITensor
 from ..domain.device._device import Device
 from ..domain._errors import DeviceNotSupportedError
+from .tensor._tensor_context import Context
 
 Number = Union[int, float]
-
-
-@dataclass
-class Context:
-    """
-    Backward context attached to a Tensor produced by an operation.
-
-    A `Context` records the information required to compute gradients for an
-    operation during backpropagation.
-
-    Attributes
-    ----------
-    parents : Sequence[Tensor]
-        The input tensors (and/or parameters) used to compute the output tensor.
-        Gradients will be produced for these parents during the backward pass.
-    backward_fn : Callable[[Tensor], Sequence[Optional[Tensor]]]
-        A function that takes the gradient w.r.t. the output (`grad_out`) and
-        returns gradients w.r.t. each `parents` entry, in the same order.
-        Entries may be None for parents that do not require gradients.
-    saved_tensors : list[Tensor]
-        Tensors explicitly saved during the forward pass for use in backward.
-        These are distinct from `parents`: they may include transformed values
-        (e.g., outputs, masks, indices, cached intermediates).
-    saved_meta : dict[str, Any]
-        Non-tensor metadata required for backward (e.g., shapes, axes, indices).
-
-    Notes
-    -----
-    `saved_tensors` and `saved_meta` are intentionally generic to support a wide
-    range of operations without coupling the Context type to specific kernels.
-    """
-
-    parents: Sequence["Tensor"]
-    backward_fn: Callable[["Tensor"], Sequence[Optional["Tensor"]]]
-    saved_tensors: list["Tensor"] = field(default_factory=list)
-    saved_meta: dict[str, Any] = field(default_factory=dict)
-
-    def save_for_backward(self, *tensors: "Tensor") -> None:
-        """
-        Save tensors for use during the backward computation.
-
-        Parameters
-        ----------
-        *tensors : Tensor
-            Any number of tensors to be stored in `saved_tensors`.
-
-        Notes
-        -----
-        Saved tensors are often intermediate results that are cheaper to reuse
-        than to recompute during the backward pass (e.g., activation masks).
-        """
-        self.saved_tensors.extend(tensors)
 
 
 class Tensor(ITensor):
