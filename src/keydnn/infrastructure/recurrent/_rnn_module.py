@@ -10,25 +10,21 @@ This module provides a minimal, CPU-only implementation of a vanilla RNN:
 
 Design goals
 -----------
-- Keep the implementation small and readable (NumPy on CPU).
+- Keep the implementation small and readable (CPU-first).
 - Integrate with KeyDNN autograd via `Context` and `Tensor.backward()`.
 - Avoid Tensor broadcasting semantics (KeyDNN currently enforces strict shape
-  equality for elementwise ops), so biases are expanded explicitly in NumPy.
+  equality for elementwise ops), so biases are expanded explicitly.
 
 Notes
 -----
 - This implementation is intended for learning and correctness first; it is not
   optimized. Python loops over time are used deliberately.
-- Device handling is currently CPU-only. Parameters are created on CPU in
-  `RNNCell.__post_init__` to match the available backend.
-- `RNN` constructs per-timestep `Tensor` objects from NumPy slices; these are
-  treated as independent leaf tensors in the current minimal autograd engine
-  (i.e., gradients will not automatically flow back into the original `x`
-  unless you later implement view/slice tensors).
+- Device handling is currently CPU-only.
+- `RNN` uses Tensor slicing (`x[t]`) and `Tensor.stack`, so BPTT emerges naturally
+  from the autograd graph (no fused RNN backward).
 
 Public API
 ----------
-- `tensor_from_numpy`
 - `RNNCell`
 - `RNN`
 """
@@ -38,41 +34,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional, Any, Dict
 
-import numpy as np
-
 from ...domain.device._device import Device
 from .._tensor import Tensor, Context
 from .._parameter import Parameter
 from .._module import Module
 from ..module._serialization_core import register_module
-
-
-def tensor_from_numpy(
-    arr: np.ndarray, *, device: Device, requires_grad: bool = False
-) -> Tensor:
-    """
-    Construct a KeyDNN `Tensor` from a NumPy array.
-
-    Parameters
-    ----------
-    arr : np.ndarray
-        Source array. It will be converted to `np.float32`.
-    device : Device
-        Target device placement (currently CPU is supported by the Tensor backend).
-    requires_grad : bool, optional
-        Whether the returned tensor should participate in autograd.
-        Defaults to False.
-
-    Returns
-    -------
-    Tensor
-        A new tensor with shape equal to `arr.shape`, whose storage is populated
-        via `Tensor.copy_from_numpy`.
-    """
-    arr = np.asarray(arr, dtype=np.float32)
-    out = Tensor(shape=arr.shape, device=device, requires_grad=requires_grad)
-    out.copy_from_numpy(arr)
-    return out
 
 
 @register_module()
@@ -115,9 +81,9 @@ class RNNCell(Module):
 
     Notes
     -----
-    - Pure NumPy CPU implementation (no ctypes/kernels).
-    - Bias addition is expanded explicitly in NumPy to avoid broadcasting in
-      KeyDNN Tensor ops (strict shape equality).
+    - CPU-first implementation.
+    - Bias addition is expanded explicitly to match strict elementwise semantics
+      (no implicit broadcasting assumed).
     - Because this is a dataclass, `Module.__init__()` is NOT called
       automatically. We explicitly call it in `__post_init__` so that parameter
       auto-registration in `Module.__setattr__` works.
@@ -137,42 +103,49 @@ class RNNCell(Module):
           U(-k, k) where k = 1/sqrt(hidden_size),
         - stores parameters on CPU (current backend support).
         """
-        # CRITICAL: dataclass does NOT call Module.__init__ automatically.
-        # Without this, __setattr__ will fail when it tries to access _parameters/_modules.
         Module.__init__(self)
 
-        k = 1.0 / np.sqrt(self.hidden_size)
-        device = Device("cpu")  # must be a Device instance
+        device = Device("cpu")
+        k = 1.0 / float(self.hidden_size) ** 0.5
 
-        # Weight: input -> hidden (D, H)
-        Wih_np = np.random.uniform(
-            -k, k, size=(self.input_size, self.hidden_size)
-        ).astype(np.float32)
-        self.W_ih = Parameter(shape=Wih_np.shape, device=device, requires_grad=True)
-        self.W_ih.copy_from_numpy(Wih_np)
+        # W_ih: (D, H), U(-k, k)
+        self.W_ih = Parameter(
+            shape=(self.input_size, self.hidden_size),
+            device=device,
+            requires_grad=True,
+        )
+        self.W_ih.copy_from(
+            (Tensor.rand(self.W_ih.shape, device=device) * 2.0 - 1.0) * k
+        )
 
-        # Weight: hidden -> hidden (H, H)
-        Whh_np = np.random.uniform(
-            -k, k, size=(self.hidden_size, self.hidden_size)
-        ).astype(np.float32)
-        self.W_hh = Parameter(shape=Whh_np.shape, device=device, requires_grad=True)
-        self.W_hh.copy_from_numpy(Whh_np)
+        # W_hh: (H, H), U(-k, k)
+        self.W_hh = Parameter(
+            shape=(self.hidden_size, self.hidden_size),
+            device=device,
+            requires_grad=True,
+        )
+        self.W_hh.copy_from(
+            (Tensor.rand(self.W_hh.shape, device=device) * 2.0 - 1.0) * k
+        )
 
         if self.bias:
-            # Biases (H,)
-            bih_np = np.random.uniform(-k, k, size=(self.hidden_size,)).astype(
-                np.float32
+            self.b_ih = Parameter(
+                shape=(self.hidden_size,),
+                device=device,
+                requires_grad=True,
             )
-            self.b_ih = Parameter(shape=bih_np.shape, device=device, requires_grad=True)
-            self.b_ih.copy_from_numpy(bih_np)
-
-            bhh_np = np.random.uniform(-k, k, size=(self.hidden_size,)).astype(
-                np.float32
+            self.b_hh = Parameter(
+                shape=(self.hidden_size,),
+                device=device,
+                requires_grad=True,
             )
-            self.b_hh = Parameter(shape=bhh_np.shape, device=device, requires_grad=True)
-            self.b_hh.copy_from_numpy(bhh_np)
+            self.b_ih.copy_from(
+                (Tensor.rand(self.b_ih.shape, device=device) * 2.0 - 1.0) * k
+            )
+            self.b_hh.copy_from(
+                (Tensor.rand(self.b_hh.shape, device=device) * 2.0 - 1.0) * k
+            )
         else:
-            # This will also avoid registering bias params in Module.__setattr__
             self.b_ih = None
             self.b_hh = None
 
@@ -219,25 +192,30 @@ class RNNCell(Module):
 
         Notes
         -----
-        Biases are expanded explicitly to shape (N, H) using NumPy repeats to
-        avoid broadcasting in Tensor ops.
+        Biases are expanded explicitly to shape (N, H) to match strict elementwise
+        semantics (no implicit broadcasting assumed).
         """
-        x = x_t.to_numpy()  # (N, D)
-        h = h_prev.to_numpy()  # (N, H)
+        if len(x_t.shape) != 2 or len(h_prev.shape) != 2:
+            raise ValueError(
+                f"RNNCell expects x_t,h_prev as 2D tensors, got {x_t.shape}, {h_prev.shape}"
+            )
+        N, D = x_t.shape
+        if D != self.input_size:
+            raise ValueError(f"RNNCell expects input_size={self.input_size}, got {D}")
+        if h_prev.shape[0] != N or h_prev.shape[1] != self.hidden_size:
+            raise ValueError(
+                f"RNNCell expects h_prev shape (N,H)=({N},{self.hidden_size}), got {h_prev.shape}"
+            )
 
-        Wih = self.W_ih.to_numpy()  # (D, H)
-        Whh = self.W_hh.to_numpy()  # (H, H)
-
-        a = x @ Wih + h @ Whh  # (N, H)
+        a = (x_t @ self.W_ih) + (h_prev @ self.W_hh)  # (N, H)
 
         if self.bias:
-            # Avoid broadcasting in Tensor ops by expanding explicitly in NumPy
-            N = x.shape[0]
-            bih = self.b_ih.to_numpy().reshape(1, -1)  # (1, H)
-            bhh = self.b_hh.to_numpy().reshape(1, -1)  # (1, H)
-            a = a + np.repeat(bih, N, axis=0) + np.repeat(bhh, N, axis=0)
+            # Explicit expansion to (N, H) without relying on implicit broadcasting
+            b_ih_2d = self.b_ih.broadcast_to((N, self.hidden_size))
+            b_hh_2d = self.b_hh.broadcast_to((N, self.hidden_size))
+            a = a + b_ih_2d + b_hh_2d
 
-        h_t_np = np.tanh(a).astype(np.float32)  # (N, H)
+        h_t = a.tanh()  # (N, H)
 
         req = Tensor._result_requires_grad(
             x_t,
@@ -247,20 +225,20 @@ class RNNCell(Module):
             *([self.b_ih, self.b_hh] if self.bias else []),
         )
 
-        out = Tensor(shape=h_t_np.shape, device=x_t.device, requires_grad=req)
-        out.copy_from_numpy(h_t_np)
+        # Create a "fresh" output tensor with ctx owned by RNNCell (legacy style)
+        out = Tensor(shape=h_t.shape, device=x_t.device, requires_grad=req, ctx=None)
+        out.copy_from(h_t)
 
         if req:
             parents = (x_t, h_prev, self.W_ih, self.W_hh)
             if self.bias:
                 parents = parents + (self.b_ih, self.b_hh)
 
-            ctx = Context(
-                parents=parents,
-                backward_fn=lambda grad_out: self._backward(ctx, grad_out),
-            )
+            def backward_fn(grad_out: Tensor):
+                return self._backward(ctx, grad_out)
 
-            # Save tensors needed for backward: x, h_prev, and h_t (for tanh').
+            ctx = Context(parents=parents, backward_fn=backward_fn)
+            # Save x_t, h_prev, h_t for tanh'(a)=1-h_t^2
             ctx.save_for_backward(x_t, h_prev, out)
             out._set_ctx(ctx)
 
@@ -291,66 +269,38 @@ class RNNCell(Module):
         """
         x_t, h_prev, h_t = ctx.saved_tensors
 
-        x = x_t.to_numpy()  # (N, D)
-        h = h_prev.to_numpy()  # (N, H)
-        ht = h_t.to_numpy()  # (N, H)
-        gh = grad_out.to_numpy()  # (N, H)
+        # grad_out should already be a non-requires-grad tensor from the engine;
+        # Tensor ops here should remain no-grad by construction.
+        ga = grad_out * (1.0 - (h_t * h_t))  # (N, H)
 
-        # dL/da
-        ga = gh * (1.0 - ht * ht)  # (N, H)
+        grad_x = None
+        grad_h_prev = None
+        grad_Wih = None
+        grad_Whh = None
+        grad_bih = None
+        grad_bhh = None
 
-        Wih = self.W_ih.to_numpy()  # (D, H)
-        Whh = self.W_hh.to_numpy()  # (H, H)
+        if x_t.requires_grad:
+            grad_x = ga @ self.W_ih.T  # (N, D)
 
-        grad_x_np = ga @ Wih.T  # (N, D)
-        grad_h_prev_np = ga @ Whh.T  # (N, H)
+        if h_prev.requires_grad:
+            grad_h_prev = ga @ self.W_hh.T  # (N, H)
 
-        grad_Wih_np = x.T @ ga  # (D, H)
-        grad_Whh_np = h.T @ ga  # (H, H)
+        if self.W_ih.requires_grad:
+            grad_Wih = x_t.T @ ga  # (D, H)
 
-        gx = (
-            tensor_from_numpy(grad_x_np, device=x_t.device, requires_grad=False)
-            if x_t.requires_grad
-            else None
-        )
-        ghp = (
-            tensor_from_numpy(grad_h_prev_np, device=h_prev.device, requires_grad=False)
-            if h_prev.requires_grad
-            else None
-        )
-
-        gWih = (
-            tensor_from_numpy(grad_Wih_np, device=self.W_ih.device, requires_grad=False)
-            if self.W_ih.requires_grad
-            else None
-        )
-        gWhh = (
-            tensor_from_numpy(grad_Whh_np, device=self.W_hh.device, requires_grad=False)
-            if self.W_hh.requires_grad
-            else None
-        )
+        if self.W_hh.requires_grad:
+            grad_Whh = h_prev.T @ ga  # (H, H)
 
         if self.bias:
-            grad_bih_np = ga.sum(axis=0).astype(np.float32)  # (H,)
-            grad_bhh_np = ga.sum(axis=0).astype(np.float32)  # (H,)
+            if self.b_ih.requires_grad:
+                grad_bih = ga.sum(axis=0)  # (H,)
+            if self.b_hh.requires_grad:
+                grad_bhh = ga.sum(axis=0)  # (H,)
 
-            gbih = (
-                tensor_from_numpy(
-                    grad_bih_np, device=self.b_ih.device, requires_grad=False
-                )
-                if self.b_ih.requires_grad
-                else None
-            )
-            gbhh = (
-                tensor_from_numpy(
-                    grad_bhh_np, device=self.b_hh.device, requires_grad=False
-                )
-                if self.b_hh.requires_grad
-                else None
-            )
-            return (gx, ghp, gWih, gWhh, gbih, gbhh)
+            return (grad_x, grad_h_prev, grad_Wih, grad_Whh, grad_bih, grad_bhh)
 
-        return (gx, ghp, gWih, gWhh)
+        return (grad_x, grad_h_prev, grad_Wih, grad_Whh)
 
     def get_config(self) -> Dict[str, Any]:
         """
@@ -460,7 +410,7 @@ class RNN(Module):
             If True, also return the final hidden state `h_T` as an additional output.
             Defaults to True.
         """
-        super().__init__()  # ensure _parameters/_modules exist
+        super().__init__()
         self.cell = RNNCell(input_size, hidden_size, bias=bias)
         self.return_sequences = bool(return_sequences)
         self.return_state = bool(return_state)
@@ -496,39 +446,38 @@ class RNN(Module):
                 (out, h_T) : Tuple[Tensor, Tensor], where out is `h_seq` of shape (T, N, H)
                 and h_T is final hidden state of shape (N, H)
         """
-        x_np = x.to_numpy()
-        T, N, D = x_np.shape
+        if len(x.shape) != 3:
+            raise ValueError(f"RNN expects 3D input (T,N,D), got {x.shape}")
+
+        T, N, D = x.shape
+        if D != self.cell.input_size:
+            raise ValueError(
+                f"RNN expects input_size={self.cell.input_size}, got D={D}"
+            )
 
         if h0 is None:
-            h_prev = tensor_from_numpy(
-                np.zeros((N, self.cell.hidden_size), dtype=np.float32),
-                device=x.device,
-                requires_grad=False,
+            h_prev = Tensor.full(
+                (N, self.cell.hidden_size), 0.0, device=x.device, requires_grad=False
             )
         else:
             h_prev = h0
 
         hs = []
         for t in range(T):
-            x_t = x[t]  # uses __getitem__ (keeps grad path to x)
+            x_t = x[t]  # keeps autograd path through slicing (as implemented)
             h_prev = self.cell.forward(x_t, h_prev)
             hs.append(h_prev)
 
         h_seq = Tensor.stack(hs, axis=0)  # (T, N, H)
-        h_T = h_prev  # (N, H)
+        h_T = h_prev
 
-        # --- Legacy behavior (default): keep tests working ---
         if not self.keras_compat:
             if self.return_state:
-                # default legacy: (h_seq, h_T)
                 if self.return_sequences:
                     return h_seq, h_T
-                # rarely used: (h_T,) isn't great; return h_T to keep sane behavior
                 return h_T
-            # return_state=False: historically some code might expect h_seq only
             return h_seq if self.return_sequences else h_T
 
-        # --- Keras-like behavior (opt-in) ---
         out = h_seq if self.return_sequences else h_T
         if self.return_state:
             return out, h_T
@@ -545,11 +494,9 @@ class RNN(Module):
         Trainable parameters are serialized separately by the weights payload.
         """
         return {
-            # architectural hyperparameters
             "input_size": int(self.cell.input_size),
             "hidden_size": int(self.cell.hidden_size),
             "bias": bool(self.cell.bias),
-            # output behavior flags
             "return_sequences": bool(self.return_sequences),
             "return_state": bool(self.return_state),
             "keras_compat": bool(self.keras_compat),

@@ -2066,3 +2066,57 @@ class Tensor(ITensor):
         )
         t.copy_from_numpy(arr)
         return t
+
+    def tanh(self) -> "Tensor":
+        """
+        Elementwise hyperbolic tangent.
+
+        Returns
+        -------
+        Tensor
+            A tensor with the same shape as `self`, with tanh applied elementwise.
+
+        Notes
+        -----
+        This method delegates to the autograd tanh Function/op and does not use
+        NumPy here (NumPy remains inside Tensor/ops only).
+        """
+        from ._function import TanhFn  # adjust if needed
+
+        ctx = Context(parents=(self,), backward_fn=None)
+        out = TanhFn.forward(ctx, self)
+        ctx.backward_fn = lambda grad_out: (TanhFn.backward(ctx, grad_out),)
+        out._set_ctx(ctx)
+        return out
+
+    def sigmoid(self) -> "Tensor":
+        """
+        Elementwise logistic sigmoid.
+
+        Computes:
+
+            sigmoid(x) = 1 / (1 + exp(-x))
+
+        Returns
+        -------
+        Tensor
+            A tensor with the same shape as `self`, with `sigmoid` applied
+            elementwise.
+
+        Notes
+        -----
+        This is a thin convenience wrapper around `SigmoidFn` located in
+        `._function`.
+        """
+        from ._function import SigmoidFn  # adjust import to your project layout
+
+        # Build context with parents AND a callable backward_fn
+        ctx = Context(parents=(self,), backward_fn=None)
+
+        out = SigmoidFn.forward(ctx, self)
+
+        # IMPORTANT: Tensor.backward() expects ctx.backward_fn to be callable
+        ctx.backward_fn = lambda grad_out: (SigmoidFn.backward(ctx, grad_out),)
+
+        out._set_ctx(ctx)
+        return out

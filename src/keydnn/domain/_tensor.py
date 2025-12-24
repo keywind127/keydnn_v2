@@ -811,3 +811,35 @@ class ITensor(Protocol):
         - The returned tensor is created with `ctx=None` (no autograd history).
         """
         ...
+
+    def tanh(self) -> "ITensor":
+        """
+        Elementwise hyperbolic tangent.
+
+        Returns
+        -------
+        Tensor
+            A tensor with the same shape as `self`, with tanh applied elementwise.
+
+        Notes
+        -----
+        This method delegates to the autograd tanh Function/op and does not use
+        NumPy here (NumPy remains inside Tensor/ops only).
+        """
+        ...
+
+    def sigmoid(self) -> "ITensor":
+        """
+        Elementwise logistic sigmoid.
+
+        Computes:
+
+            sigmoid(x) = 1 / (1 + exp(-x))
+
+        Returns
+        -------
+        Tensor
+            A tensor with the same shape as `self`, with `sigmoid` applied
+            elementwise.
+        """
+        ...
