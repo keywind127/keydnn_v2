@@ -843,3 +843,49 @@ class ITensor(Protocol):
             elementwise.
         """
         ...
+
+    @staticmethod
+    def zeros(
+        *, shape: tuple[int, ...], device, requires_grad: bool = False
+    ) -> "ITensor":
+        """
+        Construct a tensor filled with zeros.
+
+        Parameters
+        ----------
+        shape : tuple[int, ...]
+            Output shape.
+        device : Device
+            Target device.
+        requires_grad : bool, optional
+            Whether the result participates in autograd.
+
+        Returns
+        -------
+        Tensor
+            A tensor of given shape filled with 0.0 (float32).
+        """
+        ...
+
+    @staticmethod
+    def ones(
+        *, shape: tuple[int, ...], device, requires_grad: bool = False
+    ) -> "ITensor":
+        """
+        Construct a tensor filled with ones.
+
+        Parameters
+        ----------
+        shape : tuple[int, ...]
+            Output shape.
+        device : Device
+            Target device.
+        requires_grad : bool, optional
+            Whether the result participates in autograd.
+
+        Returns
+        -------
+        ITensor
+            A tensor of given shape filled with 1.0 (float32).
+        """
+        ...

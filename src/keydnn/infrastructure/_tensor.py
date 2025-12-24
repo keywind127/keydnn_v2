@@ -2120,3 +2120,59 @@ class Tensor(ITensor):
 
         out._set_ctx(ctx)
         return out
+
+    @staticmethod
+    def zeros(
+        *, shape: tuple[int, ...], device, requires_grad: bool = False
+    ) -> "Tensor":
+        """
+        Construct a tensor filled with zeros.
+
+        Parameters
+        ----------
+        shape : tuple[int, ...]
+            Output shape.
+        device : Device
+            Target device.
+        requires_grad : bool, optional
+            Whether the result participates in autograd.
+
+        Returns
+        -------
+        Tensor
+            A tensor of given shape filled with 0.0 (float32).
+        """
+        import numpy as np
+
+        arr = np.zeros(shape, dtype=np.float32)
+        out = Tensor(shape=shape, device=device, requires_grad=requires_grad)
+        out.copy_from_numpy(arr)
+        return out
+
+    @staticmethod
+    def ones(
+        *, shape: tuple[int, ...], device, requires_grad: bool = False
+    ) -> "Tensor":
+        """
+        Construct a tensor filled with ones.
+
+        Parameters
+        ----------
+        shape : tuple[int, ...]
+            Output shape.
+        device : Device
+            Target device.
+        requires_grad : bool, optional
+            Whether the result participates in autograd.
+
+        Returns
+        -------
+        Tensor
+            A tensor of given shape filled with 1.0 (float32).
+        """
+        import numpy as np
+
+        arr = np.ones(shape, dtype=np.float32)
+        out = Tensor(shape=shape, device=device, requires_grad=requires_grad)
+        out.copy_from_numpy(arr)
+        return out

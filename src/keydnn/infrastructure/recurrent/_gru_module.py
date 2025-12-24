@@ -1,20 +1,26 @@
 """
-Gated Recurrent Unit (GRU) layers for KeyDNN.
+Gated Recurrent Unit (GRU) layers for KeyDNN (CPU-only).
 
-This module provides a minimal, CPU-only implementation of a vanilla GRU,
-including both a single-timestep cell (`GRUCell`) and a unidirectional
-sequence layer (`GRU`) that applies the cell over a time-major input.
+This module implements a minimal GRU stack on top of KeyDNN's `Tensor` and
+autograd `Context`. It includes:
 
-Implemented components
-----------------------
-- `tensor_from_numpy`:
-    Utility to construct a KeyDNN `Tensor` from a NumPy array.
-- `_sigmoid`:
-    Numerically stable sigmoid used for gate activations.
-- `GRUCell`:
-    Computes one GRU step using packed parameters and a manual backward.
-- `GRU`:
-    Applies `GRUCell` over a time-major sequence input of shape (T, N, D).
+- `tensor_from_numpy`
+    A small helper that copies a NumPy array into a KeyDNN `Tensor`. This helper
+    intentionally keeps the NumPy boundary local to this module.
+- `_sigmoid`
+    A numerically-stable NumPy sigmoid used by the (manual) GRUCell backward.
+- `_expand_bias_1d_to_batch`
+    Expands a per-hidden-unit bias of shape (H,) to an explicit (N, H) tensor,
+    because elementwise broadcasting is intentionally not supported in KeyDNN.
+- `GRUCell`
+    A single-timestep GRU cell. The current `forward` builds its computation
+    using `Tensor` ops. A separate `_backward` method exists for a manual
+    backward path, but **it is not wired into autograd by `forward` in the
+    current code** (no `Context` is attached inside `forward`).
+- `GRU`
+    A unidirectional GRU layer that applies `GRUCell` over a time-major input
+    sequence of shape (T, N, D), returning either the full sequence, the final
+    output, and/or the final hidden state depending on flags.
 
 GRU equations (per timestep)
 ----------------------------
@@ -32,27 +38,32 @@ Given x_t (N, D) and h_{t-1} (N, H):
 
 Parameter packing
 -----------------
-Weights and biases are stored in packed form, similar to the LSTM module:
+The cell stores parameters in packed form (PyTorch-like packing):
 
     W_ih : (D, 3H)  -> [W_iz | W_ir | W_in]
     W_hh : (H, 3H)  -> [W_hz | W_hr | W_hn]
     b_ih : (3H,) optional
     b_hh : (3H,) optional
 
-Biases are expanded explicitly in NumPy to avoid relying on Tensor broadcasting
-semantics (KeyDNN enforces strict shape equality for elementwise operations).
+Bias handling explicitly expands to (N, H) without relying on broadcasting.
 
 Autograd notes
 --------------
-- `GRUCell` constructs an explicit `Context` and provides a manual backward.
-- `GRU` builds a BPTT graph by indexing x[t] (preserving gradient connectivity)
-  and stacking per-timestep hidden states via `Tensor.stack`.
+- `GRU` builds a differentiable BPTT graph by indexing `x[t]` (which preserves
+  gradient connectivity via `Tensor.__getitem__`) and stacking per-timestep
+  hidden states via `Tensor.stack`.
+- `GRUCell.forward` is expressed in terms of `Tensor` ops (matmul, add, mul,
+  sigmoid/tanh, etc.), so gradients flow through those ops if they are
+  autograd-enabled.
+- Although `GRUCell._backward` exists and documents a manual backward, it is
+  currently **not** connected to a `Context` in `forward` as written.
 
 Notes
 -----
-- This implementation targets correctness and readability (NumPy on CPU),
-  not performance.
-- Device handling is CPU-only; parameters are created on CPU.
+- CPU-only: parameters are allocated on CPU, and the implementation targets
+  correctness and readability over performance.
+- Broadcasting is intentionally avoided; helper routines expand biases and
+  construct "ones" explicitly.
 """
 
 from __future__ import annotations
@@ -73,23 +84,27 @@ def tensor_from_numpy(
     arr: np.ndarray, *, device: Device, requires_grad: bool = False
 ) -> Tensor:
     """
-    Construct a KeyDNN Tensor from a NumPy array.
+    Construct a KeyDNN `Tensor` by copying data from a NumPy array.
 
     Parameters
     ----------
     arr : np.ndarray
-        Input array to copy into tensor storage. The array is converted to
-        float32.
+        Source array. It is converted to `float32` before copying.
     device : Device
-        Target device for the constructed tensor.
+        Target device for the resulting tensor (CPU-only in current backend).
     requires_grad : bool, optional
-        Whether the resulting tensor should participate in autograd.
+        If True, marks the created tensor as participating in gradient tracking.
+        Defaults to False.
 
     Returns
     -------
     Tensor
-        A KeyDNN Tensor with the same shape as `arr`, stored on `device`,
-        containing a float32 copy of the input data.
+        A tensor with `shape == arr.shape` containing a float32 copy of `arr`.
+
+    Notes
+    -----
+    This helper centralizes a NumPy-to-Tensor boundary for modules that compute
+    intermediate gradients in NumPy (e.g., manual backward routines).
     """
     arr = np.asarray(arr, dtype=np.float32)
     out = Tensor(shape=arr.shape, device=device, requires_grad=requires_grad)
@@ -109,14 +124,13 @@ def _sigmoid(x: np.ndarray) -> np.ndarray:
     Returns
     -------
     np.ndarray
-        Output array with sigmoid applied elementwise (float32).
+        Elementwise sigmoid values as a float32 NumPy array.
 
     Notes
     -----
-    This implementation avoids overflow by treating positive and negative
-    values separately.
+    This implementation avoids overflow by computing sigmoid separately on
+    non-negative and negative entries.
     """
-    # numerically stable sigmoid
     x = x.astype(np.float32, copy=False)
     out = np.empty_like(x, dtype=np.float32)
     pos = x >= 0
@@ -127,14 +141,44 @@ def _sigmoid(x: np.ndarray) -> np.ndarray:
     return out
 
 
+def _expand_bias_1d_to_batch(b: Tensor, N: int) -> Tensor:
+    """
+    Expand a bias vector from shape (H,) to an explicit batch tensor (N, H).
+
+    Parameters
+    ----------
+    b : Tensor
+        Per-hidden-unit bias of shape (H,).
+    N : int
+        Batch size.
+
+    Returns
+    -------
+    Tensor
+        Expanded bias tensor of shape (N, H).
+
+    Notes
+    -----
+    KeyDNN currently enforces strict shape equality for elementwise operations.
+    This helper avoids relying on broadcasting by explicitly materializing the
+    expanded bias via `Tensor.stack` and `reshape`.
+    """
+    b2 = b.reshape((1, -1))
+    return Tensor.stack([b2] * N, axis=0).reshape((N, b.shape[0]))
+
+
 @register_module()
 @dataclass
 class GRUCell(Module):
     """
-    Vanilla GRU cell operating on a single timestep.
+    Vanilla GRU cell operating on a single timestep (CPU-only).
 
-    This cell computes the next hidden state h_t from the current input x_t
-    and previous hidden state h_{t-1} using update/reset gates.
+    The cell computes the next hidden state `h_t` given:
+    - current input `x_t` of shape (N, D)
+    - previous hidden state `h_prev` of shape (N, H)
+
+    Parameters are stored in packed form (3H columns) and are sliced into
+    per-gate matrices inside `forward`.
 
     Parameters
     ----------
@@ -143,31 +187,32 @@ class GRUCell(Module):
     hidden_size : int
         Hidden state dimension H.
     bias : bool, optional
-        If True, includes packed bias parameters b_ih and b_hh (both shape (3H,)).
-        Default is True.
+        If True, includes packed bias parameters `b_ih` and `b_hh`, each of
+        shape (3H,). Defaults to True.
 
     Attributes
     ----------
     W_ih : Parameter
-        Packed input-to-hidden weight matrix of shape (D, 3H).
+        Packed input-to-hidden weights of shape (D, 3H).
     W_hh : Parameter
-        Packed hidden-to-hidden weight matrix of shape (H, 3H).
+        Packed hidden-to-hidden weights of shape (H, 3H).
     b_ih : Optional[Parameter]
-        Packed input bias of shape (3H,) if `bias=True`, else None.
+        Packed input bias of shape (3H,), if enabled.
     b_hh : Optional[Parameter]
-        Packed hidden bias of shape (3H,) if `bias=True`, else None.
+        Packed hidden bias of shape (3H,), if enabled.
 
-    Input / Output shapes
-    ---------------------
-    x_t    : (N, D)
-    h_prev : (N, H)
-    h_t    : (N, H)
+    Autograd behavior
+    -----------------
+    - `forward` is implemented using `Tensor` operations, so gradients flow
+      through those ops if they are autograd-enabled.
+    - `_backward` implements a NumPy-based manual backward routine, but the
+      current `forward` does **not** attach a `Context` that calls `_backward`.
+      (It remains available for future refactors or alternative execution paths.)
 
-    Autograd notes
-    -------------
-    - A manual backward is implemented in `_backward` and connected through `Context`.
-    - Since this is a dataclass, `Module.__init__()` is not invoked automatically;
-      it is called explicitly in `__post_init__` to enable parameter auto-registration.
+    Notes
+    -----
+    This class is a dataclass, so `Module.__init__()` is called explicitly in
+    `__post_init__` to enable KeyDNN's parameter registration behavior.
     """
 
     input_size: int
@@ -176,19 +221,24 @@ class GRUCell(Module):
 
     def __post_init__(self) -> None:
         """
-        Dataclass post-initialization hook.
+        Initialize module state and allocate packed parameters.
 
-        Initializes the Module base class (required for parameter/module
-        auto-registration) and allocates packed GRU parameters on CPU with
-        small uniform random initialization.
+        This hook:
+        - explicitly calls `Module.__init__()` (required for dataclasses),
+        - allocates parameters on CPU,
+        - initializes packed weights (and biases, if enabled) using small uniform
+          random values in NumPy, then copies them into `Parameter` storage.
+
+        Notes
+        -----
+        The initialization uses NumPy directly; this is acceptable because it is
+        part of module construction rather than a differentiable computation.
         """
-        # dataclass does not call Module.__init__
         Module.__init__(self)
 
         k = 1.0 / np.sqrt(self.hidden_size)
         device = Device("cpu")
 
-        # Packed weights
         Wih = np.random.uniform(
             -k, k, size=(self.input_size, 3 * self.hidden_size)
         ).astype(np.float32)
@@ -223,171 +273,120 @@ class GRUCell(Module):
         Parameters
         ----------
         x_t : Tensor
-            Input at the current timestep, shape (N, D).
+            Current timestep input of shape (N, D).
         h_prev : Tensor
-            Previous hidden state, shape (N, H).
+            Previous hidden state of shape (N, H).
 
         Returns
         -------
         Tensor
-            Next hidden state h_t, shape (N, H).
+            Next hidden state `h_t` of shape (N, H).
+
+        What this implementation does
+        -----------------------------
+        - Slices packed parameters (`W_ih`, `W_hh`, and optional biases) into
+          per-gate components.
+        - Computes update/reset pre-activations via matmul/add.
+        - Expands bias vectors to (N, H) explicitly (no broadcasting).
+        - Applies `sigmoid` to z/r gates and `tanh` to candidate activation.
+        - Combines candidate and previous hidden state:
+              h_t = (1 - z) * n + z * h_prev
 
         Notes
         -----
-        - Parameters are stored in packed form (3H columns) and split internally.
-        - Biases are expanded in NumPy to match batch shape, avoiding reliance on
-          Tensor broadcasting.
-        - If autograd is required, this method attaches a `Context` that routes
-          gradients through `_backward`.
+        This method currently relies on `Tensor`-level ops for autograd.
+        It does not attach a custom `Context` for a manual backward routine.
         """
-        """
-        Forward pass for one timestep.
-
-        x_t : (N, D)
-        h_prev : (N, H)
-        returns h_t : (N, H)
-        """
-        x = x_t.to_numpy().astype(np.float32, copy=False)  # (N, D)
-        h = h_prev.to_numpy().astype(np.float32, copy=False)  # (N, H)
-
-        Wih = self.W_ih.to_numpy().astype(np.float32, copy=False)  # (D, 3H)
-        Whh = self.W_hh.to_numpy().astype(np.float32, copy=False)  # (H, 3H)
-
-        a = x @ Wih + h @ Whh  # (N, 3H)
-
-        if self.bias:
-            N = x.shape[0]
-            bih = self.b_ih.to_numpy().reshape(1, -1)  # (1, 3H)
-            bhh = self.b_hh.to_numpy().reshape(1, -1)  # (1, 3H)
-            a = a + np.repeat(bih, N, axis=0) + np.repeat(bhh, N, axis=0)
-
         H = self.hidden_size
-        a_z = a[:, 0:H]
-        a_r = a[:, H : 2 * H]
-        a_n_base = a[
-            :, 2 * H : 3 * H
-        ]  # this is xWin + hWhn + biases; we'll adjust with r*h
 
-        # But for GRU, candidate uses (r*h) @ Whn, not h @ Whn.
-        # Since our packed 'a' used h @ Whh, we cannot reuse a_n_base directly.
-        # So compute gates separately:
-        # Split packed weights.
-        W_iz = Wih[:, 0:H]
-        W_ir = Wih[:, H : 2 * H]
-        W_in = Wih[:, 2 * H : 3 * H]
+        W_iz = self.W_ih[:, 0:H]
+        W_ir = self.W_ih[:, H : 2 * H]
+        W_in = self.W_ih[:, 2 * H : 3 * H]
 
-        W_hz = Whh[:, 0:H]
-        W_hr = Whh[:, H : 2 * H]
-        W_hn = Whh[:, 2 * H : 3 * H]
+        W_hz = self.W_hh[:, 0:H]
+        W_hr = self.W_hh[:, H : 2 * H]
+        W_hn = self.W_hh[:, 2 * H : 3 * H]
 
-        # Bias split
+        a_z = x_t @ W_iz + h_prev @ W_hz
+        a_r = x_t @ W_ir + h_prev @ W_hr
+
         if self.bias:
-            b_ih = self.b_ih.to_numpy().astype(np.float32, copy=False)
-            b_hh = self.b_hh.to_numpy().astype(np.float32, copy=False)
-            b_z = (b_ih[0:H] + b_hh[0:H]).reshape(1, -1)
-            b_r = (b_ih[H : 2 * H] + b_hh[H : 2 * H]).reshape(1, -1)
-            b_n = (b_ih[2 * H : 3 * H] + b_hh[2 * H : 3 * H]).reshape(1, -1)
+            b_ih = self.b_ih
+            b_hh = self.b_hh
+
+            b_z = b_ih[0:H] + b_hh[0:H]
+            b_r = b_ih[H : 2 * H] + b_hh[H : 2 * H]
+            b_n = b_ih[2 * H : 3 * H] + b_hh[2 * H : 3 * H]
+
+            N = x_t.shape[0]
+            b_z = _expand_bias_1d_to_batch(b_z, N)
+            b_r = _expand_bias_1d_to_batch(b_r, N)
+            b_n = _expand_bias_1d_to_batch(b_n, N)
+
+            a_z = a_z + b_z
+            a_r = a_r + b_r
         else:
-            b_z = None
-            b_r = None
             b_n = None
 
-        a_z = x @ W_iz + h @ W_hz
-        a_r = x @ W_ir + h @ W_hr
-        if b_z is not None:
-            a_z = a_z + np.repeat(b_z, x.shape[0], axis=0)
-            a_r = a_r + np.repeat(b_r, x.shape[0], axis=0)
+        z = a_z.sigmoid()
+        r = a_r.sigmoid()
 
-        z = _sigmoid(a_z)  # (N, H)
-        r = _sigmoid(a_r)  # (N, H)
+        rh = r * h_prev
+        a_n = x_t @ W_in + rh @ W_hn
+        if self.bias:
+            a_n = a_n + b_n
 
-        rh = r * h  # (N, H)
-        a_n = x @ W_in + rh @ W_hn
-        if b_n is not None:
-            a_n = a_n + np.repeat(b_n, x.shape[0], axis=0)
+        n = a_n.tanh()
 
-        n = np.tanh(a_n).astype(np.float32)  # (N, H)
-
-        h_t_np = ((1.0 - z) * n + z * h).astype(np.float32)  # (N, H)
-
-        req = Tensor._result_requires_grad(
-            x_t,
-            h_prev,
-            self.W_ih,
-            self.W_hh,
-            *([self.b_ih, self.b_hh] if self.bias else []),
-        )
-
-        out = Tensor(shape=h_t_np.shape, device=x_t.device, requires_grad=req)
-        out.copy_from_numpy(h_t_np)
-
-        if req:
-            parents = (x_t, h_prev, self.W_ih, self.W_hh)
-            if self.bias:
-                parents = parents + (self.b_ih, self.b_hh)
-
-            ctx = Context(
-                parents=parents,
-                backward_fn=lambda grad_out: self._backward(ctx, grad_out),
-            )
-            # Save tensors needed for backward:
-            # x_t, h_prev, z, r, n, plus raw weights splits
-            z_t = tensor_from_numpy(z, device=x_t.device, requires_grad=False)
-            r_t = tensor_from_numpy(r, device=x_t.device, requires_grad=False)
-            n_t = tensor_from_numpy(n, device=x_t.device, requires_grad=False)
-            ctx.save_for_backward(x_t, h_prev, z_t, r_t, n_t)
-            out._set_ctx(ctx)
-
-        return out
+        one = Tensor.ones(shape=z.shape, device=z.device, requires_grad=False)
+        h_t = (one - z) * n + z * h_prev
+        return h_t
 
     def _backward(self, ctx: Context, grad_out: Tensor):
         """
-        Backward pass for one GRU timestep.
-
-        Computes gradients with respect to inputs, previous hidden state,
-        and packed parameters using the stored forward intermediates.
+        Manual backward for one GRU timestep (NumPy implementation).
 
         Parameters
         ----------
         ctx : Context
-            Autograd context containing saved tensors and parent references.
+            Context expected to contain saved forward intermediates in
+            `ctx.saved_tensors` in the following order:
+            (x_t, h_prev, z_t, r_t, n_t).
         grad_out : Tensor
-            Upstream gradient with respect to h_t, shape (N, H).
+            Upstream gradient w.r.t. `h_t`, shape (N, H).
 
         Returns
         -------
         tuple
-            Gradients aligned with `ctx.parents`:
-            (dx_t, dh_prev, dW_ih, dW_hh[, db_ih, db_hh])
-            where entries may be None when the corresponding parent does not
-            require gradients.
+            Gradients aligned with the expected `ctx.parents` ordering:
+            (dx_t, dh_prev, dW_ih, dW_hh[, db_ih, db_hh]).
+            Entries may be None if the corresponding parent does not require
+            gradients.
 
         Notes
         -----
+        - This routine computes gradients in NumPy for clarity.
         - Bias gradients are computed for the combined per-gate bias
-          b_gate = b_ih_gate + b_hh_gate and then mirrored to both b_ih and b_hh,
-          matching the forward bias composition used in this implementation.
-        """
-        """
-        Returns grads aligned with ctx.parents:
-          (dx, dh_prev, dW_ih, dW_hh[, db_ih, db_hh])
+          `b_gate = b_ih_gate + b_hh_gate` and then returned for both `b_ih`
+          and `b_hh`, matching the forward composition used here.
+        - This method is not currently invoked by `forward` unless you attach a
+          `Context` that calls it.
         """
         x_t, h_prev, z_t, r_t, n_t = ctx.saved_tensors
 
-        x = x_t.to_numpy().astype(np.float32, copy=False)  # (N, D)
-        h = h_prev.to_numpy().astype(np.float32, copy=False)  # (N, H)
-        z = z_t.to_numpy().astype(np.float32, copy=False)  # (N, H)
-        r = r_t.to_numpy().astype(np.float32, copy=False)  # (N, H)
-        n = n_t.to_numpy().astype(np.float32, copy=False)  # (N, H)
-        gh = grad_out.to_numpy().astype(np.float32, copy=False)  # (N, H)
+        x = x_t.to_numpy().astype(np.float32, copy=False)
+        h = h_prev.to_numpy().astype(np.float32, copy=False)
+        z = z_t.to_numpy().astype(np.float32, copy=False)
+        r = r_t.to_numpy().astype(np.float32, copy=False)
+        n = n_t.to_numpy().astype(np.float32, copy=False)
+        gh = grad_out.to_numpy().astype(np.float32, copy=False)
 
         N, D = x.shape
         H = self.hidden_size
 
-        Wih = self.W_ih.to_numpy().astype(np.float32, copy=False)  # (D, 3H)
-        Whh = self.W_hh.to_numpy().astype(np.float32, copy=False)  # (H, 3H)
+        Wih = self.W_ih.to_numpy().astype(np.float32, copy=False)
+        Whh = self.W_hh.to_numpy().astype(np.float32, copy=False)
 
-        # Split weights
         W_iz = Wih[:, 0:H]
         W_ir = Wih[:, H : 2 * H]
         W_in = Wih[:, 2 * H : 3 * H]
@@ -396,42 +395,35 @@ class GRUCell(Module):
         W_hr = Whh[:, H : 2 * H]
         W_hn = Whh[:, 2 * H : 3 * H]
 
-        # h_t = n + z*(h - n)
-        grad_z = gh * (h - n)  # (N, H)
-        grad_n = gh * (1.0 - z)  # (N, H)
-        grad_h = gh * z  # (N, H)  (direct path)
+        grad_z = gh * (h - n)
+        grad_n = gh * (1.0 - z)
+        grad_h = gh * z
 
-        # n = tanh(a_n)
-        grad_a_n = grad_n * (1.0 - n * n)  # (N, H)
+        grad_a_n = grad_n * (1.0 - n * n)
 
-        # a_n = x @ W_in + (r*h) @ W_hn + b_n
         rh = r * h
-        grad_x = grad_a_n @ W_in.T  # (N, D)
-        grad_W_in = x.T @ grad_a_n  # (D, H)
-        grad_W_hn = rh.T @ grad_a_n  # (H, H)
-        grad_rh = grad_a_n @ W_hn.T  # (N, H)
+        grad_x = grad_a_n @ W_in.T
+        grad_W_in = x.T @ grad_a_n
+        grad_W_hn = rh.T @ grad_a_n
+        grad_rh = grad_a_n @ W_hn.T
 
-        # rh = r*h
-        grad_r = grad_rh * h  # (N, H)
-        grad_h += grad_rh * r  # add h path through rh
+        grad_r = grad_rh * h
+        grad_h += grad_rh * r
 
-        # r = sigmoid(a_r)
-        grad_a_r = grad_r * (r * (1.0 - r))  # (N, H)
+        grad_a_r = grad_r * (r * (1.0 - r))
 
         grad_x += grad_a_r @ W_ir.T
         grad_h += grad_a_r @ W_hr.T
         grad_W_ir = x.T @ grad_a_r
         grad_W_hr = h.T @ grad_a_r
 
-        # z = sigmoid(a_z)
-        grad_a_z = grad_z * (z * (1.0 - z))  # (N, H)
+        grad_a_z = grad_z * (z * (1.0 - z))
 
         grad_x += grad_a_z @ W_iz.T
         grad_h += grad_a_z @ W_hz.T
         grad_W_iz = x.T @ grad_a_z
         grad_W_hz = h.T @ grad_a_z
 
-        # Pack weight grads to (D, 3H) and (H, 3H)
         grad_Wih = np.concatenate([grad_W_iz, grad_W_ir, grad_W_in], axis=1).astype(
             np.float32
         )
@@ -461,8 +453,6 @@ class GRUCell(Module):
         )
 
         if self.bias:
-            # For our split-bias design we treat b_ih and b_hh as combined per-gate in forward:
-            # b_gate = b_ih_gate + b_hh_gate, so gradient should be split identically to both.
             db_z = grad_a_z.sum(axis=0).astype(np.float32)
             db_r = grad_a_r.sum(axis=0).astype(np.float32)
             db_n = grad_a_n.sum(axis=0).astype(np.float32)
@@ -489,7 +479,8 @@ class GRUCell(Module):
         Returns
         -------
         Dict[str, Any]
-            Configuration dictionary containing constructor arguments.
+            A JSON-serializable dict containing the constructor arguments needed
+            to reconstruct the cell.
         """
         return {
             "input_size": int(self.input_size),
@@ -510,7 +501,7 @@ class GRUCell(Module):
         Returns
         -------
         GRUCell
-            Reconstructed GRUCell instance.
+            A reconstructed `GRUCell` instance.
         """
         return cls(
             input_size=int(cfg["input_size"]),
@@ -524,41 +515,32 @@ class GRU(Module):
     """
     Unidirectional GRU layer over a time-major sequence.
 
-    This module applies `GRUCell` over a sequence input of shape (T, N, D),
-    producing either the full sequence of hidden states or only the final
-    hidden state depending on configuration.
+    This module applies `GRUCell.forward` over a time-major input `x` of shape
+    (T, N, D). It supports multiple return conventions via flags:
 
-    Parameters
-    ----------
-    input_size : int
-        Input feature dimension D.
-    hidden_size : int
-        Hidden state dimension H.
-    bias : bool, optional
-        Whether the underlying cell uses biases.
-    return_sequences : bool, optional
-        If True, return the full output sequence (T, N, H).
-        If False, return only the final output (N, H).
-    return_state : bool, optional
-        If True, include the final hidden state in the return structure.
-    keras_compat : bool, optional
-        If True, return values follow a Keras-like convention:
-        - If return_state: (out, h_T)
-        - Else: out
-        If False, legacy-like behavior is used (matching KeyDNN RNN/LSTM).
+    - `return_sequences`
+        If True, returns the full hidden sequence stacked into shape (T, N, H).
+        If False, uses only the final output (N, H).
+    - `return_state`
+        If True, includes the final hidden state `h_T` in the return structure.
+    - `keras_compat`
+        If True, uses Keras-style returns:
+            - if return_state: (out, h_T)
+            - else: out
+        If False, uses the current KeyDNN legacy-like branching implemented in
+        `forward`.
 
-    Input
-    -----
-    x : Tensor
-        Time-major input of shape (T, N, D).
-    h0 : Optional[Tensor]
-        Initial hidden state of shape (N, H). If None, initialized to zeros.
+    Autograd behavior
+    -----------------
+    - The loop indexes `x[t]` via `Tensor.__getitem__`, preserving gradient
+      connectivity to the input.
+    - Hidden states are stacked via `Tensor.stack`, which is autograd-enabled.
 
     Notes
     -----
-    The BPTT graph is constructed by:
-    - indexing `x[t]` to preserve autograd connectivity to the input, and
-    - stacking timestep outputs via `Tensor.stack`.
+    - Initial hidden state `h0` defaults to an explicit zeros tensor when not
+      provided.
+    - This implementation is CPU-oriented and prioritizes clarity.
     """
 
     def __init__(
@@ -581,13 +563,14 @@ class GRU(Module):
         hidden_size : int
             Hidden state dimension H.
         bias : bool, optional
-            Whether the cell includes bias parameters.
+            Whether the underlying `GRUCell` includes biases. Defaults to True.
         return_sequences : bool, optional
-            Whether to return the full sequence output.
+            If True, return the full output sequence (T, N, H). Defaults to True.
         return_state : bool, optional
-            Whether to return the final hidden state.
+            If True, include the final hidden state in the return value(s).
+            Defaults to True.
         keras_compat : bool, optional
-            Whether to use Keras-like return conventions.
+            If True, return values follow a Keras-like convention. Defaults to False.
         """
         super().__init__()
         self.cell = GRUCell(input_size=input_size, hidden_size=hidden_size, bias=bias)
@@ -604,31 +587,44 @@ class GRU(Module):
         x : Tensor
             Input sequence of shape (T, N, D).
         h0 : Optional[Tensor], optional
-            Initial hidden state of shape (N, H). If None, uses zeros.
+            Initial hidden state of shape (N, H). If None, initializes to zeros
+            with `requires_grad=False`.
 
         Returns
         -------
         Any
-            Return structure depends on `keras_compat`, `return_sequences`,
-            and `return_state` as implemented in this method.
+            A return structure determined by `return_sequences`, `return_state`,
+            and `keras_compat`:
+
+            - keras_compat=False:
+                - return_state=True,  return_sequences=True  -> (h_seq, h_T)
+                - return_state=True,  return_sequences=False -> h_T
+                - return_state=False, return_sequences=True  -> h_seq
+                - return_state=False, return_sequences=False -> h_T
+            - keras_compat=True:
+                - out = h_seq if return_sequences else h_T
+                - return_state=True  -> (out, h_T)
+                - return_state=False -> out
 
         Raises
         ------
         ValueError
-            If the input tensor does not have rank 3 (T, N, D).
+            If `x` does not have rank 3 (T, N, D).
+
+        Notes
+        -----
+        The BPTT graph is built by:
+        - indexing `x[t]` to keep input connectivity, and
+        - stacking hidden states via `Tensor.stack`.
         """
         if len(x.shape) != 3:
             raise ValueError(f"GRU expects x shape (T,N,D), got {x.shape}")
 
-        x_np = x.to_numpy()
-        T, N, _ = x_np.shape
+        T, N, _D = x.shape
+        H = self.cell.hidden_size
 
         if h0 is None:
-            h_prev = tensor_from_numpy(
-                np.zeros((N, self.cell.hidden_size), dtype=np.float32),
-                device=x.device,
-                requires_grad=False,
-            )
+            h_prev = Tensor.zeros(shape=(N, H), device=x.device, requires_grad=False)
         else:
             h_prev = h0
 
@@ -638,10 +634,9 @@ class GRU(Module):
             h_prev = self.cell.forward(x_t, h_prev)
             hs.append(h_prev)
 
-        h_seq = Tensor.stack(hs, axis=0)  # (T,N,H)
-        h_T = h_prev  # (N,H)
+        h_seq = Tensor.stack(hs, axis=0)
+        h_T = h_prev
 
-        # legacy-like behavior (match your RNN/LSTM pattern)
         if not self.keras_compat:
             if self.return_state:
                 if self.return_sequences:
@@ -649,7 +644,6 @@ class GRU(Module):
                 return h_T
             return h_seq if self.return_sequences else h_T
 
-        # Keras-like behavior
         out = h_seq if self.return_sequences else h_T
         if self.return_state:
             return out, h_T
@@ -662,8 +656,8 @@ class GRU(Module):
         Returns
         -------
         Dict[str, Any]
-            Configuration dictionary containing constructor arguments and
-            behavioral flags.
+            A JSON-serializable dict containing constructor arguments and behavior
+            flags needed to reconstruct the layer.
         """
         return {
             "input_size": int(self.cell.input_size),
@@ -687,7 +681,7 @@ class GRU(Module):
         Returns
         -------
         GRU
-            Reconstructed GRU instance.
+            A reconstructed `GRU` instance with matching configuration.
         """
         return cls(
             input_size=int(cfg["input_size"]),
