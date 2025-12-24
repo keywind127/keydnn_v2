@@ -64,14 +64,24 @@ Notes
   correctness and readability over performance.
 - Broadcasting is intentionally avoided; helper routines expand biases and
   construct "ones" explicitly.
+
+Implementation notes
+--------------------
+- The forward path and parameter initialization are fully Tensor-based and do
+  not depend on NumPy.
+- NumPy is used only in legacy or auxiliary routines (`tensor_from_numpy`,
+  `_sigmoid`, and `GRUCell._backward`) that are not invoked by the default
+  autograd execution path.
+- These routines are retained for reference, testing, or future refactors and
+  may be removed once Tensor-native equivalents are complete.
+
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
-
-import numpy as np
+import math
 
 from ...domain.device._device import Device
 from .._module import Module
@@ -81,7 +91,7 @@ from ..module._serialization_core import register_module
 
 
 def tensor_from_numpy(
-    arr: np.ndarray, *, device: Device, requires_grad: bool = False
+    arr: "Any", *, device: Device, requires_grad: bool = False
 ) -> Tensor:
     """
     Construct a KeyDNN `Tensor` by copying data from a NumPy array.
@@ -103,41 +113,15 @@ def tensor_from_numpy(
 
     Notes
     -----
-    This helper centralizes a NumPy-to-Tensor boundary for modules that compute
-    intermediate gradients in NumPy (e.g., manual backward routines).
+    This helper exists to isolate NumPy usage for testing, debugging, or legacy
+    manual backward routines. Core GRU execution does not depend on NumPy.
+
     """
+    import numpy as np
+
     arr = np.asarray(arr, dtype=np.float32)
     out = Tensor(shape=arr.shape, device=device, requires_grad=requires_grad)
     out.copy_from_numpy(arr)
-    return out
-
-
-def _sigmoid(x: np.ndarray) -> np.ndarray:
-    """
-    Compute a numerically stable sigmoid on a NumPy array.
-
-    Parameters
-    ----------
-    x : np.ndarray
-        Input array.
-
-    Returns
-    -------
-    np.ndarray
-        Elementwise sigmoid values as a float32 NumPy array.
-
-    Notes
-    -----
-    This implementation avoids overflow by computing sigmoid separately on
-    non-negative and negative entries.
-    """
-    x = x.astype(np.float32, copy=False)
-    out = np.empty_like(x, dtype=np.float32)
-    pos = x >= 0
-    neg = ~pos
-    out[pos] = 1.0 / (1.0 + np.exp(-x[pos], dtype=np.float32))
-    ex = np.exp(x[neg], dtype=np.float32)
-    out[neg] = ex / (1.0 + ex)
     return out
 
 
@@ -226,42 +210,54 @@ class GRUCell(Module):
         This hook:
         - explicitly calls `Module.__init__()` (required for dataclasses),
         - allocates parameters on CPU,
-        - initializes packed weights (and biases, if enabled) using small uniform
-          random values in NumPy, then copies them into `Parameter` storage.
+        - initializes packed weights (and biases, if enabled) using `Tensor.rand`
+        and pure `Tensor` arithmetic,
+        - copies initialized tensors directly into `Parameter` storage.
 
         Notes
         -----
-        The initialization uses NumPy directly; this is acceptable because it is
-        part of module construction rather than a differentiable computation.
+        - This initialization path is **NumPy-free** by design.
+        - It relies on the existence of a `Parameter.copy_from(Tensor)` API.
+        - No fallbacks are provided: missing Tensor or Parameter functionality
+        is expected to raise errors so that incomplete framework APIs can be
+        identified and fixed explicitly.
+        - Initialization is part of module construction and is not tracked by
+        autograd.
         """
+
         Module.__init__(self)
 
-        k = 1.0 / np.sqrt(self.hidden_size)
         device = Device("cpu")
+        H = int(self.hidden_size)
+        D = int(self.input_size)
 
-        Wih = np.random.uniform(
-            -k, k, size=(self.input_size, 3 * self.hidden_size)
-        ).astype(np.float32)
-        Whh = np.random.uniform(
-            -k, k, size=(self.hidden_size, 3 * self.hidden_size)
-        ).astype(np.float32)
+        k = 1.0 / math.sqrt(H)
 
-        self.W_ih = Parameter(shape=Wih.shape, device=device, requires_grad=True)
-        self.W_hh = Parameter(shape=Whh.shape, device=device, requires_grad=True)
-        self.W_ih.copy_from_numpy(Wih)
-        self.W_hh.copy_from_numpy(Whh)
+        # NumPy-free init: Tensor.rand in [0,1) then affine to [-k, k]
+        Wih_t = Tensor.rand((D, 3 * H), device=device, requires_grad=False)
+        Whh_t = Tensor.rand((H, 3 * H), device=device, requires_grad=False)
+        Wih_t = (Wih_t * (2.0 * k)) - k
+        Whh_t = (Whh_t * (2.0 * k)) - k
+
+        self.W_ih = Parameter(shape=(D, 3 * H), device=device, requires_grad=True)
+        self.W_hh = Parameter(shape=(H, 3 * H), device=device, requires_grad=True)
+
+        # Require Tensor-to-Parameter copy. If missing, let it raise.
+        self.W_ih.copy_from(Wih_t)
+        self.W_hh.copy_from(Whh_t)
 
         if self.bias:
-            bih = np.random.uniform(-k, k, size=(3 * self.hidden_size,)).astype(
-                np.float32
-            )
-            bhh = np.random.uniform(-k, k, size=(3 * self.hidden_size,)).astype(
-                np.float32
-            )
-            self.b_ih = Parameter(shape=bih.shape, device=device, requires_grad=True)
-            self.b_hh = Parameter(shape=bhh.shape, device=device, requires_grad=True)
-            self.b_ih.copy_from_numpy(bih)
-            self.b_hh.copy_from_numpy(bhh)
+            bih_t = Tensor.rand((3 * H,), device=device, requires_grad=False)
+            bhh_t = Tensor.rand((3 * H,), device=device, requires_grad=False)
+            bih_t = (bih_t * (2.0 * k)) - k
+            bhh_t = (bhh_t * (2.0 * k)) - k
+
+            self.b_ih = Parameter(shape=(3 * H,), device=device, requires_grad=True)
+            self.b_hh = Parameter(shape=(3 * H,), device=device, requires_grad=True)
+
+            # Require Tensor-to-Parameter copy. If missing, let it raise.
+            self.b_ih.copy_from(bih_t)
+            self.b_hh.copy_from(bhh_t)
         else:
             self.b_ih = None
             self.b_hh = None
@@ -371,7 +367,18 @@ class GRUCell(Module):
           and `b_hh`, matching the forward composition used here.
         - This method is not currently invoked by `forward` unless you attach a
           `Context` that calls it.
+
+        Important
+        ---------
+        This method is a legacy NumPy-based reference implementation and is not invoked
+        by the default Tensor-based forward/autograd path. It is expected to be removed
+        or rewritten once a Tensor-native custom backward is implemented.
+
+        - All differentiable execution is performed via Tensor operations in `forward`.
+
         """
+        import numpy as np
+
         x_t, h_prev, z_t, r_t, n_t = ctx.saved_tensors
 
         x = x_t.to_numpy().astype(np.float32, copy=False)

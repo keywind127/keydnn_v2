@@ -35,7 +35,6 @@ Both `LSTMCell` and `LSTM` are registered via `register_module` and support
 
 Public API
 ----------
-- `tensor_from_numpy`
 - `LSTMCell`
 - `LSTM`
 """
@@ -46,29 +45,10 @@ from dataclasses import dataclass
 from typing import Optional, Any, Dict, Tuple
 
 from ...domain.device._device import Device
-from .._tensor import Tensor, Context
+from .._tensor import Tensor
 from .._parameter import Parameter
 from .._module import Module
 from ..module._serialization_core import register_module
-
-
-def tensor_from_numpy(
-    arr: Any, *, device: Device, requires_grad: bool = False
-) -> Tensor:
-    """
-    Construct a KeyDNN Tensor from a NumPy array.
-
-    Notes
-    -----
-    This helper remains for compatibility/testing. Core LSTM math does not
-    depend on NumPy.
-    """
-    import numpy as np
-
-    arr = np.asarray(arr, dtype=np.float32)
-    out = Tensor(shape=arr.shape, device=device, requires_grad=requires_grad, ctx=None)
-    out.copy_from_numpy(arr)
-    return out
 
 
 def _tanh(x: Tensor) -> Tensor:
