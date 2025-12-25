@@ -376,24 +376,6 @@ class Tensor(ITensor):
         """
         return self._ctx
 
-    def to_numpy(self) -> np.ndarray:
-        """
-        Convert the tensor to a NumPy ndarray (CPU-only).
-
-        Returns
-        -------
-        np.ndarray
-            A NumPy view/copy of the underlying CPU storage.
-
-        Raises
-        ------
-        RuntimeError
-            If called on a non-CPU tensor.
-        """
-        if not self._device.is_cpu():
-            raise RuntimeError("to_numpy() is only available for CPU tensors.")
-        return self._data
-
     def fill(self, value: float) -> None:
         """
         Fill the tensor with a scalar value (CPU-only).
@@ -901,50 +883,6 @@ class Tensor(ITensor):
             n *= d
         return n
 
-    def mean(self) -> "Tensor":
-        """
-        Compute the mean of all elements in the tensor.
-
-        Returns
-        -------
-        Tensor
-            A scalar tensor containing the mean value.
-
-        Notes
-        -----
-        Backward rule:
-            d(mean(x))/dx = 1 / numel(x)
-        """
-        if not self._device.is_cpu():
-            self._raise_device_not_supported("mean")
-
-        n = self.numel()
-        value = float(np.sum(self._data) / n)
-        out = Tensor(shape=(), device=self.device, requires_grad=self.requires_grad)
-        out.copy_from_numpy(np.array(value, dtype=np.float32))
-
-        if self.requires_grad:
-
-            def backward_fn(grad_out: "Tensor"):
-                grad = Tensor(
-                    shape=self.shape,
-                    device=self.device,
-                    requires_grad=False,
-                )
-                grad.copy_from_numpy(
-                    np.ones(self.shape, dtype=np.float32)
-                    * (float(np.asarray(grad_out.to_numpy())) / n)
-                )
-                return (grad,)
-
-            ctx = Context(
-                parents=(self,),
-                backward_fn=backward_fn,
-            )
-            out._set_ctx(ctx)
-
-        return out
-
     def log(self) -> "Tensor":
         """
         Compute the elementwise natural logarithm of the tensor.
@@ -990,179 +928,6 @@ class Tensor(ITensor):
             out._set_ctx(ctx)
 
         return out
-
-    # ----------------------------
-    # Autograd engine (graph traversal)
-    # ----------------------------
-    def backward(self, grad_out: Optional["Tensor"] = None) -> None:
-        """
-        Backpropagate gradients from this tensor through the autograd graph.
-
-        Parameters
-        ----------
-        grad_out : Optional[Tensor], optional
-            Gradient w.r.t. this tensor. If omitted, this tensor must be a scalar
-            (shape == ()) and the gradient is assumed to be 1.0.
-
-        Raises
-        ------
-        ValueError
-            If grad_out is None and this tensor is not a scalar.
-        RuntimeError
-            If backward is invoked on a non-CPU tensor in the current implementation.
-
-        Notes
-        -----
-        - Gradients are accumulated into `.grad` of leaf tensors that have
-          `requires_grad=True`.
-        - This implementation performs a reverse topological traversal.
-        - Only CPU tensors are supported for now.
-        """
-        if not self.device.is_cpu():
-            self._raise_device_not_supported("backward")
-
-        # Seed gradient
-        if grad_out is None:
-            if self.shape != ():
-                raise ValueError(
-                    "grad_out must be provided for non-scalar tensors. "
-                    f"Got shape={self.shape}."
-                )
-            grad_out = Tensor(shape=(), device=self.device, requires_grad=False)
-            grad_out.copy_from_numpy(np.array(1.0, dtype=np.float32))
-        else:
-            if not isinstance(grad_out, Tensor):
-                raise TypeError(f"grad_out must be a Tensor, got {type(grad_out)!r}")
-            if grad_out.shape != self.shape:
-                raise ValueError(
-                    f"grad_out shape mismatch: expected {self.shape}, got {grad_out.shape}"
-                )
-            if grad_out.device != self.device:
-                raise ValueError("grad_out must be on the same device as self")
-
-        # Build reverse topological order of nodes reachable from `self`
-        topo: list[Tensor] = []
-        visited: set[int] = set()
-
-        def dfs(t: "Tensor") -> None:
-            tid = id(t)
-            if tid in visited:
-                return
-            visited.add(tid)
-
-            ctx = t._get_ctx()
-            if ctx is not None:
-                for p in ctx.parents:
-                    dfs(p)
-
-            topo.append(t)
-
-        dfs(self)
-
-        # Map from tensor id -> accumulated gradient tensor
-        grads: dict[int, Tensor] = {id(self): grad_out}
-
-        # Traverse in reverse topo order (from outputs back to leaves)
-        for t in reversed(topo):
-            ctx = t._get_ctx()
-            if ctx is None:
-                continue
-
-            grad_t = grads.get(id(t))
-            if grad_t is None:
-                # No gradient flowing to this node; skip
-                continue
-
-            parent_grads = ctx.backward_fn(grad_t)
-            if len(parent_grads) != len(ctx.parents):
-                raise RuntimeError(
-                    "backward_fn must return one grad per parent. "
-                    f"Got {len(parent_grads)} grads for {len(ctx.parents)} parents."
-                )
-
-            for parent, g in zip(ctx.parents, parent_grads):
-                if g is None:
-                    continue
-                if not isinstance(g, Tensor):
-                    raise TypeError(
-                        f"backward_fn must return Tensor or None, got {type(g)!r}"
-                    )
-                if g.device != parent.device:
-                    raise ValueError("Gradient device must match parent device")
-                if g.shape != parent.shape:
-                    raise ValueError(
-                        f"Gradient shape mismatch for parent: expected {parent.shape}, got {g.shape}"
-                    )
-
-                # Accumulate gradient in the grads dict
-                pid = id(parent)
-                if pid in grads:
-                    grads[pid] = self._add_no_grad(grads[pid], g)
-                else:
-                    # Ensure stored grads do not track grad
-                    grads[pid] = self._detach_no_grad(g)
-
-        # Write accumulated grads into leaf tensors that require grad
-        for tid, g in grads.items():
-            # Find the actual Tensor object by scanning visited/topo
-            # (topo contains all visited tensors)
-            # This keeps it simple without weakrefs.
-            # Note: O(n^2) worst-case, but graphs are small for now.
-            for t in topo:
-                if id(t) == tid:
-                    if t.requires_grad:
-                        t._accumulate_grad_(g)
-                    break
-
-    def _accumulate_grad_(self, g: "Tensor") -> None:
-        """
-        In-place accumulate gradient `g` into `self.grad` (CPU-only).
-        """
-        if not self.device.is_cpu():
-            self._raise_device_not_supported("accumulate_grad")
-
-        g0 = self._detach_no_grad(g)
-
-        if self._grad is None:
-            self._grad = g0
-            return
-
-        # In-place add into existing grad storage
-        if not self._grad.device.is_cpu():
-            self._raise_device_not_supported("accumulate_grad_non_cpu")
-
-        if self._grad.shape != g0.shape:
-            raise ValueError(f"Grad shape mismatch: {self._grad.shape} vs {g0.shape}")
-
-        # Add underlying numpy arrays directly (avoid creating autograd edges)
-        self._grad._data[...] = self._grad._data + g0._data  # type: ignore[attr-defined]
-
-    @staticmethod
-    def _detach_no_grad(t: "Tensor") -> "Tensor":
-        """
-        Return a detached copy of `t` that does not track gradients and has no ctx.
-        """
-        out = Tensor(shape=t.shape, device=t.device, requires_grad=False, ctx=None)
-        if t.device.is_cpu():
-            out.copy_from_numpy(t.to_numpy())
-            return out
-        t._raise_device_not_supported("detach_no_grad")
-
-    @staticmethod
-    def _add_no_grad(a: "Tensor", b: "Tensor") -> "Tensor":
-        """
-        Add two tensors without creating autograd history.
-        """
-        if a.device != b.device:
-            raise ValueError("Device mismatch in _add_no_grad")
-        if a.shape != b.shape:
-            raise ValueError("Shape mismatch in _add_no_grad")
-
-        out = Tensor(shape=a.shape, device=a.device, requires_grad=False, ctx=None)
-        if a.device.is_cpu():
-            out.copy_from_numpy(a.to_numpy() + b.to_numpy())
-            return out
-        a._raise_device_not_supported("add_no_grad")
 
     def __getitem__(self, key: Any) -> "Tensor":
         """
@@ -1778,148 +1543,6 @@ class Tensor(ITensor):
 
         return out
 
-    def sum(self, axis: Optional[int] = None, keepdims: bool = False) -> "Tensor":
-        """
-        Sum elements of the tensor.
-
-        Parameters
-        ----------
-        axis : Optional[int], optional
-            Axis along which to sum. If None, sums all elements into a scalar.
-        keepdims : bool, optional
-            If True, retains reduced dimensions with size 1.
-
-        Returns
-        -------
-        Tensor
-            Reduced tensor.
-
-        Notes
-        -----
-        Backward rule:
-            Gradient is broadcast back to input shape.
-        """
-        if not self.device.is_cpu():
-            self._raise_device_not_supported("sum")
-
-        x_np = self.to_numpy()
-        if axis is None:
-            value = np.sum(x_np)
-            out_shape = () if not keepdims else tuple(1 for _ in self.shape)
-        else:
-            if not isinstance(axis, int):
-                raise TypeError("axis must be int or None")
-            ndim = x_np.ndim
-            axis_ = axis if axis >= 0 else ndim + axis
-            if axis_ < 0 or axis_ >= ndim:
-                raise ValueError(f"axis {axis} out of bounds for ndim {ndim}")
-            value = np.sum(x_np, axis=axis_, keepdims=keepdims)
-            out_shape = value.shape
-
-        out = Tensor(
-            shape=out_shape, device=self.device, requires_grad=self.requires_grad
-        )
-        out.copy_from_numpy(np.asarray(value, dtype=np.float32))
-
-        if self.requires_grad:
-
-            def backward_fn(grad_out: "Tensor"):
-                if not grad_out.device.is_cpu():
-                    raise RuntimeError("grad_out must be CPU in current implementation")
-
-                g = np.asarray(grad_out.to_numpy(), dtype=np.float32)
-
-                # Expand grad to input shape
-                if axis is None:
-                    grad_np = np.ones(self.shape, dtype=np.float32) * float(
-                        np.asarray(g)
-                    )
-                else:
-                    # If keepdims=False, need to re-insert the reduced axis
-                    if not keepdims:
-                        g = np.expand_dims(g, axis=axis_)
-
-                    grad_np = np.ones(self.shape, dtype=np.float32) * g
-
-                grad = Tensor(shape=self.shape, device=self.device, requires_grad=False)
-                grad.copy_from_numpy(grad_np)
-                return (grad,)
-
-            ctx = Context(parents=(self,), backward_fn=backward_fn)
-            ctx.saved_meta["axis"] = axis
-            ctx.saved_meta["keepdims"] = keepdims
-            out._set_ctx(ctx)
-
-        return out
-
-    def max(self, axis: int = -1, keepdims: bool = False) -> "Tensor":
-        """
-        Compute the maximum along an axis (CPU-only).
-
-        Parameters
-        ----------
-        axis : int, optional
-            Axis along which to compute the max. Defaults to -1.
-        keepdims : bool, optional
-            If True, retains reduced dimensions with size 1.
-
-        Returns
-        -------
-        Tensor
-            Tensor of max values.
-
-        Notes
-        -----
-        Backward rule:
-            Gradient is routed to positions equal to the max (ties split by mask),
-            i.e., dx = grad_out * 1[x == max(x)].
-        """
-        if not self.device.is_cpu():
-            self._raise_device_not_supported("max")
-
-        x_np = self.to_numpy()
-        ndim = x_np.ndim
-        axis_ = axis if axis >= 0 else ndim + axis
-        if axis_ < 0 or axis_ >= ndim:
-            raise ValueError(f"axis {axis} out of bounds for ndim {ndim}")
-
-        m_np = np.max(x_np, axis=axis_, keepdims=keepdims).astype(
-            np.float32, copy=False
-        )
-        out = Tensor(
-            shape=m_np.shape, device=self.device, requires_grad=self.requires_grad
-        )
-        out.copy_from_numpy(m_np)
-
-        if self.requires_grad:
-            # Save input and max output for backward mask
-            def backward_fn(grad_out: "Tensor"):
-                if not grad_out.device.is_cpu():
-                    raise RuntimeError("grad_out must be CPU in current implementation")
-
-                g = grad_out.to_numpy().astype(np.float32, copy=False)
-
-                # If keepdims=False, expand dims for mask alignment
-                m = m_np
-                g_aligned = g
-                if not keepdims:
-                    m = np.expand_dims(m, axis=axis_)
-                    g_aligned = np.expand_dims(g_aligned, axis=axis_)
-
-                mask = (x_np == m).astype(np.float32)
-                grad_np = mask * g_aligned
-
-                grad = Tensor(shape=self.shape, device=self.device, requires_grad=False)
-                grad.copy_from_numpy(grad_np.astype(np.float32, copy=False))
-                return (grad,)
-
-            ctx = Context(parents=(self,), backward_fn=backward_fn)
-            ctx.saved_meta["axis"] = axis_
-            ctx.saved_meta["keepdims"] = keepdims
-            out._set_ctx(ctx)
-
-        return out
-
     def broadcast_to(self, shape: tuple[int, ...]) -> "Tensor":
         """
         Broadcast this tensor to a target shape by explicit expansion (CPU-only).
@@ -2295,4 +1918,847 @@ class Tensor(ITensor):
         arr = np.ones(shape, dtype=np.float32)
         out = Tensor(shape=shape, device=device, requires_grad=requires_grad)
         out.copy_from_numpy(arr)
+        return out
+
+    def _accumulate_grad_(self, g: "Tensor") -> None:
+        """
+        In-place accumulate gradient `g` into `self.grad` (CPU-only).
+        """
+        if not self.device.is_cpu():
+            self._raise_device_not_supported("accumulate_grad")
+
+        g0 = self._detach_no_grad(g)
+
+        if self._grad is None:
+            self._grad = g0
+            return
+
+        # In-place add into existing grad storage
+        if not self._grad.device.is_cpu():
+            self._raise_device_not_supported("accumulate_grad_non_cpu")
+
+        if self._grad.shape != g0.shape:
+            raise ValueError(f"Grad shape mismatch: {self._grad.shape} vs {g0.shape}")
+
+        # Add underlying numpy arrays directly (avoid creating autograd edges)
+        self._grad._data[...] = self._grad._data + g0._data  # type: ignore[attr-defined]
+
+    @staticmethod
+    def _detach_no_grad(t: "Tensor") -> "Tensor":
+        """
+        Return a detached copy of `t` that does not track gradients and has no ctx.
+        """
+        out = Tensor(shape=t.shape, device=t.device, requires_grad=False, ctx=None)
+        if t.device.is_cpu():
+            out.copy_from_numpy(t.to_numpy())
+            return out
+        t._raise_device_not_supported("detach_no_grad")
+
+    @staticmethod
+    def _add_no_grad(a: "Tensor", b: "Tensor") -> "Tensor":
+        """
+        Add two tensors without creating autograd history.
+        """
+        if a.device != b.device:
+            raise ValueError("Device mismatch in _add_no_grad")
+        if a.shape != b.shape:
+            raise ValueError("Shape mismatch in _add_no_grad")
+
+        out = Tensor(shape=a.shape, device=a.device, requires_grad=False, ctx=None)
+        if a.device.is_cpu():
+            out.copy_from_numpy(a.to_numpy() + b.to_numpy())
+            return out
+        a._raise_device_not_supported("add_no_grad")
+
+    def sum(self, axis: Optional[int] = None, keepdims: bool = False) -> "Tensor":
+        """
+        Sum elements of the tensor.
+
+        Parameters
+        ----------
+        axis : Optional[int], optional
+            Axis along which to sum. If None, sums all elements into a scalar.
+        keepdims : bool, optional
+            If True, retains reduced dimensions with size 1.
+
+        Returns
+        -------
+        Tensor
+            Reduced tensor.
+
+        Notes
+        -----
+        Backward rule:
+            Gradient is broadcast back to input shape.
+        """
+        # -----------------------
+        # CUDA path (all-reduce only)
+        # -----------------------
+        if self.device.is_cuda():
+            if axis is not None:
+                raise NotImplementedError(
+                    "Tensor.sum(axis=...) for CUDA is not implemented yet "
+                    "(only axis=None / sum_all is supported)."
+                )
+
+            dtype = np.float32  # TODO: replace with self.dtype if you track it
+            numel = int(self.numel())
+
+            out_shape = () if not keepdims else tuple(1 for _ in self.shape)
+
+            # IMPORTANT: do not assume Tensor(...) auto-allocates device memory.
+            # Allocate dev scalar explicitly if needed.
+            from .native_cuda.python.maxpool2d_ctypes import (
+                load_keydnn_cuda_native as _load_lib,
+            )
+            from .ops.reduce_cuda import (
+                sum_all_cuda as _sum_all_cuda,
+                sum_backward_fill_cuda as _sum_bwd_fill_cuda,
+            )
+
+            from .native_cuda.python.maxpool2d_ctypes import (
+                load_keydnn_cuda_native as _load_lib,
+                cuda_malloc as _cuda_malloc,
+                cuda_synchronize as _cuda_sync,
+            )
+
+            lib = _load_lib()
+
+            out = Tensor(
+                shape=out_shape, device=self.device, requires_grad=self.requires_grad
+            )
+
+            # robustly get/set devptrs via `.data` (your tests/free code uses this)
+            x_dev = int(self.data)
+
+            y_dev = int(getattr(out, "data", 0) or 0)
+            if y_dev == 0:
+                y_dev = int(_cuda_malloc(lib, int(np.dtype(dtype).itemsize)))
+                # wrap/attach devptr to out
+                out = Tensor._from_devptr(
+                    dev_ptr=y_dev,
+                    shape=out_shape,
+                    device=self.device,
+                    requires_grad=self.requires_grad,
+                    ctx=None,
+                    dtype=dtype,
+                )
+
+            _sum_all_cuda(lib, x_dev=x_dev, y_dev=y_dev, numel=numel, dtype=dtype)
+            _cuda_sync(lib)
+
+            if self.requires_grad:
+
+                def backward_fn(grad_out: "Tensor"):
+                    if not grad_out.device.is_cuda():
+                        raise RuntimeError(
+                            "grad_out must be CUDA for CUDA Tensor.sum backward"
+                        )
+
+                    go_dev = int(grad_out.data)
+
+                    grad = Tensor(
+                        shape=self.shape, device=self.device, requires_grad=False
+                    )
+
+                    gx_dev = int(getattr(grad, "data", 0) or 0)
+                    if gx_dev == 0:
+                        gx_dev = int(
+                            _cuda_malloc(
+                                lib, int(numel) * int(np.dtype(dtype).itemsize)
+                            )
+                        )
+                        grad = Tensor._from_devptr(
+                            dev_ptr=gx_dev,
+                            shape=self.shape,
+                            device=self.device,
+                            requires_grad=False,
+                            ctx=None,
+                            dtype=dtype,
+                        )
+
+                    _sum_bwd_fill_cuda(
+                        lib,
+                        grad_out_dev=go_dev,  # scalar on device
+                        grad_x_dev=gx_dev,
+                        numel=numel,
+                        dtype=dtype,
+                    )
+                    _cuda_sync(lib)
+                    return (grad,)
+
+                ctx = Context(parents=(self,), backward_fn=backward_fn)
+                ctx.saved_meta["axis"] = axis
+                ctx.saved_meta["keepdims"] = keepdims
+                out._set_ctx(ctx)
+
+            return out
+
+        # -----------------------
+        # CPU path (unchanged)
+        # -----------------------
+        if not self.device.is_cpu():
+            self._raise_device_not_supported("sum")
+
+        x_np = self.to_numpy()
+        if axis is None:
+            value = np.sum(x_np)
+            out_shape = () if not keepdims else tuple(1 for _ in self.shape)
+        else:
+            if not isinstance(axis, int):
+                raise TypeError("axis must be int or None")
+            ndim = x_np.ndim
+            axis_ = axis if axis >= 0 else ndim + axis
+            if axis_ < 0 or axis_ >= ndim:
+                raise ValueError(f"axis {axis} out of bounds for ndim {ndim}")
+            value = np.sum(x_np, axis=axis_, keepdims=keepdims)
+            out_shape = value.shape
+
+        out = Tensor(
+            shape=out_shape, device=self.device, requires_grad=self.requires_grad
+        )
+        out.copy_from_numpy(np.asarray(value, dtype=np.float32))
+
+        if self.requires_grad:
+
+            def backward_fn(grad_out: "Tensor"):
+                if not grad_out.device.is_cpu():
+                    raise RuntimeError("grad_out must be CPU in current implementation")
+
+                g = np.asarray(grad_out.to_numpy(), dtype=np.float32)
+
+                if axis is None:
+                    grad_np = np.ones(self.shape, dtype=np.float32) * float(
+                        np.asarray(g)
+                    )
+                else:
+                    if not keepdims:
+                        g = np.expand_dims(g, axis=axis_)
+                    grad_np = np.ones(self.shape, dtype=np.float32) * g
+
+                grad = Tensor(shape=self.shape, device=self.device, requires_grad=False)
+                grad.copy_from_numpy(grad_np)
+                return (grad,)
+
+            ctx = Context(parents=(self,), backward_fn=backward_fn)
+            ctx.saved_meta["axis"] = axis
+            ctx.saved_meta["keepdims"] = keepdims
+            out._set_ctx(ctx)
+
+        return out
+
+    def mean(self) -> "Tensor":
+        """
+        Compute the mean of all elements in the tensor.
+
+        Returns
+        -------
+        Tensor
+            A scalar tensor containing the mean value.
+
+        Notes
+        -----
+        Backward rule:
+            d(mean(x))/dx = 1 / numel(x)
+        """
+        # -----------------------
+        # CUDA path (all-reduce)
+        # -----------------------
+        if self.device.is_cuda():
+            dtype = np.float32
+            n = int(self.numel())
+
+            out = Tensor(shape=(), device=self.device, requires_grad=self.requires_grad)
+
+            from src.keydnn.infrastructure.ops.reduce_cuda import (
+                mean_all_cuda as _mean_all_cuda,
+                mean_backward_fill_cuda as _mean_bwd_fill_cuda,
+                cuda_synchronize as _cuda_sync,
+            )
+            from src.keydnn.infrastructure.native_cuda.python.maxpool2d_ctypes import (
+                load_keydnn_cuda_native as _load_lib,
+            )
+
+            lib = _load_lib()
+
+            _mean_all_cuda(
+                lib,
+                x_dev=int(self._data),
+                y_dev=int(out._data),
+                numel=n,
+                dtype=dtype,
+            )
+            _cuda_sync(lib)
+
+            if self.requires_grad:
+
+                def backward_fn(grad_out: "Tensor"):
+                    if not grad_out.device.is_cuda():
+                        raise RuntimeError(
+                            "grad_out must be CUDA for CUDA Tensor.mean backward"
+                        )
+
+                    grad = Tensor(
+                        shape=self.shape, device=self.device, requires_grad=False
+                    )
+
+                    _mean_bwd_fill_cuda(
+                        lib,
+                        grad_out_dev=int(grad_out._data),  # scalar device pointer
+                        grad_x_dev=int(grad._data),
+                        numel=n,
+                        dtype=dtype,
+                    )
+                    _cuda_sync(lib)
+                    return (grad,)
+
+                ctx = Context(parents=(self,), backward_fn=backward_fn)
+                out._set_ctx(ctx)
+
+            return out
+
+        # -----------------------
+        # CPU path (existing behavior)
+        # -----------------------
+        if not self._device.is_cpu():
+            self._raise_device_not_supported("mean")
+
+        n = self.numel()
+        value = float(np.sum(self._data) / n)
+        out = Tensor(shape=(), device=self.device, requires_grad=self.requires_grad)
+        out.copy_from_numpy(np.array(value, dtype=np.float32))
+
+        if self.requires_grad:
+
+            def backward_fn(grad_out: "Tensor"):
+                grad = Tensor(shape=self.shape, device=self.device, requires_grad=False)
+                grad.copy_from_numpy(
+                    np.ones(self.shape, dtype=np.float32)
+                    * (float(np.asarray(grad_out.to_numpy())) / n)
+                )
+                return (grad,)
+
+            ctx = Context(parents=(self,), backward_fn=backward_fn)
+            out._set_ctx(ctx)
+
+        return out
+
+    def max(self, axis: int = -1, keepdims: bool = False) -> "Tensor":
+        """
+        Compute the maximum along an axis.
+
+        CUDA support
+        ------------
+        - Only supports 2D inputs.
+        - axis must reduce one dimension: axis in {0, 1, -1, -2}.
+        - Backward routes gradient to a single argmax index per slice (no tie-splitting).
+
+        CPU notes
+        ---------
+        Backward rule:
+            Gradient is routed to positions equal to the max (ties split by mask),
+            i.e., dx = grad_out * 1[x == max(x)].
+        """
+        # -----------------------
+        # CUDA path (2D only, axis 0/1)
+        # -----------------------
+        if self.device.is_cuda():
+            if len(self.shape) != 2:
+                raise NotImplementedError(
+                    "CUDA Tensor.max currently supports 2D tensors only "
+                    "(to match max_axis2d kernels)."
+                )
+
+            rows, cols = int(self.shape[0]), int(self.shape[1])
+
+            # normalize axis to 0 or 1 for 2D
+            axis_ = axis
+            if axis_ < 0:
+                axis_ = 2 + axis_
+            if axis_ not in (0, 1):
+                raise ValueError(
+                    "CUDA Tensor.max only supports axis in {0,1,-1,-2} for 2D tensors."
+                )
+
+            dtype = np.float32
+
+            # output shape
+            if axis_ == 1:
+                out_shape = (rows, 1) if keepdims else (rows,)
+            else:
+                out_shape = (1, cols) if keepdims else (cols,)
+
+            out = Tensor(
+                shape=out_shape, device=self.device, requires_grad=self.requires_grad
+            )
+
+            from src.keydnn.infrastructure.ops.reduce_cuda import (
+                max_axis2d_forward_cuda as _max_fwd,
+                max_axis2d_backward_cuda as _max_bwd,
+                cuda_malloc as _cuda_malloc,
+                cuda_free as _cuda_free,
+                cuda_memset as _cuda_memset,
+                cuda_synchronize as _cuda_sync,
+            )
+            from src.keydnn.infrastructure.native_cuda.python.maxpool2d_ctypes import (
+                load_keydnn_cuda_native as _load_lib,
+            )
+
+            lib = _load_lib()
+
+            # idx buffer lives on device (int64)
+            idx_n = rows if axis_ == 1 else cols
+            idx_dev = int(_cuda_malloc(lib, int(idx_n) * 8))
+
+            _max_fwd(
+                lib,
+                x_dev=int(self._data),
+                y_dev=int(out._data),
+                idx_dev=idx_dev,
+                rows=rows,
+                cols=cols,
+                axis=int(axis_),
+                dtype=dtype,
+            )
+            _cuda_sync(lib)
+
+            if self.requires_grad:
+
+                def backward_fn(grad_out: "Tensor"):
+                    if not grad_out.device.is_cuda():
+                        raise RuntimeError(
+                            "grad_out must be CUDA for CUDA Tensor.max backward"
+                        )
+
+                    grad = Tensor(
+                        shape=self.shape, device=self.device, requires_grad=False
+                    )
+
+                    # scatter-add expects grad_x to be zeroed
+                    _cuda_memset(lib, int(grad._data), 0, int(rows * cols) * 4)
+                    _max_bwd(
+                        lib,
+                        grad_out_dev=int(grad_out._data),
+                        idx_dev=idx_dev,
+                        grad_x_dev=int(grad._data),
+                        rows=rows,
+                        cols=cols,
+                        axis=int(axis_),
+                        dtype=dtype,
+                    )
+                    _cuda_sync(lib)
+
+                    # free idx buffer after use (avoid leaking device memory)
+                    _cuda_free(lib, idx_dev)
+                    return (grad,)
+
+                ctx = Context(parents=(self,), backward_fn=backward_fn)
+                ctx.saved_meta["axis"] = axis_
+                ctx.saved_meta["keepdims"] = keepdims
+                out._set_ctx(ctx)
+            else:
+                # no backward => safe to free idx immediately
+                _cuda_free(lib, idx_dev)
+
+            return out
+
+        # -----------------------
+        # CPU path (existing behavior)
+        # -----------------------
+        if not self.device.is_cpu():
+            self._raise_device_not_supported("max")
+
+        x_np = self.to_numpy()
+        ndim = x_np.ndim
+        axis_ = axis if axis >= 0 else ndim + axis
+        if axis_ < 0 or axis_ >= ndim:
+            raise ValueError(f"axis {axis} out of bounds for ndim {ndim}")
+
+        m_np = np.max(x_np, axis=axis_, keepdims=keepdims).astype(
+            np.float32, copy=False
+        )
+        out = Tensor(
+            shape=m_np.shape, device=self.device, requires_grad=self.requires_grad
+        )
+        out.copy_from_numpy(m_np)
+
+        if self.requires_grad:
+
+            def backward_fn(grad_out: "Tensor"):
+                if not grad_out.device.is_cpu():
+                    raise RuntimeError("grad_out must be CPU in current implementation")
+
+                g = grad_out.to_numpy().astype(np.float32, copy=False)
+
+                m = m_np
+                g_aligned = g
+                if not keepdims:
+                    m = np.expand_dims(m, axis=axis_)
+                    g_aligned = np.expand_dims(g_aligned, axis=axis_)
+
+                mask = (x_np == m).astype(np.float32)
+                grad_np = mask * g_aligned
+
+                grad = Tensor(shape=self.shape, device=self.device, requires_grad=False)
+                grad.copy_from_numpy(grad_np.astype(np.float32, copy=False))
+                return (grad,)
+
+            ctx = Context(parents=(self,), backward_fn=backward_fn)
+            ctx.saved_meta["axis"] = axis_
+            ctx.saved_meta["keepdims"] = keepdims
+            out._set_ctx(ctx)
+
+        return out
+
+    def backward(self, grad_out: Optional["Tensor"] = None) -> None:
+        """
+        Backpropagate gradients from this tensor through the autograd graph.
+
+        Parameters
+        ----------
+        grad_out : Optional[Tensor], optional
+            Gradient w.r.t. this tensor. If omitted, this tensor must be a scalar
+            (shape == ()) and the gradient is assumed to be 1.0.
+
+        Raises
+        ------
+        ValueError
+            If grad_out is None and this tensor is not a scalar.
+        RuntimeError
+            If backward is invoked on an unsupported device.
+
+        Notes
+        -----
+        - Gradients are accumulated into `.grad` of leaf tensors that have
+        `requires_grad=True`.
+        - This implementation performs a reverse topological traversal.
+        - CPU behavior is unchanged.
+        """
+        # ---------------------------------------------------------------------
+        # CPU path: KEEP EXACTLY the original semantics (backward compatible).
+        # ---------------------------------------------------------------------
+        if self.device.is_cpu():
+            # ---- BEGIN original implementation (CPU-only) ----
+
+            # Seed gradient
+            if grad_out is None:
+                if self.shape != ():
+                    raise ValueError(
+                        "grad_out must be provided for non-scalar tensors. "
+                        f"Got shape={self.shape}."
+                    )
+                grad_out = Tensor(shape=(), device=self.device, requires_grad=False)
+                grad_out.copy_from_numpy(np.array(1.0, dtype=np.float32))
+            else:
+                if not isinstance(grad_out, Tensor):
+                    raise TypeError(
+                        f"grad_out must be a Tensor, got {type(grad_out)!r}"
+                    )
+                if grad_out.shape != self.shape:
+                    raise ValueError(
+                        f"grad_out shape mismatch: expected {self.shape}, got {grad_out.shape}"
+                    )
+                if grad_out.device != self.device:
+                    raise ValueError("grad_out must be on the same device as self")
+
+            # Build reverse topological order of nodes reachable from `self`
+            topo: list[Tensor] = []
+            visited: set[int] = set()
+
+            def dfs(t: "Tensor") -> None:
+                tid = id(t)
+                if tid in visited:
+                    return
+                visited.add(tid)
+
+                ctx = t._get_ctx()
+                if ctx is not None:
+                    for p in ctx.parents:
+                        dfs(p)
+
+                topo.append(t)
+
+            dfs(self)
+
+            # Map from tensor id -> accumulated gradient tensor
+            grads: dict[int, Tensor] = {id(self): grad_out}
+
+            # Traverse in reverse topo order (from outputs back to leaves)
+            for t in reversed(topo):
+                ctx = t._get_ctx()
+                if ctx is None:
+                    continue
+
+                grad_t = grads.get(id(t))
+                if grad_t is None:
+                    # No gradient flowing to this node; skip
+                    continue
+
+                parent_grads = ctx.backward_fn(grad_t)
+                if len(parent_grads) != len(ctx.parents):
+                    raise RuntimeError(
+                        "backward_fn must return one grad per parent. "
+                        f"Got {len(parent_grads)} grads for {len(ctx.parents)} parents."
+                    )
+
+                for parent, g in zip(ctx.parents, parent_grads):
+                    if g is None:
+                        continue
+                    if not isinstance(g, Tensor):
+                        raise TypeError(
+                            f"backward_fn must return Tensor or None, got {type(g)!r}"
+                        )
+                    if g.device != parent.device:
+                        raise ValueError("Gradient device must match parent device")
+                    if g.shape != parent.shape:
+                        raise ValueError(
+                            f"Gradient shape mismatch for parent: expected {parent.shape}, got {g.shape}"
+                        )
+
+                    # Accumulate gradient in the grads dict
+                    pid = id(parent)
+                    if pid in grads:
+                        grads[pid] = self._add_no_grad(grads[pid], g)
+                    else:
+                        # Ensure stored grads do not track grad
+                        grads[pid] = self._detach_no_grad(g)
+
+            # Write accumulated grads into leaf tensors that require grad
+            for tid, g in grads.items():
+                # Find the actual Tensor object by scanning visited/topo
+                for t in topo:
+                    if id(t) == tid:
+                        if t.requires_grad:
+                            t._accumulate_grad_(g)
+                        break
+
+            # ---- END original implementation (CPU-only) ----
+            return
+
+        # ---------------------------------------------------------------------
+        # CUDA path: additive support (minimal, does NOT change CPU behavior).
+        # ---------------------------------------------------------------------
+        if not self.device.is_cuda():
+            self._raise_device_not_supported("backward")
+
+        # Helper: share a single CUDA DLL handle to avoid multi-handle issues.
+        def _get_cuda_lib():
+            lib = getattr(Tensor, "_CUDA_LIB", None)
+            if lib is None:
+                from src.keydnn.infrastructure.native_cuda.python import (
+                    maxpool2d_ctypes as m,
+                )
+
+                lib = m.load_keydnn_cuda_native()
+                setattr(Tensor, "_CUDA_LIB", lib)
+            return lib
+
+        # Seed gradient (CUDA)
+        if grad_out is None:
+            if self.shape != ():
+                raise ValueError(
+                    "grad_out must be provided for non-scalar tensors. "
+                    f"Got shape={self.shape}."
+                )
+
+            from src.keydnn.infrastructure.native_cuda.python import (
+                maxpool2d_ctypes as m,
+            )
+
+            lib = _get_cuda_lib()
+            host = np.array(1.0, dtype=np.float32)
+            dev_ptr = int(m.cuda_malloc(lib, int(host.nbytes)))
+
+            try:
+                m.cudaMemcpyHtoD(lib, int(dev_ptr), host, int(host.nbytes))
+
+                grad_out = Tensor._from_devptr(
+                    dev_ptr=int(dev_ptr),
+                    shape=(),  # scalar
+                    device=self.device,
+                    requires_grad=False,
+                    ctx=None,
+                    dtype=np.float32,
+                )
+            except Exception:
+                try:
+                    m.cuda_free(lib, int(dev_ptr))
+                except Exception:
+                    pass
+                raise
+        else:
+            if not isinstance(grad_out, Tensor):
+                raise TypeError(f"grad_out must be a Tensor, got {type(grad_out)!r}")
+            if grad_out.shape != self.shape:
+                raise ValueError(
+                    f"grad_out shape mismatch: expected {self.shape}, got {grad_out.shape}"
+                )
+            if grad_out.device != self.device:
+                raise ValueError("grad_out must be on the same device as self")
+
+        # Build reverse topo on CUDA graph (same structure as CPU)
+        topo: list[Tensor] = []
+        visited: set[int] = set()
+
+        def dfs_cuda(t: "Tensor") -> None:
+            tid = id(t)
+            if tid in visited:
+                return
+            visited.add(tid)
+
+            ctx = t._get_ctx()
+            if ctx is not None:
+                for p in ctx.parents:
+                    dfs_cuda(p)
+
+            topo.append(t)
+
+        dfs_cuda(self)
+
+        grads: dict[int, Tensor] = {id(self): grad_out}
+
+        # CUDA: no generic accumulation yet (requires add kernel),
+        # so we only support single-contribution gradients per tensor id.
+        for t in reversed(topo):
+            ctx = t._get_ctx()
+            if ctx is None:
+                continue
+
+            grad_t = grads.get(id(t))
+            if grad_t is None:
+                continue
+
+            parent_grads = ctx.backward_fn(grad_t)
+            if len(parent_grads) != len(ctx.parents):
+                raise RuntimeError(
+                    "backward_fn must return one grad per parent. "
+                    f"Got {len(parent_grads)} grads for {len(ctx.parents)} parents."
+                )
+
+            for parent, g in zip(ctx.parents, parent_grads):
+                if g is None:
+                    continue
+                if not isinstance(g, Tensor):
+                    raise TypeError(
+                        f"backward_fn must return Tensor or None, got {type(g)!r}"
+                    )
+                if g.device != parent.device:
+                    raise ValueError("Gradient device must match parent device")
+                if g.shape != parent.shape:
+                    raise ValueError(
+                        f"Gradient shape mismatch for parent: expected {parent.shape}, got {g.shape}"
+                    )
+
+                # Enforce "non-tracking" grads on CUDA to avoid needing detach helpers.
+                if getattr(g, "requires_grad", False):
+                    raise RuntimeError(
+                        "CUDA backward_fn must return requires_grad=False gradient tensors."
+                    )
+                if g._get_ctx() is not None:
+                    raise RuntimeError(
+                        "CUDA backward_fn must return gradient tensors with ctx=None."
+                    )
+
+                pid = id(parent)
+                if pid in grads:
+                    raise RuntimeError(
+                        "CUDA backward currently does not support accumulating multiple "
+                        "gradient contributions into the same tensor."
+                    )
+                grads[pid] = g
+
+        # Write accumulated grads into leaf tensors that require grad
+        # NOTE: _accumulate_grad_ is CPU-only, so set _grad directly for CUDA.
+        for tid, g in grads.items():
+            for t in topo:
+                if id(t) != tid:
+                    continue
+                if not t.requires_grad:
+                    break
+
+                # Best-effort "leaf grad set" semantics:
+                # - if no existing grad: set
+                # - else: would require CUDA add kernel
+                if getattr(t, "_grad", None) is None:
+                    t._grad = g
+                else:
+                    raise RuntimeError(
+                        "CUDA backward currently does not support accumulating into an existing .grad."
+                    )
+                break
+
+    def to_numpy(self) -> np.ndarray:
+        """
+        Convert the tensor to a NumPy ndarray.
+
+        Returns
+        -------
+        np.ndarray
+            A NumPy array containing the tensor data on the host.
+
+        Raises
+        ------
+        RuntimeError
+            If device-to-host transfer is unavailable or the tensor's dtype is unknown.
+
+        Notes
+        -----
+        - CPU tensors return a view/copy of the underlying CPU storage (unchanged behavior).
+        - CUDA tensors are copied from device to host via a DtoH memcpy.
+        """
+        # -----------------------
+        # CPU path (unchanged)
+        # -----------------------
+        if self._device.is_cpu():
+            return self._data
+
+        # -----------------------
+        # CUDA path
+        # -----------------------
+        if not self._device.is_cuda():
+            raise RuntimeError(
+                f"to_numpy() is not available for device {self._device!s}"
+            )
+
+        # Helper: share a single CUDA DLL handle to avoid multi-handle issues.
+        def _get_cuda_lib():
+            lib = getattr(Tensor, "_CUDA_LIB", None)
+            if lib is None:
+                from src.keydnn.infrastructure.native_cuda.python import (
+                    maxpool2d_ctypes as m,
+                )
+
+                lib = m.load_keydnn_cuda_native()
+                setattr(Tensor, "_CUDA_LIB", lib)
+            return lib
+
+        try:
+            from src.keydnn.infrastructure.native_cuda.python import (
+                maxpool2d_ctypes as m,
+            )
+        except Exception as e:
+            raise RuntimeError(
+                f"to_numpy() CUDA transfer requires native CUDA ctypes wrappers: {e!r}"
+            )
+
+        # Figure out dtype
+        dtype = getattr(self, "dtype", None)
+        if dtype is None:
+            # Some codebases store dtype in _dtype; try that as a fallback.
+            dtype = getattr(self, "_dtype", None)
+        if dtype is None:
+            raise RuntimeError("CUDA Tensor has no dtype; cannot materialize to NumPy.")
+
+        dtype = np.dtype(dtype)
+
+        # Allocate host array and copy device -> host
+        out = np.empty(self.shape, dtype=dtype, order="C")
+
+        dev_ptr = int(getattr(self, "data"))
+        nbytes = int(out.nbytes)
+
+        lib = _get_cuda_lib()
+        # Expected signature: (lib, dst_host_ndarray, src_dev_ptr, nbytes)
+        m.cudaMemcpyDtoH(lib, out, dev_ptr, nbytes)
+
         return out
