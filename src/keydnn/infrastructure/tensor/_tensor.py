@@ -1864,62 +1864,6 @@ class Tensor(ITensor):
         out._set_ctx(ctx)
         return out
 
-    @staticmethod
-    def zeros(
-        *, shape: tuple[int, ...], device, requires_grad: bool = False
-    ) -> "Tensor":
-        """
-        Construct a tensor filled with zeros.
-
-        Parameters
-        ----------
-        shape : tuple[int, ...]
-            Output shape.
-        device : Device
-            Target device.
-        requires_grad : bool, optional
-            Whether the result participates in autograd.
-
-        Returns
-        -------
-        Tensor
-            A tensor of given shape filled with 0.0 (float32).
-        """
-        import numpy as np
-
-        arr = np.zeros(shape, dtype=np.float32)
-        out = Tensor(shape=shape, device=device, requires_grad=requires_grad)
-        out.copy_from_numpy(arr)
-        return out
-
-    @staticmethod
-    def ones(
-        *, shape: tuple[int, ...], device, requires_grad: bool = False
-    ) -> "Tensor":
-        """
-        Construct a tensor filled with ones.
-
-        Parameters
-        ----------
-        shape : tuple[int, ...]
-            Output shape.
-        device : Device
-            Target device.
-        requires_grad : bool, optional
-            Whether the result participates in autograd.
-
-        Returns
-        -------
-        Tensor
-            A tensor of given shape filled with 1.0 (float32).
-        """
-        import numpy as np
-
-        arr = np.ones(shape, dtype=np.float32)
-        out = Tensor(shape=shape, device=device, requires_grad=requires_grad)
-        out.copy_from_numpy(arr)
-        return out
-
     def _accumulate_grad_(self, g: "Tensor") -> None:
         """
         In-place accumulate gradient `g` into `self.grad` (CPU-only).
@@ -2761,4 +2705,213 @@ class Tensor(ITensor):
         # Expected signature: (lib, dst_host_ndarray, src_dev_ptr, nbytes)
         m.cudaMemcpyDtoH(lib, out, dev_ptr, nbytes)
 
+        return out
+
+    def _numel_from_shape(self) -> int:
+        """
+        Compute the total number of elements implied by the tensor shape.
+
+        This method multiplies all dimensions in `self.shape` to obtain the
+        total element count. Dimensions are explicitly cast to `int` to avoid
+        propagation of NumPy scalar types.
+
+        Returns
+        -------
+        int
+            Total number of elements represented by the tensor shape.
+
+        Notes
+        -----
+        - An empty shape (e.g., `()`) yields 1 by convention.
+        - This helper is used by both CPU and CUDA allocation paths.
+        """
+        n = 1
+        for d in self.shape:
+            n *= int(d)
+        return int(n)
+
+    @staticmethod
+    def _get_cuda_lib():
+        """
+        Lazily load and cache the KeyDNN native CUDA shared library.
+
+        This method performs a local import to avoid importing CUDA-related
+        symbols during CPU-only execution. The loaded library handle is cached
+        as an attribute on the function object, acting as a simple singleton.
+
+        Returns
+        -------
+        object
+            Handle to the loaded KeyDNN CUDA native library.
+
+        Notes
+        -----
+        - The library is loaded at most once per process.
+        - This method does not perform device selection; callers are responsible
+        for invoking `cuda_set_device` as needed.
+        """
+        # Local import to avoid importing CUDA on CPU-only runs
+        from ..native_cuda.python.avgpool2d_ctypes import load_keydnn_cuda_native
+
+        # cache on the function object (simple singleton)
+        if not hasattr(Tensor._get_cuda_lib, "_lib"):
+            Tensor._get_cuda_lib._lib = load_keydnn_cuda_native()
+        return Tensor._get_cuda_lib._lib
+
+    def _ensure_cuda_alloc(self, *, dtype) -> None:
+        """
+        Ensure that a CUDA tensor has an allocated device buffer.
+
+        This method allocates device memory sized to
+        `numel * dtype.itemsize` and stores the resulting device pointer on
+        the tensor instance. Memory contents are left uninitialized.
+
+        Parameters
+        ----------
+        dtype
+            Desired NumPy-compatible data type for the device buffer.
+
+        Raises
+        ------
+        RuntimeError
+            If called on a tensor whose device is not CUDA.
+
+        Notes
+        -----
+        - Zero-sized tensors do not allocate device memory; their device pointer
+        is set to `0`.
+        - This method does not perform any data initialization (e.g., zeros or
+        ones); it is purely an allocation helper.
+        - Device selection is performed internally based on `self.device.index`.
+        """
+        import numpy as np
+        from ..native_cuda.python.avgpool2d_ctypes import cuda_set_device, cuda_malloc
+
+        if not self.device.is_cuda():
+            raise RuntimeError("_ensure_cuda_alloc is only valid for CUDA tensors.")
+
+        dtype = np.dtype(dtype)
+        numel = self._numel_from_shape()
+
+        # zero-sized: represent as null pointer
+        if numel == 0:
+            self._data = (
+                0  # store device ptr here (adjust if you have a dedicated field)
+            )
+            self._dtype = dtype
+            return
+
+        lib = self._get_cuda_lib()
+        cuda_set_device(lib, int(self.device.index or 0))
+
+        nbytes = int(numel) * int(dtype.itemsize)
+        dev_ptr = cuda_malloc(lib, nbytes)
+
+        # Store device pointer on tensor. Adjust if your tensor uses another attribute.
+        self._data = int(dev_ptr)
+        self._dtype = dtype
+
+    @staticmethod
+    def zeros(
+        *, shape: tuple[int, ...], device: Device, requires_grad: bool = False
+    ) -> "Tensor":
+        """
+        Create a tensor filled with zeros on the specified device.
+
+        This factory method constructs a tensor with the given shape and device.
+        For CPU tensors, a NumPy array is allocated and zero-initialized.
+        For CUDA tensors, device memory is allocated and zeroed via `cudaMemset`.
+
+        Parameters
+        ----------
+        shape : tuple[int, ...]
+            Shape of the output tensor.
+        device : Device
+            Target device placement (CPU or CUDA).
+        requires_grad : bool, optional
+            Whether the tensor should track gradients for autograd.
+
+        Returns
+        -------
+        Tensor
+            Newly created tensor filled with zeros.
+
+        Notes
+        -----
+        - The dtype is currently fixed to `float32`.
+        - Zero-sized tensors are valid and return immediately without invoking
+        CUDA kernels.
+        """
+        import numpy as np
+
+        dtype = np.float32
+        out = Tensor(shape=shape, device=device, requires_grad=requires_grad)
+
+        if device.is_cpu():
+            out._data = np.zeros(shape, dtype=dtype)
+            return out
+
+        out._ensure_cuda_alloc(dtype=dtype)
+        numel = out._numel_from_shape()
+        if numel == 0:
+            return out
+
+        from ..ops.fill_cuda import zeros_cuda
+
+        lib = out._get_cuda_lib()
+        zeros_cuda(lib, y_dev=int(out._data), numel=numel, dtype=dtype, sync=True)
+        return out
+
+    @staticmethod
+    def ones(
+        *, shape: tuple[int, ...], device: Device, requires_grad: bool = False
+    ) -> "Tensor":
+        """
+        Create a tensor filled with ones on the specified device.
+
+        This factory method constructs a tensor with the given shape and device.
+        For CPU tensors, a NumPy array is allocated and initialized with ones.
+        For CUDA tensors, device memory is allocated and filled using a native
+        CUDA kernel, with a host-to-device memcpy fallback if needed.
+
+        Parameters
+        ----------
+        shape : tuple[int, ...]
+            Shape of the output tensor.
+        device : Device
+            Target device placement (CPU or CUDA).
+        requires_grad : bool, optional
+            Whether the tensor should track gradients for autograd.
+
+        Returns
+        -------
+        Tensor
+            Newly created tensor filled with ones.
+
+        Notes
+        -----
+        - The dtype is currently fixed to `float32`.
+        - Zero-sized tensors are valid and return immediately without invoking
+        CUDA kernels.
+        - The CUDA path prioritizes correctness and may fall back to a slower
+        initialization strategy if the native fill kernel fails.
+        """
+        import numpy as np
+
+        dtype = np.float32
+        out = Tensor(shape=shape, device=device, requires_grad=requires_grad)
+
+        if device.is_cpu():
+            out._data = np.ones(shape, dtype=dtype)
+            return out
+
+        out._ensure_cuda_alloc(dtype=dtype)
+        numel = out._numel_from_shape()
+        if numel == 0:
+            return out
+
+        from ..ops.fill_cuda import ones_cuda
+
+        lib = out._get_cuda_lib()
+        ones_cuda(lib, y_dev=int(out._data), numel=numel, dtype=dtype, sync=True)
         return out
