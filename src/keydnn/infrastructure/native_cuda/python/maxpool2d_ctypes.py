@@ -148,6 +148,9 @@ class CudaLib:
         lib.keydnn_cuda_synchronize.argtypes = []
         lib.keydnn_cuda_synchronize.restype = c_int
 
+        lib.keydnn_cuda_memcpy_d2d.argtypes = [c_void_p, c_void_p, c_size_t]
+        lib.keydnn_cuda_memcpy_d2d.restype = c_int
+
         self._cuda_utils_bound = True
 
     def _bind_maxpool2d(self) -> None:
@@ -637,6 +640,16 @@ class CudaLib:
         if sync:
             self.cuda_synchronize()
 
+    def cuda_memcpy_d2d(self, dst_dev: DevPtr, src_dev: DevPtr, nbytes: int) -> None:
+        self._bind_cuda_utils()
+        st = self.lib.keydnn_cuda_memcpy_d2d(
+            c_void_p(int(dst_dev)),
+            c_void_p(int(src_dev)),
+            c_size_t(int(nbytes)),
+        )
+        if st != 0:
+            raise RuntimeError(f"keydnn_cuda_memcpy_d2d failed with status={st}")
+
 
 # ---------------------------------------------------------------------
 # Functional API (keeps backward compatibility with the earlier wrapper)
@@ -940,3 +953,14 @@ def cuda_memcpy_dtoh(
 # Optional extra aliases if tests probe these exact names
 cudaMemcpyHtoD = cuda_memcpy_htod
 cudaMemcpyDtoH = cuda_memcpy_dtoh
+
+
+def cuda_memcpy_d2d(
+    lib: ctypes.CDLL, dst_dev: DevPtr, src_dev: DevPtr, nbytes: int
+) -> None:
+    _get_cuda(lib).cuda_memcpy_d2d(dst_dev, src_dev, nbytes)
+
+
+cuda_memcpy_dtod = cuda_memcpy_d2d
+cudaMemcpyDtoD = cuda_memcpy_d2d
+cudaMemcpyD2D = cuda_memcpy_d2d

@@ -82,11 +82,16 @@
   <ItemGroup>
     <CudaCompile Include="kernel.cu" />
     <CudaCompile Include="keydnn_avgpool2d_cuda.cu" />
+    <CudaCompile Include="keydnn_cuda_exp.cu" />
     <CudaCompile Include="keydnn_cuda_utils.cu" />
     <CudaCompile Include="keydnn_fill_cuda.cu" />
     <CudaCompile Include="keydnn_global_avgpool2d_cuda.cu" />
+    <CudaCompile Include="keydnn_matmul.cu" />
+    <CudaCompile Include="keydnn_memcpy_d2d.cu" />
+    <CudaCompile Include="keydnn_mul.cu" />
     <CudaCompile Include="keydnn_pad2d_cuda.cu" />
     <CudaCompile Include="keydnn_reduce_cuda.cu" />
+    <CudaCompile Include="keydnn_transpose2d.cu" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
