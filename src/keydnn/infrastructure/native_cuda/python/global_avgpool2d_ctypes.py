@@ -257,6 +257,46 @@ def cuda_from_host(lib: ctypes.CDLL, x: np.ndarray) -> DevPtr:
     return dev
 
 
+def cuda_from_host_any(lib: ctypes.CDLL, x: np.ndarray) -> DevPtr:
+    """
+    Generic convenience: allocate device buffer and copy a NumPy CPU array to GPU.
+
+    Unlike `cuda_from_host`, this supports ANY dtype as raw bytes, as long as
+    the array is C-contiguous. Useful for int64 index buffers, etc.
+
+    Parameters
+    ----------
+    x : np.ndarray
+        Host array (any dtype). Will be made contiguous if needed.
+
+    Returns
+    -------
+    DevPtr
+        Device pointer handle.
+    """
+    if not isinstance(x, np.ndarray):
+        raise TypeError(f"x must be np.ndarray, got {type(x)}")
+    if not x.flags["C_CONTIGUOUS"]:
+        x = np.ascontiguousarray(x)
+
+    dev = cuda_malloc(lib, int(x.nbytes))
+    try:
+        cuda_memcpy_h2d(lib, dev, x)
+    except Exception:
+        cuda_free(lib, dev)
+        raise
+    return dev
+
+
+def cuda_from_host_i64(lib: ctypes.CDLL, x: np.ndarray) -> DevPtr:
+    """
+    Convenience wrapper for int64 index buffers (common in argmax ops).
+    """
+    if x.dtype != np.int64:
+        raise TypeError(f"cuda_from_host_i64 expects int64, got {x.dtype}")
+    return cuda_from_host_any(lib, x)
+
+
 def _bind_global_avgpool2d(lib: ctypes.CDLL) -> None:
     """
     Bind argtypes/restype for GlobalAvgPool2D CUDA exports.
