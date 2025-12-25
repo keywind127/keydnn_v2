@@ -23,8 +23,16 @@ Implemented pooling variants
 """
 
 from __future__ import annotations
+import ctypes
 
 import numpy as np
+
+from ..native_cuda.python.global_avgpool2d_ctypes import (
+    _as_dev_ptr_double,
+    _as_dev_ptr_float,
+    _bind_global_avgpool2d,
+    cuda_synchronize,
+)
 
 DevPtr = int
 
@@ -326,7 +334,7 @@ def avgpool2d_backward_cuda(
 
 
 def global_avgpool2d_forward_cuda(
-    lib,
+    lib: ctypes.CDLL,
     *,
     x_dev: DevPtr,
     y_dev: DevPtr,
@@ -337,31 +345,57 @@ def global_avgpool2d_forward_cuda(
     dtype: np.dtype,
     sync: bool = True,
 ) -> None:
-    """Device-pointer GlobalAvgPool2D forward."""
-    from ..native_cuda.python.global_avgpool2d_ctypes import (
-        global_avgpool2d_forward_cuda as _fwd,
-    )
+    """
+    Run CUDA GlobalAvgPool2D forward on device buffers.
 
-    if dtype not in (np.float32, np.float64):
-        raise TypeError(
-            f"global_avgpool2d_forward_cuda supports float32/float64 only, got {dtype}"
+    Parameters
+    ----------
+    x_dev : DevPtr
+        Device pointer to input x (N,C,H,W).
+    y_dev : DevPtr
+        Device pointer to output y (N,C,1,1), stored as N*C contiguous values.
+    dtype : np.dtype
+        np.float32 or np.float64 selects the kernel.
+
+    Raises
+    ------
+    RuntimeError
+        If the CUDA kernel reports failure.
+    """
+    _bind_global_avgpool2d(lib)
+
+    if dtype == np.float32:
+        st = lib.keydnn_cuda_global_avgpool2d_forward_f32(
+            _as_dev_ptr_float(x_dev),
+            _as_dev_ptr_float(y_dev),
+            int(N),
+            int(C),
+            int(H),
+            int(W),
+        )
+    elif dtype == np.float64:
+        st = lib.keydnn_cuda_global_avgpool2d_forward_f64(
+            _as_dev_ptr_double(x_dev),
+            _as_dev_ptr_double(y_dev),
+            int(N),
+            int(C),
+            int(H),
+            int(W),
+        )
+    else:
+        raise TypeError(f"Unsupported dtype for global_avgpool2d_forward_cuda: {dtype}")
+
+    if st != 0:
+        raise RuntimeError(
+            f"keydnn_cuda_global_avgpool2d_forward failed with status={st}"
         )
 
-    _fwd(
-        lib,
-        x_dev=int(x_dev),
-        y_dev=int(y_dev),
-        N=int(N),
-        C=int(C),
-        H=int(H),
-        W=int(W),
-        dtype=dtype,
-        sync=bool(sync),
-    )
+    if sync:
+        cuda_synchronize(lib)
 
 
 def global_avgpool2d_backward_cuda(
-    lib,
+    lib: ctypes.CDLL,
     *,
     grad_out_dev: DevPtr,
     grad_x_dev: DevPtr,
@@ -372,24 +406,49 @@ def global_avgpool2d_backward_cuda(
     dtype: np.dtype,
     sync: bool = True,
 ) -> None:
-    """Device-pointer GlobalAvgPool2D backward."""
-    from ..native_cuda.python.global_avgpool2d_ctypes import (
-        global_avgpool2d_backward_cuda as _bwd,
-    )
+    """
+    Run CUDA GlobalAvgPool2D backward on device buffers.
 
-    if dtype not in (np.float32, np.float64):
+    Parameters
+    ----------
+    grad_out_dev : DevPtr
+        Device pointer to grad_out (N,C,1,1), stored as N*C values.
+    grad_x_dev : DevPtr
+        Device pointer to grad_x (N,C,H,W).
+
+    Notes
+    -----
+    This kernel overwrites all grad_x elements, so zero-initialization is not required.
+    """
+    _bind_global_avgpool2d(lib)
+
+    if dtype == np.float32:
+        st = lib.keydnn_cuda_global_avgpool2d_backward_f32(
+            _as_dev_ptr_float(grad_out_dev),
+            _as_dev_ptr_float(grad_x_dev),
+            int(N),
+            int(C),
+            int(H),
+            int(W),
+        )
+    elif dtype == np.float64:
+        st = lib.keydnn_cuda_global_avgpool2d_backward_f64(
+            _as_dev_ptr_double(grad_out_dev),
+            _as_dev_ptr_double(grad_x_dev),
+            int(N),
+            int(C),
+            int(H),
+            int(W),
+        )
+    else:
         raise TypeError(
-            f"global_avgpool2d_backward_cuda supports float32/float64 only, got {dtype}"
+            f"Unsupported dtype for global_avgpool2d_backward_cuda: {dtype}"
         )
 
-    _bwd(
-        lib,
-        grad_out_dev=int(grad_out_dev),
-        grad_x_dev=int(grad_x_dev),
-        N=int(N),
-        C=int(C),
-        H=int(H),
-        W=int(W),
-        dtype=dtype,
-        sync=bool(sync),
-    )
+    if st != 0:
+        raise RuntimeError(
+            f"keydnn_cuda_global_avgpool2d_backward failed with status={st}"
+        )
+
+    if sync:
+        cuda_synchronize(lib)

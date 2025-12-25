@@ -860,3 +860,83 @@ def maxpool2d_forward_cuda_from_numpy(
         cuda.cuda_free(idx_dev)
 
     return y, argmax_idx
+
+
+def cuda_memcpy_htod(
+    lib: ctypes.CDLL,
+    dst_dev: DevPtr,
+    src_host: np.ndarray,
+    nbytes: int | None = None,
+) -> None:
+    """
+    Backward-compatible alias for host->device memcpy.
+
+    Parameters
+    ----------
+    lib : ctypes.CDLL
+        Loaded CUDA DLL handle.
+    dst_dev : DevPtr
+        Destination device pointer.
+    src_host : np.ndarray
+        Source host array.
+    nbytes : int | None, optional
+        Legacy parameter used by older wrappers/tests. If provided, it must match
+        `src_host.nbytes` (after contiguity normalization).
+
+    Notes
+    -----
+    Older code/tests may look for `cuda_memcpy_htod` (or `cudaMemcpyHtoD`) and
+    call it as (lib, dst_dev, src_host, nbytes).
+    The canonical name in this module is `cuda_memcpy_h2d(lib, dst_dev, src_host)`.
+    """
+    # Normalize contiguity the same way the canonical wrapper does.
+    if not src_host.flags["C_CONTIGUOUS"]:
+        src_host = np.ascontiguousarray(src_host)
+
+    if nbytes is not None and int(nbytes) != int(src_host.nbytes):
+        raise ValueError(
+            f"nbytes mismatch: got {int(nbytes)} but src_host.nbytes is {int(src_host.nbytes)}"
+        )
+
+    cuda_memcpy_h2d(lib, dst_dev, src_host)
+
+
+def cuda_memcpy_dtoh(
+    lib: ctypes.CDLL,
+    dst_host: np.ndarray,
+    src_dev: DevPtr,
+    nbytes: int | None = None,
+) -> None:
+    """
+    Backward-compatible alias for device->host memcpy.
+
+    Parameters
+    ----------
+    lib : ctypes.CDLL
+        Loaded CUDA DLL handle.
+    dst_host : np.ndarray
+        Destination host array (should be C-contiguous).
+    src_dev : DevPtr
+        Source device pointer.
+    nbytes : int | None, optional
+        Legacy parameter used by older wrappers/tests. If provided, it must match
+        `dst_host.nbytes`.
+
+    Notes
+    -----
+    The canonical name in this module is `cuda_memcpy_d2h(lib, dst_host, src_dev)`.
+    """
+    if not dst_host.flags["C_CONTIGUOUS"]:
+        raise ValueError("dst_host must be C-contiguous")
+
+    if nbytes is not None and int(nbytes) != int(dst_host.nbytes):
+        raise ValueError(
+            f"nbytes mismatch: got {int(nbytes)} but dst_host.nbytes is {int(dst_host.nbytes)}"
+        )
+
+    cuda_memcpy_d2h(lib, dst_host, src_dev)
+
+
+# Optional extra aliases if tests probe these exact names
+cudaMemcpyHtoD = cuda_memcpy_htod
+cudaMemcpyDtoH = cuda_memcpy_dtoh

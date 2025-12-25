@@ -49,6 +49,20 @@ class ITensor(Protocol):
     # ---------------------------------------------------------------------
     # Core identity / placement
     # ---------------------------------------------------------------------
+
+    @property
+    def dtype(self) -> Any:
+        """
+        Return the element dtype of this tensor.
+
+        Returns
+        -------
+        np.dtype
+            NumPy dtype representing the tensor element type.
+
+        """
+        ...
+
     @property
     def shape(self) -> tuple[int, ...]:
         """

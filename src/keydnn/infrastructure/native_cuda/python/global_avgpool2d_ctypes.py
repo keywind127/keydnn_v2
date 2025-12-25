@@ -45,6 +45,13 @@ from typing import Tuple
 
 import numpy as np
 
+from .maxpool2d_ctypes import (
+    cudaMemcpyDtoH,
+    cudaMemcpyHtoD,
+    cuda_memcpy_dtoh,
+    cuda_memcpy_htod,
+)  # do not remove, dynamic import dependencies
+
 # Device pointer handle type: uintptr_t stored as Python int
 DevPtr = int
 

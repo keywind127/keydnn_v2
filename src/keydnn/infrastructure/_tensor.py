@@ -59,11 +59,13 @@ class Tensor(ITensor):
     ctx : Optional[Context], optional
         Backward context for autograd graph traversal. Typically set internally
         by differentiable operations. Defaults to None.
+    dtype : np.dtype, optional
+        Element dtype for this tensor. Defaults to np.float32.
 
     Notes
     -----
-    - For CPU tensors, `_data` is a NumPy ndarray of dtype float32.
-    - For CUDA tensors, `_data` is currently a placeholder string.
+    - For CPU tensors, `_data` is a NumPy ndarray of dtype `self._dtype`.
+    - For CUDA tensors, `_data` is a device pointer handle (DevPtr) stored as an int.
     - Gradients (if any) are stored as another `Tensor` in `_grad`.
     """
 
@@ -86,7 +88,7 @@ class Tensor(ITensor):
 
         is_cpu = getattr(d, "is_cpu", None)
         if callable(is_cpu) and is_cpu():
-            self._data = np.zeros(self._shape, dtype=np.float32)
+            self._data = np.zeros(self._shape, dtype=self._dtype)
             return
 
         is_cuda = getattr(d, "is_cuda", None)
@@ -96,6 +98,23 @@ class Tensor(ITensor):
             return
 
         raise ValueError(f"Unsupported device type: {type(d)!r} value={d!r}")
+
+    @property
+    def dtype(self) -> np.dtype:
+        """
+        Return the element dtype of this tensor.
+
+        Returns
+        -------
+        np.dtype
+            NumPy dtype representing the tensor element type.
+
+        Notes
+        -----
+        - For CPU tensors, this matches the underlying ndarray dtype.
+        - For CUDA tensors, this is metadata used for kernel dispatch and tests.
+        """
+        return self._dtype
 
     @property
     def data(self) -> int | np.ndarray:
@@ -138,6 +157,7 @@ class Tensor(ITensor):
         device: Device,
         requires_grad: bool = False,
         ctx: Optional[Context] = None,
+        dtype: np.dtype = np.float32,
     ) -> "Tensor":
         """
         Construct a CUDA tensor backed by an existing device pointer (DevPtr).
@@ -154,6 +174,9 @@ class Tensor(ITensor):
             Whether this tensor should accumulate gradients during backprop.
         ctx : Optional[Context], optional
             Optional autograd context to attach.
+        dtype : np.dtype, optional
+            Element dtype metadata for kernel dispatch (e.g., np.float32/np.float64).
+            Defaults to np.float32.
 
         Returns
         -------
@@ -181,14 +204,13 @@ class Tensor(ITensor):
         if dev_ptr is None:
             raise ValueError("dev_ptr must be an int (uintptr_t), got None")
 
-        # Accept dev_ptr == 0 only if you *intentionally* use it as a null handle.
-        # If you prefer stricter behavior, change this to `if int(dev_ptr) == 0: raise ...`.
         dp = int(dev_ptr)
 
         obj = cls.__new__(cls)  # bypass __init__
         obj._shape = shape
         obj._device = device
         obj._data = dp
+        obj._dtype = np.dtype(dtype)
 
         # --- autograd fields (optional) ---
         obj._requires_grad = bool(requires_grad)
@@ -209,7 +231,10 @@ class Tensor(ITensor):
         d = self._device
         is_cuda = getattr(d, "is_cuda", None)
         if callable(is_cuda) and is_cuda():
-            return f"Tensor(shape={self._shape}, device={d}, data=DevPtr({int(self._data)}))"
+            return (
+                f"Tensor(shape={self._shape}, device={d}, dtype={self._dtype}, "
+                f"data=DevPtr({int(self._data)}))"
+            )
         return f"Tensor(shape={self._shape}, device={d}, dtype={self._data.dtype})"
 
     def __init__(
@@ -219,6 +244,7 @@ class Tensor(ITensor):
         *,
         requires_grad: bool = False,
         ctx: Optional[Context] = None,
+        dtype: np.dtype = np.float32,
     ) -> None:
         """
         Construct a new Tensor with allocated storage.
@@ -233,9 +259,12 @@ class Tensor(ITensor):
             Whether this tensor should participate in gradient accumulation.
         ctx : Optional[Context], optional
             Optional autograd context to attach to this tensor.
+        dtype : np.dtype, optional
+            Element dtype for this tensor. Defaults to np.float32.
         """
         self._shape = shape
         self._device = device
+        self._dtype = np.dtype(dtype)
         self.__initialize_data()
 
         # --- autograd fields (optional) ---

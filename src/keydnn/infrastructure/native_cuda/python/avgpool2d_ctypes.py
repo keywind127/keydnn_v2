@@ -43,9 +43,15 @@ from ctypes import (
     c_uint64,
 )
 from pathlib import Path
-from typing import Tuple
 
 import numpy as np
+
+from .maxpool2d_ctypes import (
+    cudaMemcpyDtoH,
+    cudaMemcpyHtoD,
+    cuda_memcpy_dtoh,
+    cuda_memcpy_htod,
+)  # do not remove, dynamic import dependencies
 
 
 # ---------------------------------------------------------------------

@@ -1,9 +1,9 @@
 """
-Autograd `Function` adapters for 2D pooling (CPU backend).
+Autograd `Function` adapters for 2D pooling (CPU/CUDA backends).
 
-This module connects the CPU pooling primitives in `ops.pool2d_cpu_ext` to the
-KeyDNN autograd runtime (`Tensor`, `Context`, `Function`). Each pooling operator
-is implemented as a `Function` subclass that:
+This module connects the pooling primitives in `ops.pool2d_cpu_ext` and
+`ops.pool2d_cuda_ext` to the KeyDNN autograd runtime (`Tensor`, `Context`,
+`Function`). Each pooling operator is implemented as a `Function` subclass that:
 
 - implements `forward(ctx, ...)` to compute the output tensor, and
 - implements `backward(ctx, grad_out)` to compute gradients w.r.t. inputs.
@@ -26,9 +26,12 @@ Implemented operators
 Design notes
 ------------
 - Assumes **NCHW** layout: (N, C, H, W).
-- CPU-only in the current implementation; these functions rely on NumPy kernels.
-- The actual numeric work is performed by `ops.pool2d_cpu_ext` wrappers, which
-  hide NumPy boundaries behind the `Tensor` API (`to_numpy`, `Tensor._from_numpy`).
+- Device-dispatch happens here:
+  - CPU tensors call `ops.pool2d_cpu_ext`
+  - CUDA tensors call `ops.pool2d_cuda_ext`
+- The actual numeric work is performed by backend wrappers, which hide backend
+  boundaries behind the `Tensor` API (CPU: `to_numpy`/`_from_numpy`,
+  CUDA: device pointers via `Tensor.data`/`_from_devptr`).
 - For backward compatibility, outputs explicitly mirror the input's
   `requires_grad` flag (`y.requires_grad = x.requires_grad`) instead of relying
   on kernel wrappers to set it.
@@ -43,14 +46,17 @@ from ..tensor._tensor_context import Context
 from .._function import Function
 from .._tensor import Tensor
 from ..ops.pool2d_cpu import _pair
-from ..ops.pool2d_cpu_ext import (
-    maxpool2d_forward,
-    maxpool2d_backward,
-    avgpool2d_forward,
-    avgpool2d_backward,
-    global_avgpool2d_forward,
-    global_avgpool2d_backward,
-)
+from ..ops import pool2d_cpu_ext as cpu_ext
+from ..ops import pool2d_cuda_ext as cuda_ext
+
+
+def _dispatch_backend(x: Tensor) -> str:
+    """Return backend tag for x ("cpu" | "cuda") or raise for unsupported device."""
+    if x.device.is_cpu():
+        return "cpu"
+    if x.device.is_cuda():
+        return "cuda"
+    raise TypeError(f"Unsupported device for pooling: device={x.device}")
 
 
 class MaxPool2dFn(Function):
@@ -105,7 +111,16 @@ class MaxPool2dFn(Function):
         s = _pair(kernel_size if stride is None else stride)
         p = _pair(padding)
 
-        y, argmax_idx = maxpool2d_forward(x, kernel_size=k, stride=s, padding=p)
+        backend = _dispatch_backend(x)
+        if backend == "cpu":
+            y, argmax_idx = cpu_ext.maxpool2d_forward(
+                x, kernel_size=k, stride=s, padding=p
+            )
+        else:
+            # CUDA: argmax_idx is a DevPtr (int) for int64 indices on device
+            y, argmax_idx = cuda_ext.maxpool2d_forward(
+                x, kernel_size=k, stride=s, padding=p
+            )
 
         ctx.save_for_backward(x)
         ctx.saved_meta["x_shape"] = x.shape
@@ -140,14 +155,25 @@ class MaxPool2dFn(Function):
         if not x.requires_grad:
             return (None,)
 
-        gx = maxpool2d_backward(
-            grad_out,
-            argmax_idx=ctx.saved_meta["argmax_idx"],
-            x_shape=ctx.saved_meta["x_shape"],
-            kernel_size=ctx.saved_meta["kernel_size"],
-            stride=ctx.saved_meta["stride"],
-            padding=ctx.saved_meta["padding"],
-        )
+        backend = _dispatch_backend(x)
+        if backend == "cpu":
+            gx = cpu_ext.maxpool2d_backward(
+                grad_out,
+                argmax_idx=ctx.saved_meta["argmax_idx"],
+                x_shape=ctx.saved_meta["x_shape"],
+                kernel_size=ctx.saved_meta["kernel_size"],
+                stride=ctx.saved_meta["stride"],
+                padding=ctx.saved_meta["padding"],
+            )
+        else:
+            gx = cuda_ext.maxpool2d_backward(
+                grad_out,
+                argmax_idx=ctx.saved_meta["argmax_idx"],
+                x_shape=ctx.saved_meta["x_shape"],
+                kernel_size=ctx.saved_meta["kernel_size"],
+                stride=ctx.saved_meta["stride"],
+                padding=ctx.saved_meta["padding"],
+            )
         return (gx,)
 
 
@@ -209,7 +235,11 @@ class AvgPool2dFn(Function):
         s = _pair(kernel_size if stride is None else stride)
         p = _pair(padding)
 
-        y = avgpool2d_forward(x, kernel_size=k, stride=s, padding=p)
+        backend = _dispatch_backend(x)
+        if backend == "cpu":
+            y = cpu_ext.avgpool2d_forward(x, kernel_size=k, stride=s, padding=p)
+        else:
+            y = cuda_ext.avgpool2d_forward(x, kernel_size=k, stride=s, padding=p)
 
         ctx.save_for_backward(x)
         ctx.saved_meta["x_shape"] = x.shape
@@ -243,13 +273,23 @@ class AvgPool2dFn(Function):
         if not x.requires_grad:
             return (None,)
 
-        gx = avgpool2d_backward(
-            grad_out,
-            x_shape=ctx.saved_meta["x_shape"],
-            kernel_size=ctx.saved_meta["kernel_size"],
-            stride=ctx.saved_meta["stride"],
-            padding=ctx.saved_meta["padding"],
-        )
+        backend = _dispatch_backend(x)
+        if backend == "cpu":
+            gx = cpu_ext.avgpool2d_backward(
+                grad_out,
+                x_shape=ctx.saved_meta["x_shape"],
+                kernel_size=ctx.saved_meta["kernel_size"],
+                stride=ctx.saved_meta["stride"],
+                padding=ctx.saved_meta["padding"],
+            )
+        else:
+            gx = cuda_ext.avgpool2d_backward(
+                grad_out,
+                x_shape=ctx.saved_meta["x_shape"],
+                kernel_size=ctx.saved_meta["kernel_size"],
+                stride=ctx.saved_meta["stride"],
+                padding=ctx.saved_meta["padding"],
+            )
         return (gx,)
 
 
@@ -294,7 +334,11 @@ class GlobalAvgPool2dFn(Function):
         Tensor
             Output tensor of shape (N, C, 1, 1).
         """
-        y = global_avgpool2d_forward(x)
+        backend = _dispatch_backend(x)
+        if backend == "cpu":
+            y = cpu_ext.global_avgpool2d_forward(x)
+        else:
+            y = cuda_ext.global_avgpool2d_forward(x)
 
         ctx.save_for_backward(x)
         ctx.saved_meta["x_shape"] = x.shape
@@ -325,8 +369,15 @@ class GlobalAvgPool2dFn(Function):
         if not x.requires_grad:
             return (None,)
 
-        gx = global_avgpool2d_backward(
-            grad_out,
-            x_shape=ctx.saved_meta["x_shape"],
-        )
+        backend = _dispatch_backend(x)
+        if backend == "cpu":
+            gx = cpu_ext.global_avgpool2d_backward(
+                grad_out,
+                x_shape=ctx.saved_meta["x_shape"],
+            )
+        else:
+            gx = cuda_ext.global_avgpool2d_backward(
+                grad_out,
+                x_shape=ctx.saved_meta["x_shape"],
+            )
         return (gx,)
