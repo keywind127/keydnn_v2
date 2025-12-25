@@ -45,7 +45,7 @@ from dataclasses import dataclass
 from typing import Optional, Any, Dict, Tuple
 
 from ...domain.device._device import Device
-from .._tensor import Tensor
+from ..tensor._tensor import Tensor
 from .._parameter import Parameter
 from .._module import Module
 from ..module._serialization_core import register_module

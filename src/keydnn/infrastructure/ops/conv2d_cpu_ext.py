@@ -31,7 +31,7 @@ from typing import Optional, Tuple
 
 import numpy as np
 
-from .._tensor import Tensor
+from ..tensor._tensor import Tensor
 from .conv2d_cpu import (
     conv2d_forward_cpu,
     conv2d_backward_cpu,

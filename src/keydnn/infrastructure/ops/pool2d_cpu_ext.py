@@ -25,7 +25,7 @@ Notes
 from __future__ import annotations
 from typing import Optional, Tuple
 
-from .._tensor import Tensor
+from ..tensor._tensor import Tensor
 from .pool2d_cpu import (
     _pair,
     maxpool2d_forward_cpu,

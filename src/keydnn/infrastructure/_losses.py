@@ -31,7 +31,7 @@ from typing import Tuple
 
 from .tensor._tensor_context import Context
 from ._function import Function
-from ._tensor import Tensor
+from .tensor._tensor import Tensor
 
 
 def _scalar_to_float(t: Tensor) -> float:

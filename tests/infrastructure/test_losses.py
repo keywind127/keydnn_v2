@@ -5,7 +5,7 @@ import numpy as np
 
 from src.keydnn.infrastructure.tensor._tensor_context import Context
 from src.keydnn.domain.device._device import Device
-from src.keydnn.infrastructure._tensor import Tensor
+from src.keydnn.infrastructure.tensor._tensor import Tensor
 from src.keydnn.infrastructure._losses import SSEFn, MSEFn
 from src.keydnn.infrastructure._losses import (
     BinaryCrossEntropyFn,

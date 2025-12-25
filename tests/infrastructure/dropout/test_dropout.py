@@ -5,7 +5,7 @@ import numpy as np
 
 from src.keydnn.domain.device._device import Device
 from src.keydnn.infrastructure.layers._dropout import Dropout
-from src.keydnn.infrastructure._tensor import Tensor
+from src.keydnn.infrastructure.tensor._tensor import Tensor
 
 
 def _tensor_supports_numpy_load() -> bool:

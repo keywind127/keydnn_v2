@@ -31,7 +31,7 @@ from ..tensor._tensor_context import Context
 
 from .._module import Module
 from ..module._serialization_core import register_module
-from .._tensor import Tensor
+from ..tensor._tensor import Tensor
 from ..ops.pool2d_cpu import _pair
 from ..pooling._pooling_function import (
     MaxPool2dFn,

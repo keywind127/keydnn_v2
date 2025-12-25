@@ -12,8 +12,8 @@ dist
 *.exe
 *.log
 *.json
-src/keydnn/infrastructure/tensor/*
-!src/keydnn/infrastructure/tensor/_tensor_context.py
+# src/keydnn/infrastructure/tensor/*
+# !src/keydnn/infrastructure/tensor/_tensor_context.py
 # Visual Studio cache / user state
 .vs/
 *.user

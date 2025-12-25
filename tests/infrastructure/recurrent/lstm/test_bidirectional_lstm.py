@@ -4,7 +4,7 @@ import unittest
 import numpy as np
 
 from src.keydnn.domain.device._device import Device
-from src.keydnn.infrastructure._tensor import Tensor
+from src.keydnn.infrastructure.tensor._tensor import Tensor
 from src.keydnn.infrastructure.recurrent._lstm_module import LSTM
 from src.keydnn.infrastructure.recurrent._bidirectional import Bidirectional
 

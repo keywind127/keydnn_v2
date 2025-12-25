@@ -49,7 +49,7 @@ def _construct(cls, **candidates):
 
 
 def _make_tensor():
-    from src.keydnn.infrastructure._tensor import Tensor
+    from src.keydnn.infrastructure.tensor._tensor import Tensor
 
     device = _make_cpu_device()
 

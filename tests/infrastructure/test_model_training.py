@@ -11,7 +11,7 @@ class TestSequentialXORTraining(unittest.TestCase):
             from src.keydnn.infrastructure._models import Sequential
             from src.keydnn.infrastructure._linear import Linear
             from src.keydnn.infrastructure._activations import Sigmoid
-            from src.keydnn.infrastructure._tensor import Tensor
+            from src.keydnn.infrastructure.tensor._tensor import Tensor
             from src.keydnn.domain.device._device import Device
             from src.keydnn.infrastructure._optimizers import SGD
         except (ModuleNotFoundError, ImportError) as e:

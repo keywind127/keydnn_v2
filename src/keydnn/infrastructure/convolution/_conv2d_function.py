@@ -32,7 +32,7 @@ from typing import Sequence, Optional, Tuple
 from ..tensor._tensor_context import Context
 
 from ...domain._function import Function
-from .._tensor import Tensor
+from ..tensor._tensor import Tensor
 from ..ops.conv2d_cpu import _pair
 from ..ops.conv2d_cpu_ext import (
     conv2d_backward_cpu_tensor,

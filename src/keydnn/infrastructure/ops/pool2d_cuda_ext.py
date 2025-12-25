@@ -19,7 +19,7 @@ from __future__ import annotations
 from typing import Optional, Tuple
 import numpy as np
 
-from .._tensor import Tensor
+from ..tensor._tensor import Tensor
 from .pool2d_cpu import _pair, _out_hw
 from .pool2d_cuda import (
     _load_cuda_lib,

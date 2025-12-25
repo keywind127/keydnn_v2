@@ -44,7 +44,7 @@ from typing import Optional, Sequence, Tuple
 from ..tensor._tensor_context import Context
 
 from .._function import Function
-from .._tensor import Tensor
+from ..tensor._tensor import Tensor
 from ..ops.pool2d_cpu import _pair
 from ..ops import pool2d_cpu_ext as cpu_ext
 from ..ops import pool2d_cuda_ext as cuda_ext

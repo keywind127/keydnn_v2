@@ -25,7 +25,7 @@ from typing import Optional, Sequence, Tuple
 
 from ..tensor._tensor_context import Context
 
-from .._tensor import Tensor
+from ..tensor._tensor import Tensor
 from .._function import Function
 
 

@@ -32,7 +32,7 @@ from __future__ import annotations
 from typing import Any, Dict, Tuple, Union
 
 from .._module import Module
-from .._tensor import Tensor
+from ..tensor._tensor import Tensor
 from ..module._serialization_core import register_module
 
 

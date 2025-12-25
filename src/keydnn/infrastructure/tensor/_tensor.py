@@ -29,10 +29,10 @@ from typing import Any, Union, Optional, Sequence
 
 import numpy as np
 
-from ..domain._tensor import ITensor
-from ..domain.device._device import Device
-from ..domain._errors import DeviceNotSupportedError
-from .tensor._tensor_context import Context
+from ...domain._tensor import ITensor
+from ...domain.device._device import Device
+from ...domain._errors import DeviceNotSupportedError
+from ._tensor_context import Context
 
 Number = Union[int, float]
 
@@ -1824,7 +1824,7 @@ class Tensor(ITensor):
         This method delegates to the autograd tanh Function/op and does not use
         NumPy here (NumPy remains inside Tensor/ops only).
         """
-        from ._function import TanhFn  # adjust if needed
+        from .._function import TanhFn  # adjust if needed
 
         ctx = Context(parents=(self,), backward_fn=None)
         out = TanhFn.forward(ctx, self)
@@ -1851,7 +1851,7 @@ class Tensor(ITensor):
         This is a thin convenience wrapper around `SigmoidFn` located in
         `._function`.
         """
-        from ._function import SigmoidFn  # adjust import to your project layout
+        from .._function import SigmoidFn  # adjust import to your project layout
 
         # Build context with parents AND a callable backward_fn
         ctx = Context(parents=(self,), backward_fn=None)
@@ -2008,15 +2008,15 @@ class Tensor(ITensor):
 
             # IMPORTANT: do not assume Tensor(...) auto-allocates device memory.
             # Allocate dev scalar explicitly if needed.
-            from .native_cuda.python.maxpool2d_ctypes import (
+            from ..native_cuda.python.maxpool2d_ctypes import (
                 load_keydnn_cuda_native as _load_lib,
             )
-            from .ops.reduce_cuda import (
+            from ..ops.reduce_cuda import (
                 sum_all_cuda as _sum_all_cuda,
                 sum_backward_fill_cuda as _sum_bwd_fill_cuda,
             )
 
-            from .native_cuda.python.maxpool2d_ctypes import (
+            from ..native_cuda.python.maxpool2d_ctypes import (
                 load_keydnn_cuda_native as _load_lib,
                 cuda_malloc as _cuda_malloc,
                 cuda_synchronize as _cuda_sync,
@@ -2170,12 +2170,12 @@ class Tensor(ITensor):
 
             out = Tensor(shape=(), device=self.device, requires_grad=self.requires_grad)
 
-            from src.keydnn.infrastructure.ops.reduce_cuda import (
+            from ..ops.reduce_cuda import (
                 mean_all_cuda as _mean_all_cuda,
                 mean_backward_fill_cuda as _mean_bwd_fill_cuda,
                 cuda_synchronize as _cuda_sync,
             )
-            from src.keydnn.infrastructure.native_cuda.python.maxpool2d_ctypes import (
+            from ..native_cuda.python.maxpool2d_ctypes import (
                 load_keydnn_cuda_native as _load_lib,
             )
 
@@ -2292,7 +2292,7 @@ class Tensor(ITensor):
                 shape=out_shape, device=self.device, requires_grad=self.requires_grad
             )
 
-            from src.keydnn.infrastructure.ops.reduce_cuda import (
+            from ..ops.reduce_cuda import (
                 max_axis2d_forward_cuda as _max_fwd,
                 max_axis2d_backward_cuda as _max_bwd,
                 cuda_malloc as _cuda_malloc,
@@ -2300,7 +2300,7 @@ class Tensor(ITensor):
                 cuda_memset as _cuda_memset,
                 cuda_synchronize as _cuda_sync,
             )
-            from src.keydnn.infrastructure.native_cuda.python.maxpool2d_ctypes import (
+            from ..native_cuda.python.maxpool2d_ctypes import (
                 load_keydnn_cuda_native as _load_lib,
             )
 
@@ -2545,7 +2545,7 @@ class Tensor(ITensor):
         def _get_cuda_lib():
             lib = getattr(Tensor, "_CUDA_LIB", None)
             if lib is None:
-                from src.keydnn.infrastructure.native_cuda.python import (
+                from ...infrastructure.native_cuda.python import (
                     maxpool2d_ctypes as m,
                 )
 
@@ -2561,7 +2561,7 @@ class Tensor(ITensor):
                     f"Got shape={self.shape}."
                 )
 
-            from src.keydnn.infrastructure.native_cuda.python import (
+            from ...infrastructure.native_cuda.python import (
                 maxpool2d_ctypes as m,
             )
 
@@ -2724,7 +2724,7 @@ class Tensor(ITensor):
         def _get_cuda_lib():
             lib = getattr(Tensor, "_CUDA_LIB", None)
             if lib is None:
-                from src.keydnn.infrastructure.native_cuda.python import (
+                from ...infrastructure.native_cuda.python import (
                     maxpool2d_ctypes as m,
                 )
 
@@ -2733,7 +2733,7 @@ class Tensor(ITensor):
             return lib
 
         try:
-            from src.keydnn.infrastructure.native_cuda.python import (
+            from ...infrastructure.native_cuda.python import (
                 maxpool2d_ctypes as m,
             )
         except Exception as e:

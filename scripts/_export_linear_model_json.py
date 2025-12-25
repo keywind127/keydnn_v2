@@ -23,7 +23,7 @@ if SRC_DIR not in sys.path:
 from pathlib import Path
 import numpy as np
 
-from keydnn.infrastructure._tensor import Tensor
+from keydnn.infrastructure.tensor._tensor import Tensor
 from keydnn.infrastructure._models import Sequential
 from keydnn.infrastructure._linear import Linear
 

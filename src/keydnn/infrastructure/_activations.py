@@ -33,7 +33,7 @@ from .tensor._tensor_context import Context
 
 from ..domain.model._stateless_mixin import StatelessConfigMixin
 from .module._serialization_core import register_module
-from ._tensor import Tensor
+from .tensor._tensor import Tensor
 from ._module import Module
 
 from ._function import SigmoidFn, ReLUFn, LeakyReLUFn, TanhFn, SoftmaxFn

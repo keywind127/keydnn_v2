@@ -25,7 +25,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable, Sequence, Tuple, Dict
 
-from ._tensor import Tensor
+from .tensor._tensor import Tensor
 from ._parameter import Parameter
 
 

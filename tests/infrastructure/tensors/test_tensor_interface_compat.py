@@ -1,8 +1,7 @@
-import inspect
 import unittest
 from typing import Any, Dict, Set, Type
 
-from src.keydnn.infrastructure._tensor import Tensor
+from src.keydnn.infrastructure.tensor._tensor import Tensor
 from src.keydnn.domain._tensor import ITensor
 
 
