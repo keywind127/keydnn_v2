@@ -6,6 +6,12 @@ domain-level `ITensor` protocol and stores data on a specified `Device`.
 Currently, CPU tensors are backed by NumPy arrays, while CUDA tensors are
 represented by a placeholder string (until a CUDA backend is implemented).
 
+It also defines `Context`, a lightweight record attached to tensors produced
+by differentiable operations. The context stores:
+- parent tensors (inputs to the operation),
+- a backward function that maps `grad_out` to gradients for each parent, and
+- any saved tensors or metadata required to compute those gradients.
+
 Design notes
 ------------
 - This file sits in the infrastructure layer: it imports NumPy and concrete
@@ -66,23 +72,18 @@ class Tensor(ITensor):
         Allocate and initialize underlying storage for the tensor.
 
         For CPU devices, storage is a NumPy ndarray initialized to zeros.
-        For CUDA devices, a placeholder representation is currently used.
+        For CUDA devices, this implementation does not auto-allocate device memory
+        (because the allocator lives in the native CUDA DLL, which is not available
+        at construction time here). CUDA tensors should be constructed via
+        `Tensor._from_devptr` or filled by higher-level CUDA allocation utilities.
 
         Raises
         ------
         ValueError
             If the device type is unsupported.
         """
-        # match self._device:
-        #     case Device() if self._device.is_cpu():
-        #         self._data = np.zeros(self._shape, dtype=np.float32)
-        #     case Device() if self._device.is_cuda():
-        #         self._data = f"CUDA Tensor on device {self._device.index} with shape {self._shape}"
-        #     case _:
-        #         raise ValueError("Unsupported device type")
         d = self._device
 
-        # Duck typing: avoid class-identity issues.
         is_cpu = getattr(d, "is_cpu", None)
         if callable(is_cpu) and is_cpu():
             self._data = np.zeros(self._shape, dtype=np.float32)
@@ -90,10 +91,126 @@ class Tensor(ITensor):
 
         is_cuda = getattr(d, "is_cuda", None)
         if callable(is_cuda) and is_cuda():
-            self._data = f"CUDA Tensor on device {getattr(d, 'index', None)} with shape {self._shape}"
+            # Device pointer handle (DevPtr). 0 means "not allocated / not set".
+            self._data = 0
             return
 
         raise ValueError(f"Unsupported device type: {type(d)!r} value={d!r}")
+
+    @property
+    def data(self) -> int | np.ndarray:
+        """
+        Return the underlying storage for this tensor.
+
+        Returns
+        -------
+        numpy.ndarray or int
+            - If the tensor is on CPU: a NumPy ndarray backing the tensor.
+            - If the tensor is on CUDA: a device pointer handle (DevPtr) as a Python int.
+
+        Notes
+        -----
+        - For CUDA tensors, the returned integer is a raw device pointer value
+          (uintptr_t) produced by the native CUDA allocator.
+        - A CUDA tensor created via the regular constructor may have `data == 0`
+          (uninitialized device pointer). Prefer constructing CUDA tensors with
+          `Tensor._from_devptr(...)` when you already have an allocated buffer.
+        """
+        d = self._device
+
+        is_cpu = getattr(d, "is_cpu", None)
+        if callable(is_cpu) and is_cpu():
+            return self._data
+
+        is_cuda = getattr(d, "is_cuda", None)
+        if callable(is_cuda) and is_cuda():
+            # DevPtr (uintptr_t) represented as Python int
+            return int(self._data)
+
+        raise ValueError(f"Unsupported device type: {type(d)!r} value={d!r}")
+
+    @classmethod
+    def _from_devptr(
+        cls,
+        dev_ptr: int,
+        *,
+        shape: tuple[int, ...],
+        device: Device,
+        requires_grad: bool = False,
+        ctx: Optional[Context] = None,
+    ) -> "Tensor":
+        """
+        Construct a CUDA tensor backed by an existing device pointer (DevPtr).
+
+        Parameters
+        ----------
+        dev_ptr : int
+            Raw device pointer handle (uintptr_t) returned by the native CUDA allocator.
+        shape : tuple[int, ...]
+            Tensor shape.
+        device : Device
+            CUDA device descriptor. Must satisfy `device.is_cuda() == True`.
+        requires_grad : bool, optional
+            Whether this tensor should accumulate gradients during backprop.
+        ctx : Optional[Context], optional
+            Optional autograd context to attach.
+
+        Returns
+        -------
+        Tensor
+            A tensor whose `.data` is the provided device pointer handle.
+
+        Raises
+        ------
+        ValueError
+            If `device` is not a CUDA device, or if `dev_ptr` is invalid.
+
+        Notes
+        -----
+        - This function does not take ownership semantics beyond storing the pointer.
+          The caller is responsible for freeing device memory (typically via your
+          native CUDA `cuda_free` wrapper) when appropriate.
+        - This constructor bypasses `__init__` and does not allocate memory.
+        """
+        is_cuda = getattr(device, "is_cuda", None)
+        if not (callable(is_cuda) and is_cuda()):
+            raise ValueError(
+                f"_from_devptr requires a CUDA device; got device={device!r}"
+            )
+
+        if dev_ptr is None:
+            raise ValueError("dev_ptr must be an int (uintptr_t), got None")
+
+        # Accept dev_ptr == 0 only if you *intentionally* use it as a null handle.
+        # If you prefer stricter behavior, change this to `if int(dev_ptr) == 0: raise ...`.
+        dp = int(dev_ptr)
+
+        obj = cls.__new__(cls)  # bypass __init__
+        obj._shape = shape
+        obj._device = device
+        obj._data = dp
+
+        # --- autograd fields (optional) ---
+        obj._requires_grad = bool(requires_grad)
+        obj._grad = None
+        obj._ctx = ctx
+
+        return obj
+
+    def __repr__(self) -> str:
+        """
+        Return a human-readable string representation of the tensor.
+
+        Returns
+        -------
+        str
+            A string describing the tensor's shape, device, and storage details.
+        """
+        d = self._device
+        is_cuda = getattr(d, "is_cuda", None)
+        if callable(is_cuda) and is_cuda():
+            return f"Tensor(shape={self._shape}, device={d}, data=DevPtr({int(self._data)}))"
+        return f"Tensor(shape={self._shape}, device={d}, dtype={self._data.dtype})"
 
     def __init__(
         self,
@@ -268,18 +385,50 @@ class Tensor(ITensor):
 
     def debug_storage_repr(self) -> str:
         """
-        Return a human-readable description of the underlying storage.
+        Return a stable, human-readable description of underlying storage.
 
-        Returns
-        -------
-        str
-            A short string describing storage (shape/dtype for CPU, placeholder
-            string for CUDA).
+        Contract
+        --------
+        - CPU tensors: describe the NumPy ndarray storage.
+        - CUDA tensors: return a stable placeholder string that includes:
+            - device index
+            - tensor shape
+            - (if available) the device pointer value
+
+        Notes
+        -----
+        This is a debugging aid and intentionally does not expose full contents.
         """
-        if self._device.is_cpu():
-            arr: np.ndarray = self._data
-            return f"CPU ndarray shape={arr.shape} dtype={arr.dtype}"
-        return str(self._data)
+        d = self._device
+
+        is_cpu = getattr(d, "is_cpu", None)
+        if callable(is_cpu) and is_cpu():
+            # CPU: we expect a NumPy ndarray
+            try:
+                arr = self._data  # typically np.ndarray
+                return f"CPU ndarray dtype={getattr(arr, 'dtype', None)} shape={self._shape}"
+            except Exception:
+                return f"CPU storage shape={self._shape}"
+
+        is_cuda = getattr(d, "is_cuda", None)
+        if callable(is_cuda) and is_cuda():
+            dev_index = getattr(d, "index", None)
+
+            # If CUDA storage is already a string placeholder, keep it.
+            if isinstance(self._data, str):
+                return self._data
+
+            # If CUDA storage is a devptr handle (int), format a stable message.
+            if isinstance(self._data, int):
+                return (
+                    f"CUDA Tensor on device {dev_index} with shape {self._shape} "
+                    f"(devptr={self._data})"
+                )
+
+            # Fallback if something unexpected is stored
+            return f"CUDA Tensor on device {dev_index} with shape {self._shape}"
+
+        return f"Unknown device storage shape={self._shape}"
 
     def copy_from_numpy(self, arr: np.ndarray) -> None:
         """

@@ -203,12 +203,19 @@ class ITensor(Protocol):
 
     def debug_storage_repr(self) -> str:
         """
-        Return a human-readable description of the underlying storage.
+        Return a stable, human-readable description of underlying storage.
 
-        Returns
-        -------
-        str
-            A short string describing storage internals (shape/dtype when available).
+        Contract
+        --------
+        - CPU tensors: describe the NumPy ndarray storage.
+        - CUDA tensors: return a stable placeholder string that includes:
+            - device index
+            - tensor shape
+            - (if available) the device pointer value
+
+        Notes
+        -----
+        This is a debugging aid and intentionally does not expose full contents.
         """
         ...
 
@@ -887,5 +894,30 @@ class ITensor(Protocol):
         -------
         ITensor
             A tensor of given shape filled with 1.0 (float32).
+        """
+        ...
+
+    @property
+    def data(self) -> Any:
+        """
+        Return the underlying storage for this tensor.
+
+        Returns
+        -------
+        numpy.ndarray or int
+            - If the tensor is on CPU: a NumPy ndarray backing the tensor.
+            - If the tensor is on CUDA: a device pointer handle (DevPtr) as a Python int.
+
+        """
+        ...
+
+    def __repr__(self) -> str:
+        """
+        Return a human-readable string representation of the tensor.
+
+        Returns
+        -------
+        str
+            A string describing the tensor's shape, device, and storage details.
         """
         ...
