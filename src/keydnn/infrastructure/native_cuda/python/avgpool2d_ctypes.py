@@ -58,35 +58,36 @@ from .maxpool2d_ctypes import (
 # DLL loading
 # ---------------------------------------------------------------------
 
-_DEFAULT_DLL_PATH = Path(
-    r"D:\keydnn_v2\src\keydnn\infrastructure\native_cuda\keydnn_v2_cuda_native\x64\Debug\KeyDNNV2CudaNative.dll"
-)
 
+def load_keydnn_cuda_native():
+    import os
+    import ctypes
+    from pathlib import Path
 
-def load_keydnn_cuda_native(dll_path: str | Path = _DEFAULT_DLL_PATH) -> ctypes.CDLL:
-    """
-    Load the KeyDNN v2 CUDA native DLL.
+    # your existing path logic:
+    p = (
+        Path(__file__).resolve().parents[2]
+        / "native_cuda"
+        / "keydnn_v2_cuda_native"
+        / "x64"
+        / "Debug"
+        / "KeyDNNV2CudaNative.dll"
+    )
+    p = p.resolve()
 
-    Parameters
-    ----------
-    dll_path : str | Path
-        Path to KeyDNNV2CudaNative.dll.
-
-    Returns
-    -------
-    ctypes.CDLL
-        Loaded DLL handle.
-
-    Raises
-    ------
-    FileNotFoundError
-        If the DLL path does not exist.
-    OSError
-        If the DLL cannot be loaded (missing dependencies, wrong arch, etc.).
-    """
-    p = Path(dll_path)
     if not p.exists():
-        raise FileNotFoundError(f"CUDA native DLL not found: {p}")
+        raise FileNotFoundError(f"KeyDNN CUDA native DLL not found at: {p}")
+
+    # ---- ADD THIS: ensure CUDA runtime deps are discoverable ----
+    cuda_path = os.environ.get("CUDA_PATH", "")
+    if cuda_path:
+        cuda_bin = os.path.join(cuda_path, "bin")
+        if os.path.isdir(cuda_bin):
+            os.add_dll_directory(cuda_bin)
+
+    # Optional: also add the DLL folder itself (good practice)
+    os.add_dll_directory(str(p.parent))
+
     return ctypes.CDLL(str(p))
 
 
