@@ -1313,19 +1313,16 @@ class Tensor(ITensor):
 
         return out
 
-        # ----------------------------
-
-    # Matrix ops (2D)
-    # ----------------------------
     def matmul(self, other: "Tensor") -> "Tensor":
         """
         Matrix multiplication (2D): out = self @ other.
 
         Requirements
         ------------
-        - CPU-only
-        - both operands must be 2D
-        - inner dimensions must match: (N, K) @ (K, M) -> (N, M)
+        - CPU: unchanged behavior (backward compatible)
+        - CUDA: both operands must be CUDA, 2D, inner dims match
+        - CUDA inputs MUST already have allocated device buffers (data != 0).
+            (No implicit allocation for inputs.)
 
         Backward
         --------
@@ -1333,8 +1330,8 @@ class Tensor(ITensor):
         - dL/dA = dL/dout @ B^T
         - dL/dB = A^T @ dL/dout
         """
-        if not self.device.is_cpu() or not other.device.is_cpu():
-            self._raise_device_not_supported("matmul")
+        if not isinstance(other, Tensor):
+            raise TypeError(f"matmul expects Tensor, got {type(other)!r}")
 
         if len(self.shape) != 2 or len(other.shape) != 2:
             raise ValueError(
@@ -1343,12 +1340,281 @@ class Tensor(ITensor):
 
         n, k1 = self.shape
         k2, m = other.shape
-        if k1 != k2:
+        if int(k1) != int(k2):
             raise ValueError(
                 f"matmul shape mismatch: {self.shape} @ {other.shape} (inner dims {k1} vs {k2})"
             )
 
         req = self._result_requires_grad(self, other)
+
+        # ------------------------------------------------------------------
+        # CUDA path
+        # ------------------------------------------------------------------
+        if self.device.is_cuda() or other.device.is_cuda():
+
+            # For now, require both on CUDA (no mixed-device implicit copies)
+            if not (self.device.is_cuda() and other.device.is_cuda()):
+                raise RuntimeError(
+                    f"matmul requires both tensors on the same device; got {self.device} and {other.device}"
+                )
+
+            # Enforce same CUDA device index if your Device encodes it
+            if str(self.device) != str(other.device):
+                raise RuntimeError(
+                    f"matmul requires both tensors on the same CUDA device; got {self.device} and {other.device}"
+                )
+
+            import ctypes  # local import so CPU-only runs don't pay cost
+            import numpy as np
+            from ..ops.matmul_cuda import matmul2d_cuda  # ops-layer opt ext wrapper
+            from ..ops.transpose_cuda import transpose2d_cuda  # used in backward
+
+            def _cuda_device_index(dev: object) -> int:
+                # Prefer explicit attribute if you really have it
+                idx = getattr(dev, "index", None)
+                if idx is not None:
+                    try:
+                        return int(idx)
+                    except Exception:
+                        pass
+
+                # Fallback: parse from string like "cuda:0"
+                s = str(dev)
+                if "cuda" not in s:
+                    return 0
+                if ":" in s:
+                    tail = s.split(":", 1)[1].strip()
+                    try:
+                        return int(tail)
+                    except Exception:
+                        return 0
+                return 0
+
+            device_index = _cuda_device_index(self.device)
+
+            dtype = np.dtype(self.dtype)
+            if np.dtype(other.dtype) != dtype:
+                raise TypeError(f"matmul dtype mismatch: {self.dtype} vs {other.dtype}")
+
+            # IMPORTANT: do NOT implicitly allocate inputs.
+            a_dev = int(self.data)
+            b_dev = int(other.data)
+            if a_dev == 0 or b_dev == 0:
+                raise RuntimeError(
+                    "CUDA matmul requires allocated device buffers for both inputs (data != 0)"
+                )
+
+            lib = self._get_cuda_lib()
+
+            # --------------------------------------------------------------
+            # CRITICAL: set device BEFORE any allocations/syncs in this method
+            # --------------------------------------------------------------
+            if hasattr(lib, "keydnn_cuda_set_device"):
+                fn = lib.keydnn_cuda_set_device
+                fn.argtypes = [ctypes.c_int]
+                fn.restype = ctypes.c_int
+                st = int(fn(int(device_index)))
+                if st != 0:
+                    raise RuntimeError(
+                        f"cuda_set_device({int(device_index)}) failed: status={st}"
+                    )
+
+            def _cuda_sync() -> None:
+                # Best-effort synchronize to avoid async hazards (Windows-friendly).
+                if hasattr(lib, "keydnn_cuda_synchronize"):
+                    fn = lib.keydnn_cuda_synchronize
+                    fn.argtypes = []
+                    fn.restype = ctypes.c_int
+                    st = int(fn())
+                    if st != 0:
+                        raise RuntimeError(f"cuda_synchronize failed: status={st}")
+
+            # Ensure any prior H2D copies / kernels that produced inputs are complete.
+            _cuda_sync()
+
+            # Allocate output (now guaranteed on correct device)
+            out = Tensor(
+                shape=(int(n), int(m)),
+                device=self.device,
+                requires_grad=req,
+                ctx=None,
+                dtype=dtype,
+            )
+            out._ensure_cuda_alloc(dtype=dtype)
+            y_dev = int(out.data)
+            if y_dev == 0:
+                raise RuntimeError("CUDA matmul failed to allocate output buffer")
+
+            # Forward: C = A @ B
+            matmul2d_cuda(
+                lib,
+                a_dev=int(a_dev),
+                b_dev=int(b_dev),
+                c_dev=int(y_dev),
+                n=int(n),  # rows of A
+                k=int(k1),  # inner dim
+                m=int(m),  # cols of B
+                dtype=dtype,
+                sync=True,
+                device_index=int(device_index),
+            )
+
+            if req:
+
+                def backward_fn(grad_out: "Tensor"):
+                    if not grad_out.device.is_cuda():
+                        raise RuntimeError(
+                            "grad_out must be CUDA for CUDA matmul backward"
+                        )
+                    if str(grad_out.device) != str(self.device):
+                        raise RuntimeError(
+                            f"grad_out must be on the same CUDA device as output; got {grad_out.device} vs {self.device}"
+                        )
+                    if grad_out.shape != (int(n), int(m)):
+                        raise ValueError(
+                            f"grad_out shape mismatch: expected {(int(n), int(m))}, got {grad_out.shape}"
+                        )
+
+                    go_dev = int(grad_out.data)
+                    if go_dev == 0:
+                        raise RuntimeError(
+                            "grad_out CUDA tensor has no allocated devptr (data == 0)"
+                        )
+
+                    # Ensure correct device before allocating temporaries in backward too.
+                    if hasattr(lib, "keydnn_cuda_set_device"):
+                        fn = lib.keydnn_cuda_set_device
+                        fn.argtypes = [ctypes.c_int]
+                        fn.restype = ctypes.c_int
+                        st = int(fn(int(device_index)))
+                        if st != 0:
+                            raise RuntimeError(
+                                f"cuda_set_device({int(device_index)}) failed: status={st}"
+                            )
+
+                    grad_a = None
+                    grad_b = None
+
+                    _cuda_sync()
+
+                    # ---- dA path ----
+                    if self.requires_grad:
+                        bt = Tensor(
+                            shape=(int(m), int(k1)),
+                            device=self.device,
+                            requires_grad=False,
+                            ctx=None,
+                            dtype=dtype,
+                        )
+                        bt._ensure_cuda_alloc(dtype=dtype)
+                        bt_dev = int(bt.data)
+                        if bt_dev == 0:
+                            raise RuntimeError(
+                                "CUDA matmul backward failed to allocate Bt buffer"
+                            )
+
+                        transpose2d_cuda(
+                            lib,
+                            x_dev=int(b_dev),
+                            y_dev=int(bt_dev),
+                            rows=int(k1),
+                            cols=int(m),
+                            dtype=dtype,
+                            sync=True,
+                        )
+
+                        grad_a = Tensor(
+                            shape=(int(n), int(k1)),
+                            device=self.device,
+                            requires_grad=False,
+                            ctx=None,
+                            dtype=dtype,
+                        )
+                        grad_a._ensure_cuda_alloc(dtype=dtype)
+                        ga_dev = int(grad_a.data)
+                        if ga_dev == 0:
+                            raise RuntimeError(
+                                "CUDA matmul backward failed to allocate grad_a buffer"
+                            )
+
+                        matmul2d_cuda(
+                            lib,
+                            a_dev=int(go_dev),
+                            b_dev=int(bt_dev),
+                            c_dev=int(ga_dev),
+                            n=int(n),
+                            k=int(m),
+                            m=int(k1),
+                            dtype=dtype,
+                            sync=True,
+                            device_index=int(device_index),
+                        )
+
+                    # ---- dB path ----
+                    if other.requires_grad:
+                        at = Tensor(
+                            shape=(int(k1), int(n)),
+                            device=self.device,
+                            requires_grad=False,
+                            ctx=None,
+                            dtype=dtype,
+                        )
+                        at._ensure_cuda_alloc(dtype=dtype)
+                        at_dev = int(at.data)
+                        if at_dev == 0:
+                            raise RuntimeError(
+                                "CUDA matmul backward failed to allocate At buffer"
+                            )
+
+                        transpose2d_cuda(
+                            lib,
+                            x_dev=int(a_dev),
+                            y_dev=int(at_dev),
+                            rows=int(n),
+                            cols=int(k1),
+                            dtype=dtype,
+                            sync=True,
+                        )
+
+                        grad_b = Tensor(
+                            shape=(int(k1), int(m)),
+                            device=self.device,
+                            requires_grad=False,
+                            ctx=None,
+                            dtype=dtype,
+                        )
+                        grad_b._ensure_cuda_alloc(dtype=dtype)
+                        gb_dev = int(grad_b.data)
+                        if gb_dev == 0:
+                            raise RuntimeError(
+                                "CUDA matmul backward failed to allocate grad_b buffer"
+                            )
+
+                        matmul2d_cuda(
+                            lib,
+                            a_dev=int(at_dev),
+                            b_dev=int(go_dev),
+                            c_dev=int(gb_dev),
+                            n=int(k1),
+                            k=int(n),
+                            m=int(m),
+                            dtype=dtype,
+                            sync=True,
+                            device_index=int(device_index),
+                        )
+
+                    return (grad_a, grad_b)
+
+                ctx = Context(parents=(self, other), backward_fn=backward_fn)
+                out._set_ctx(ctx)
+
+            return out
+
+        # ------------------------------------------------------------------
+        # CPU path (UNCHANGED)
+        # ------------------------------------------------------------------
+        if not self.device.is_cpu() or not other.device.is_cpu():
+            self._raise_device_not_supported("matmul")
 
         out = Tensor(shape=(n, m), device=self.device, requires_grad=req, ctx=None)
         out.copy_from_numpy(self.to_numpy() @ other.to_numpy())
@@ -1366,7 +1632,6 @@ class Tensor(ITensor):
                 grad_a = None
                 grad_b = None
 
-                # dA = dOut @ B^T
                 if self.requires_grad:
                     ga_np = grad_out.to_numpy() @ other.to_numpy().T
                     grad_a = Tensor(
@@ -1377,7 +1642,6 @@ class Tensor(ITensor):
                     )
                     grad_a.copy_from_numpy(ga_np)
 
-                # dB = A^T @ dOut
                 if other.requires_grad:
                     gb_np = self.to_numpy().T @ grad_out.to_numpy()
                     grad_b = Tensor(
@@ -1390,10 +1654,7 @@ class Tensor(ITensor):
 
                 return (grad_a, grad_b)
 
-            ctx = Context(
-                parents=(self, other),
-                backward_fn=backward_fn,
-            )
+            ctx = Context(parents=(self, other), backward_fn=backward_fn)
             out._set_ctx(ctx)
 
         return out
@@ -1405,59 +1666,6 @@ class Tensor(ITensor):
         if not isinstance(other, Tensor):
             raise TypeError(f"@ only supports Tensor operands, got {type(other)!r}")
         return self.matmul(other)
-
-    # ----------------------------
-    # Transpose (2D)
-    # ----------------------------
-    def transpose(self) -> "Tensor":
-        """
-        2D transpose: out[i, j] = self[j, i].
-
-        Requirements
-        ------------
-        - CPU-only
-        - input must be 2D
-
-        Backward
-        --------
-        If out = A^T, then dL/dA = (dL/dout)^T
-        """
-        if not self.device.is_cpu():
-            self._raise_device_not_supported("transpose")
-
-        if len(self.shape) != 2:
-            raise ValueError(f"transpose requires a 2D tensor, got shape={self.shape}")
-
-        r, c = self.shape
-        req = self.requires_grad
-
-        out = Tensor(shape=(c, r), device=self.device, requires_grad=req, ctx=None)
-        out.copy_from_numpy(self.to_numpy().T)
-
-        if req:
-
-            def backward_fn(grad_out: "Tensor"):
-                if not grad_out.device.is_cpu():
-                    raise RuntimeError("grad_out must be CPU in current implementation")
-                if grad_out.shape != (c, r):
-                    raise ValueError(
-                        f"grad_out shape mismatch: expected {(c, r)}, got {grad_out.shape}"
-                    )
-
-                g_np = grad_out.to_numpy().T  # back to (r, c)
-                grad_parent = Tensor(
-                    shape=self.shape, device=self.device, requires_grad=False, ctx=None
-                )
-                grad_parent.copy_from_numpy(g_np)
-                return (grad_parent,)
-
-            ctx = Context(
-                parents=(self,),
-                backward_fn=backward_fn,
-            )
-            out._set_ctx(ctx)
-
-        return out
 
     @property
     def T(self) -> "Tensor":
@@ -2914,4 +3122,149 @@ class Tensor(ITensor):
 
         lib = out._get_cuda_lib()
         ones_cuda(lib, y_dev=int(out._data), numel=numel, dtype=dtype, sync=True)
+        return out
+
+    # ----------------------------
+    # Transpose (2D)
+    # ----------------------------
+    def transpose(self) -> "Tensor":
+        """
+        2D transpose: out[i, j] = self[j, i].
+
+        Requirements
+        ------------
+        - input must be 2D
+        - CPU and CUDA supported
+
+        Backward
+        --------
+        If out = A^T, then dL/dA = (dL/dout)^T
+        """
+        if len(self.shape) != 2:
+            raise ValueError(f"transpose requires a 2D tensor, got shape={self.shape}")
+
+        r, c = self.shape
+        req = self.requires_grad
+
+        # -----------------------
+        # CUDA path
+        # -----------------------
+        if self.device.is_cuda():
+            import numpy as np
+            from ..ops.transpose_cuda import transpose2d_cuda  # ops-layer wrapper
+
+            dtype = np.dtype(self.dtype)
+
+            # Input must have allocated device memory
+            x_dev = int(self.data)
+            if x_dev == 0:
+                raise RuntimeError(
+                    "CUDA transpose requires an allocated input device buffer (data != 0)"
+                )
+
+            # Allocate output buffer if needed
+            out = Tensor(
+                shape=(c, r),
+                device=self.device,
+                requires_grad=req,
+                ctx=None,
+                dtype=dtype,
+            )
+            out._ensure_cuda_alloc(dtype=dtype)
+            y_dev = int(out.data)
+            if y_dev == 0:
+                raise RuntimeError(
+                    "CUDA transpose failed to allocate output device buffer"
+                )
+
+            lib = self._get_cuda_lib()
+
+            # Forward kernel
+            transpose2d_cuda(
+                lib,
+                x_dev=x_dev,
+                y_dev=y_dev,
+                rows=int(r),
+                cols=int(c),
+                dtype=dtype,
+                sync=True,
+            )
+
+            if req:
+
+                def backward_fn(grad_out: "Tensor"):
+                    if not grad_out.device.is_cuda():
+                        raise RuntimeError(
+                            "grad_out must be CUDA for CUDA transpose backward"
+                        )
+                    if grad_out.shape != (c, r):
+                        raise ValueError(
+                            f"grad_out shape mismatch: expected {(c, r)}, got {grad_out.shape}"
+                        )
+
+                    go_dev = int(grad_out.data)
+                    if go_dev == 0:
+                        raise RuntimeError(
+                            "grad_out CUDA tensor has no allocated devptr (data == 0)"
+                        )
+
+                    grad = Tensor(
+                        shape=(r, c),
+                        device=self.device,
+                        requires_grad=False,
+                        ctx=None,
+                        dtype=dtype,
+                    )
+                    grad._ensure_cuda_alloc(dtype=dtype)
+                    gx_dev = int(grad.data)
+                    if gx_dev == 0:
+                        raise RuntimeError(
+                            "CUDA transpose backward failed to allocate grad buffer"
+                        )
+
+                    # grad_x = grad_out^T
+                    transpose2d_cuda(
+                        lib,
+                        x_dev=go_dev,
+                        y_dev=gx_dev,
+                        rows=int(c),
+                        cols=int(r),
+                        dtype=dtype,
+                        sync=True,
+                    )
+                    return (grad,)
+
+                ctx = Context(parents=(self,), backward_fn=backward_fn)
+                out._set_ctx(ctx)
+
+            return out
+
+        # -----------------------
+        # CPU path (unchanged)
+        # -----------------------
+        if not self.device.is_cpu():
+            self._raise_device_not_supported("transpose")
+
+        out = Tensor(shape=(c, r), device=self.device, requires_grad=req, ctx=None)
+        out.copy_from_numpy(self.to_numpy().T)
+
+        if req:
+
+            def backward_fn(grad_out: "Tensor"):
+                if not grad_out.device.is_cpu():
+                    raise RuntimeError("grad_out must be CPU in current implementation")
+                if grad_out.shape != (c, r):
+                    raise ValueError(
+                        f"grad_out shape mismatch: expected {(c, r)}, got {grad_out.shape}"
+                    )
+                g_np = grad_out.to_numpy().T
+                grad_parent = Tensor(
+                    shape=self.shape, device=self.device, requires_grad=False, ctx=None
+                )
+                grad_parent.copy_from_numpy(g_np)
+                return (grad_parent,)
+
+            ctx = Context(parents=(self,), backward_fn=backward_fn)
+            out._set_ctx(ctx)
+
         return out

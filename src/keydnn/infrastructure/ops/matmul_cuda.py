@@ -153,6 +153,21 @@ def matmul_cuda(*args: Any, **kwargs: Any) -> None:
     b_req = K_i * N_i * itemsize
     c_req = M_i * N_i * itemsize
 
+    # Optional device selection (important for probe on Windows)
+    device_index = kwargs.pop("device_index", None)
+    if device_index is None:
+        device_index = kwargs.pop("device", None)  # tolerate alias
+
+    if hasattr(lib, "keydnn_cuda_set_device"):
+        fn = lib.keydnn_cuda_set_device
+        fn.argtypes = [ctypes.c_int]
+        fn.restype = ctypes.c_int
+        st = int(fn(int(device_index or 0)))
+        if st != 0:
+            raise RuntimeError(
+                f"cuda_set_device({int(device_index or 0)}) failed: status={st}"
+            )
+
     _probe_dev_range(lib, int(a_dev), a_req)
     _probe_dev_range(lib, int(b_dev), b_req)
     _probe_dev_range(lib, int(c_dev), c_req)

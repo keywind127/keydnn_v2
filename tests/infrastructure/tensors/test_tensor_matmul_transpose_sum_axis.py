@@ -39,11 +39,17 @@ class TestTensorMatmulForward(TestCase, _TensorFactoryMixin):
         with self.assertRaises(ValueError):
             _ = a @ b
 
-    def test_matmul_on_cuda_raises(self):
-        a = Tensor((3, 4), Device("cuda:0"), requires_grad=False)
-        b = Tensor((4, 2), Device("cuda:0"), requires_grad=False)
-        with self.assertRaises(Exception):
-            _ = a @ b
+    # def test_matmul_on_cuda_raises(self):
+    #     a = Tensor((3, 4), Device("cuda:0"), requires_grad=False)
+    #     b = Tensor((4, 2), Device("cuda:0"), requires_grad=False)
+    #     with self.assertRaises(Exception):
+    #         _ = a @ b
+
+    def test_matmul_on_cuda_forward_runs_when_allocated(self):
+        a = Tensor.zeros(shape=(3, 4), device=Device("cuda:0"), requires_grad=False)
+        b = Tensor.zeros(shape=(4, 2), device=Device("cuda:0"), requires_grad=False)
+        y = a @ b
+        self.assertEqual(y.shape, (3, 2))
 
 
 class TestTensorMatmulBackward(TestCase, _TensorFactoryMixin):
