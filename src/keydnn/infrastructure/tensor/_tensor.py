@@ -1005,15 +1005,131 @@ class Tensor(ITensor):
 
         return out
 
+    # @staticmethod
+    # def stack(tensors: Sequence["Tensor"], axis: int = 0) -> "Tensor":
+    #     """
+    #     Stack a sequence of tensors along a new axis (CPU-only).
+
+    #     This is the differentiable counterpart of `np.stack`. All input tensors must:
+    #     - live on CPU
+    #     - share the same shape
+    #     - share the same device
+
+    #     Parameters
+    #     ----------
+    #     tensors : Sequence[Tensor]
+    #         Input tensors to stack. Must be non-empty and same-shape.
+    #     axis : int, optional
+    #         Axis at which the new dimension is inserted. Supports negative axes.
+    #         Defaults to 0.
+
+    #     Returns
+    #     -------
+    #     Tensor
+    #         A new tensor whose shape is:
+    #             out.shape = in.shape[:axis] + (len(tensors),) + in.shape[axis:]
+
+    #     Notes
+    #     -----
+    #     - Forward returns a *copy* (not a view).
+    #     - Backward splits `grad_out` along `axis` and routes each slice back to
+    #       the corresponding parent tensor.
+    #     """
+    #     if len(tensors) == 0:
+    #         raise ValueError("Tensor.stack() requires a non-empty sequence")
+
+    #     # ---- Validate devices and shapes ----
+    #     first = tensors[0]
+    #     if not first.device.is_cpu():
+    #         first._raise_device_not_supported("stack")
+
+    #     dev = first.device
+    #     in_shape = first.shape
+
+    #     for i, t in enumerate(tensors):
+    #         if not t.device.is_cpu():
+    #             t._raise_device_not_supported("stack")
+    #         if str(t.device) != str(dev):
+    #             raise ValueError(
+    #                 f"Tensor.stack() requires all tensors on the same device; "
+    #                 f"tensors[0] is {dev!r} but tensors[{i}] is {t.device!r}"
+    #             )
+    #         if t.shape != in_shape:
+    #             raise ValueError(
+    #                 f"Tensor.stack() requires all tensors to have the same shape; "
+    #                 f"expected {in_shape}, got {t.shape} at index {i}"
+    #             )
+
+    #     # Normalize axis (np.stack does this too, but we want predictable error messages)
+    #     ndim = len(in_shape)
+    #     # axis is in [-ndim-1, ndim]
+    #     if axis < 0:
+    #         axis = axis + (ndim + 1)
+    #     if axis < 0 or axis > ndim:
+    #         raise ValueError(
+    #             f"axis {axis} out of bounds for stack with input ndim {ndim}"
+    #         )
+
+    #     # ---- Forward ----
+    #     arrs = [t.to_numpy() for t in tensors]
+    #     stacked = np.stack(arrs, axis=axis).astype(np.float32, copy=False)
+
+    #     req = any(t.requires_grad for t in tensors)
+    #     out = Tensor(shape=stacked.shape, device=dev, requires_grad=req, ctx=None)
+    #     out.copy_from_numpy(stacked)
+
+    #     # ---- Backward ----
+    #     if req:
+
+    #         def backward_fn(grad_out: "Tensor"):
+    #             if not grad_out.device.is_cpu():
+    #                 raise RuntimeError("grad_out must be CPU in current implementation")
+
+    #             g = grad_out.to_numpy()  # shape: stacked.shape
+
+    #             grads: list[Optional["Tensor"]] = []
+    #             for i, t in enumerate(tensors):
+    #                 if not t.requires_grad:
+    #                     grads.append(None)
+    #                     continue
+
+    #                 # Select the i-th slice along the stacked axis.
+    #                 # Use take() to avoid view complexities; it returns an array.
+    #                 gi_np = np.take(g, indices=i, axis=axis).astype(
+    #                     np.float32, copy=False
+    #                 )
+
+    #                 gi = Tensor(
+    #                     shape=t.shape, device=dev, requires_grad=False, ctx=None
+    #                 )
+    #                 gi.copy_from_numpy(gi_np)
+    #                 grads.append(gi)
+
+    #             return tuple(grads)
+
+    #         ctx = Context(
+    #             parents=tuple(tensors),
+    #             backward_fn=backward_fn,
+    #         )
+    #         out._set_ctx(ctx)
+
+    #     return out
+
     @staticmethod
     def stack(tensors: Sequence["Tensor"], axis: int = 0) -> "Tensor":
         """
-        Stack a sequence of tensors along a new axis (CPU-only).
+        Stack a sequence of tensors along a new axis.
 
-        This is the differentiable counterpart of `np.stack`. All input tensors must:
-        - live on CPU
-        - share the same shape
-        - share the same device
+        This is the differentiable counterpart of `np.stack`.
+
+        Requirements
+        ------------
+        - `tensors` must be non-empty
+        - all tensors must share the same shape
+        - all tensors must share the same device
+        - CPU: forward/backward uses NumPy (backward compatible)
+        - CUDA: forward/backward uses `stack_cuda_ext` kernels (device-pointer based)
+        and does NOT call `to_numpy()` on CUDA tensors.
 
         Parameters
         ----------
@@ -1033,52 +1149,137 @@ class Tensor(ITensor):
         -----
         - Forward returns a *copy* (not a view).
         - Backward splits `grad_out` along `axis` and routes each slice back to
-          the corresponding parent tensor.
+        the corresponding parent tensor.
+        - CUDA backward overwrites dx buffers (no accumulation inside kernel).
         """
+        import numpy as np
         if len(tensors) == 0:
             raise ValueError("Tensor.stack() requires a non-empty sequence")
 
-        # ---- Validate devices and shapes ----
         first = tensors[0]
-        if not first.device.is_cpu():
-            first._raise_device_not_supported("stack")
-
         dev = first.device
-        in_shape = first.shape
+        in_shape = tuple(first.shape)
 
-        for i, t in enumerate(tensors):
-            if not t.device.is_cpu():
-                t._raise_device_not_supported("stack")
-            if str(t.device) != str(dev):
-                raise ValueError(
-                    f"Tensor.stack() requires all tensors on the same device; "
-                    f"tensors[0] is {dev!r} but tensors[{i}] is {t.device!r}"
-                )
-            if t.shape != in_shape:
-                raise ValueError(
-                    f"Tensor.stack() requires all tensors to have the same shape; "
-                    f"expected {in_shape}, got {t.shape} at index {i}"
-                )
-
-        # Normalize axis (np.stack does this too, but we want predictable error messages)
+        # Normalize axis against input ndim (same logic as before)
         ndim = len(in_shape)
-        # axis is in [-ndim-1, ndim]
         if axis < 0:
             axis = axis + (ndim + 1)
         if axis < 0 or axis > ndim:
             raise ValueError(
                 f"axis {axis} out of bounds for stack with input ndim {ndim}"
             )
+        axis_n = int(axis)
 
-        # ---- Forward ----
-        arrs = [t.to_numpy() for t in tensors]
-        stacked = np.stack(arrs, axis=axis).astype(np.float32, copy=False)
+        # Validate all tensors: same device + same shape
+        for i, t in enumerate(tensors):
+            if str(t.device) != str(dev):
+                raise ValueError(
+                    f"Tensor.stack() requires all tensors on the same device; "
+                    f"tensors[0] is {dev!r} but tensors[{i}] is {t.device!r}"
+                )
+            if tuple(t.shape) != in_shape:
+                raise ValueError(
+                    f"Tensor.stack() requires all tensors to have the same shape; "
+                    f"expected {in_shape}, got {tuple(t.shape)} at index {i}"
+                )
 
         req = any(t.requires_grad for t in tensors)
+        K = int(len(tensors))
+        out_shape = tuple(in_shape[:axis_n]) + (K,) + tuple(in_shape[axis_n:])
+
+        # ------------------------------------------------------------------
+        # CUDA path (new)
+        # ------------------------------------------------------------------
+        if dev.is_cuda():
+            import numpy as np
+            from ..ops.stack_cuda_ext import (
+                stack_forward as _stack_fwd_cuda,
+                stack_backward as _stack_bwd_cuda,
+            )
+
+            # Enforce dtype support for kernels (module checks too, but keep errors local)
+            dt = np.dtype(first.dtype)
+            if dt not in (np.float32, np.float64):
+                raise TypeError(
+                    f"Tensor.stack CUDA supports float32/float64 only; got {dt}"
+                )
+
+            # IMPORTANT: do not silently allocate inputs; require allocated buffers
+            for i, t in enumerate(tensors):
+                if int(t.data) == 0:
+                    raise RuntimeError(
+                        f"Tensor.stack CUDA requires allocated device buffers (data != 0); "
+                        f"tensors[{i}].data == 0"
+                    )
+                if np.dtype(t.dtype) != dt:
+                    raise TypeError(
+                        f"Tensor.stack CUDA requires same dtype for all tensors; "
+                        f"expected {dt}, got {np.dtype(t.dtype)} at index {i}"
+                    )
+
+            # Forward (CUDA): returns a CUDA Tensor already backed by devptr
+            out = _stack_fwd_cuda(
+                tensors,
+                axis=axis_n,
+                device=int(getattr(dev, "index", 0) or 0),
+            )
+            # preserve autograd flags
+            out._requires_grad = bool(req)
+
+            if req:
+
+                def backward_fn(grad_out: "Tensor"):
+                    if not grad_out.device.is_cuda():
+                        raise RuntimeError(
+                            "grad_out must be CUDA for CUDA Tensor.stack backward"
+                        )
+                    if str(grad_out.device) != str(dev):
+                        raise RuntimeError(
+                            f"grad_out must be on the same CUDA device as output; "
+                            f"got {grad_out.device} vs {dev}"
+                        )
+                    if tuple(grad_out.shape) != out_shape:
+                        raise ValueError(
+                            f"grad_out shape mismatch: expected {out_shape}, got {tuple(grad_out.shape)}"
+                        )
+
+                    # Compute CUDA grads for all K, then mask by requires_grad
+                    grads_all = _stack_bwd_cuda(
+                        grad_out,
+                        x_shape=in_shape,
+                        axis=axis_n,
+                        K=K,
+                        device=int(getattr(dev, "index", 0) or 0),
+                    )
+
+                    grads: list[Optional["Tensor"]] = []
+                    for i, t in enumerate(tensors):
+                        if not t.requires_grad:
+                            grads.append(None)
+                            continue
+                        grads.append(grads_all[i])
+                    return tuple(grads)
+
+                ctx = Context(parents=tuple(tensors), backward_fn=backward_fn)
+                ctx.saved_meta["stack_axis"] = axis_n
+                ctx.saved_meta["stack_K"] = K
+                ctx.saved_meta["stack_in_shape"] = in_shape
+                out._set_ctx(ctx)
+
+            return out
+
+        # ------------------------------------------------------------------
+        # CPU path (unchanged behavior)
+        # ------------------------------------------------------------------
+        if not dev.is_cpu():
+            first._raise_device_not_supported("stack")
+
+        arrs = [t.to_numpy() for t in tensors]
+        stacked = np.stack(arrs, axis=axis_n).astype(np.float32, copy=False)
+
         out = Tensor(shape=stacked.shape, device=dev, requires_grad=req, ctx=None)
         out.copy_from_numpy(stacked)
 
-        # ---- Backward ----
         if req:
 
             def backward_fn(grad_out: "Tensor"):
@@ -1093,9 +1294,7 @@ class Tensor(ITensor):
                         grads.append(None)
                         continue
 
-                    # Select the i-th slice along the stacked axis.
-                    # Use take() to avoid view complexities; it returns an array.
-                    gi_np = np.take(g, indices=i, axis=axis).astype(
+                    gi_np = np.take(g, indices=i, axis=axis_n).astype(
                         np.float32, copy=False
                     )
 
@@ -1107,10 +1306,7 @@ class Tensor(ITensor):
 
                 return tuple(grads)
 
-            ctx = Context(
-                parents=tuple(tensors),
-                backward_fn=backward_fn,
-            )
+            ctx = Context(parents=tuple(tensors), backward_fn=backward_fn)
             out._set_ctx(ctx)
 
         return out
