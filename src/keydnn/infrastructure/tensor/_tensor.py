@@ -598,6 +598,46 @@ class Tensor(ITensor):
     # ----------------------------
     # Addition / Subtraction
     # ----------------------------
+    # def __add__(self, other: Union["Tensor", Number]) -> "Tensor":
+    #     """
+    #     Elementwise addition.
+
+    #     Parameters
+    #     ----------
+    #     other : Union[Tensor, Number]
+    #         Right-hand operand. Scalars are lifted to tensors matching this
+    #         tensor's shape and device.
+
+    #     Returns
+    #     -------
+    #     Tensor
+    #         Result of `self + other` (elementwise).
+
+    #     Notes
+    #     -----
+    #     Backward rule (elementwise, no broadcasting):
+    #     - d(a + b)/da = 1
+    #     - d(a + b)/db = 1
+    #     """
+    #     other_t = self._as_tensor_like(other, self)
+
+    #     if self._device.is_cpu() and other_t.device.is_cpu():
+    #         self._binary_op_shape_check(self, other_t)
+
+    #         req = self._result_requires_grad(self, other_t)
+    #         out = Tensor(shape=self.shape, device=self.device, requires_grad=req)
+    #         out.copy_from_numpy(self.to_numpy() + other_t.to_numpy())
+
+    #         if req:
+    #             ctx = Context(
+    #                 parents=(self, other_t),
+    #                 backward_fn=lambda grad_out: (grad_out, grad_out),
+    #             )
+    #             out._set_ctx(ctx)
+    #         return out
+
+    #     self._raise_device_not_supported("add")
+
     def __add__(self, other: Union["Tensor", Number]) -> "Tensor":
         """
         Elementwise addition.
@@ -621,6 +661,9 @@ class Tensor(ITensor):
         """
         other_t = self._as_tensor_like(other, self)
 
+        # -----------------------------
+        # CPU path (existing)
+        # -----------------------------
         if self._device.is_cpu() and other_t.device.is_cpu():
             self._binary_op_shape_check(self, other_t)
 
@@ -634,6 +677,85 @@ class Tensor(ITensor):
                     backward_fn=lambda grad_out: (grad_out, grad_out),
                 )
                 out._set_ctx(ctx)
+            return out
+
+        # -----------------------------
+        # CUDA fallback (TEMPORARY):
+        # DtoH -> NumPy add -> HtoD
+        # -----------------------------
+        if self._device.is_cuda() and other_t.device.is_cuda():
+            self._binary_op_shape_check(self, other_t)
+
+            # NOTE: correctness-first fallback, slow but unblocks CUDA Linear tests.
+            a_np = self.to_numpy()
+            b_np = other_t.to_numpy()
+            y_np = a_np + b_np
+
+            req = self._result_requires_grad(self, other_t)
+
+            # Create CUDA output + allocate device buffer, then memcpy HtoD
+            import numpy as np
+
+            y_np = np.asarray(y_np)
+            if not y_np.flags["C_CONTIGUOUS"]:
+                y_np = np.ascontiguousarray(y_np)
+
+            out = Tensor(shape=self.shape, device=self.device, requires_grad=req)
+            if hasattr(out, "_ensure_cuda_alloc") and callable(
+                getattr(out, "_ensure_cuda_alloc")
+            ):
+                out._ensure_cuda_alloc(dtype=np.dtype(y_np.dtype))
+
+            dst = int(getattr(out, "data", 0))
+            if dst == 0:
+                raise RuntimeError(
+                    "CUDA add fallback produced output with data == 0 after allocation."
+                )
+
+            # Robust import for cudaMemcpyHtoD
+            def _import_cudaMemcpyHtoD():
+                try:
+                    from ..native_cuda.python.maxpool2d_ctypes import cudaMemcpyHtoD  # type: ignore
+
+                    return cudaMemcpyHtoD
+                except Exception:
+                    pass
+                try:
+                    from ..native_cuda.python.global_avgpool2d_ctypes import cudaMemcpyHtoD  # type: ignore
+
+                    return cudaMemcpyHtoD
+                except Exception:
+                    pass
+                try:
+                    from ..native_cuda.python.avgpool2d_ctypes import cudaMemcpyHtoD  # type: ignore
+
+                    return cudaMemcpyHtoD
+                except Exception:
+                    pass
+                raise ImportError(
+                    "Could not import cudaMemcpyHtoD from known native_cuda ctypes modules. "
+                    "Expose a cudaMemcpyHtoD wrapper or add its module path here."
+                )
+
+            cudaMemcpyHtoD = _import_cudaMemcpyHtoD()
+
+            # Get CUDA native library handle
+            if hasattr(out, "_get_cuda_lib") and callable(
+                getattr(out, "_get_cuda_lib")
+            ):
+                lib = out._get_cuda_lib()
+            else:
+                lib = Tensor._get_cuda_lib()
+
+            cudaMemcpyHtoD(lib, dst, y_np, int(y_np.nbytes))
+
+            if req:
+                ctx = Context(
+                    parents=(self, other_t),
+                    backward_fn=lambda grad_out: (grad_out, grad_out),
+                )
+                out._set_ctx(ctx)
+
             return out
 
         self._raise_device_not_supported("add")
@@ -1005,116 +1127,6 @@ class Tensor(ITensor):
 
         return out
 
-    # @staticmethod
-    # def stack(tensors: Sequence["Tensor"], axis: int = 0) -> "Tensor":
-    #     """
-    #     Stack a sequence of tensors along a new axis (CPU-only).
-
-    #     This is the differentiable counterpart of `np.stack`. All input tensors must:
-    #     - live on CPU
-    #     - share the same shape
-    #     - share the same device
-
-    #     Parameters
-    #     ----------
-    #     tensors : Sequence[Tensor]
-    #         Input tensors to stack. Must be non-empty and same-shape.
-    #     axis : int, optional
-    #         Axis at which the new dimension is inserted. Supports negative axes.
-    #         Defaults to 0.
-
-    #     Returns
-    #     -------
-    #     Tensor
-    #         A new tensor whose shape is:
-    #             out.shape = in.shape[:axis] + (len(tensors),) + in.shape[axis:]
-
-    #     Notes
-    #     -----
-    #     - Forward returns a *copy* (not a view).
-    #     - Backward splits `grad_out` along `axis` and routes each slice back to
-    #       the corresponding parent tensor.
-    #     """
-    #     if len(tensors) == 0:
-    #         raise ValueError("Tensor.stack() requires a non-empty sequence")
-
-    #     # ---- Validate devices and shapes ----
-    #     first = tensors[0]
-    #     if not first.device.is_cpu():
-    #         first._raise_device_not_supported("stack")
-
-    #     dev = first.device
-    #     in_shape = first.shape
-
-    #     for i, t in enumerate(tensors):
-    #         if not t.device.is_cpu():
-    #             t._raise_device_not_supported("stack")
-    #         if str(t.device) != str(dev):
-    #             raise ValueError(
-    #                 f"Tensor.stack() requires all tensors on the same device; "
-    #                 f"tensors[0] is {dev!r} but tensors[{i}] is {t.device!r}"
-    #             )
-    #         if t.shape != in_shape:
-    #             raise ValueError(
-    #                 f"Tensor.stack() requires all tensors to have the same shape; "
-    #                 f"expected {in_shape}, got {t.shape} at index {i}"
-    #             )
-
-    #     # Normalize axis (np.stack does this too, but we want predictable error messages)
-    #     ndim = len(in_shape)
-    #     # axis is in [-ndim-1, ndim]
-    #     if axis < 0:
-    #         axis = axis + (ndim + 1)
-    #     if axis < 0 or axis > ndim:
-    #         raise ValueError(
-    #             f"axis {axis} out of bounds for stack with input ndim {ndim}"
-    #         )
-
-    #     # ---- Forward ----
-    #     arrs = [t.to_numpy() for t in tensors]
-    #     stacked = np.stack(arrs, axis=axis).astype(np.float32, copy=False)
-
-    #     req = any(t.requires_grad for t in tensors)
-    #     out = Tensor(shape=stacked.shape, device=dev, requires_grad=req, ctx=None)
-    #     out.copy_from_numpy(stacked)
-
-    #     # ---- Backward ----
-    #     if req:
-
-    #         def backward_fn(grad_out: "Tensor"):
-    #             if not grad_out.device.is_cpu():
-    #                 raise RuntimeError("grad_out must be CPU in current implementation")
-
-    #             g = grad_out.to_numpy()  # shape: stacked.shape
-
-    #             grads: list[Optional["Tensor"]] = []
-    #             for i, t in enumerate(tensors):
-    #                 if not t.requires_grad:
-    #                     grads.append(None)
-    #                     continue
-
-    #                 # Select the i-th slice along the stacked axis.
-    #                 # Use take() to avoid view complexities; it returns an array.
-    #                 gi_np = np.take(g, indices=i, axis=axis).astype(
-    #                     np.float32, copy=False
-    #                 )
-
-    #                 gi = Tensor(
-    #                     shape=t.shape, device=dev, requires_grad=False, ctx=None
-    #                 )
-    #                 gi.copy_from_numpy(gi_np)
-    #                 grads.append(gi)
-
-    #             return tuple(grads)
-
-    #         ctx = Context(
-    #             parents=tuple(tensors),
-    #             backward_fn=backward_fn,
-    #         )
-    #         out._set_ctx(ctx)
-
-    #     return out
-
     @staticmethod
     def stack(tensors: Sequence["Tensor"], axis: int = 0) -> "Tensor":
         """
@@ -1153,6 +1165,7 @@ class Tensor(ITensor):
         - CUDA backward overwrites dx buffers (no accumulation inside kernel).
         """
         import numpy as np
+
         if len(tensors) == 0:
             raise ValueError("Tensor.stack() requires a non-empty sequence")
 
