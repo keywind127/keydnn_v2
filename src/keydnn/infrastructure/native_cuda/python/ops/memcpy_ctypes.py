@@ -90,3 +90,21 @@ def cuda_memcpy_d2d(lib, dst_dev: int, src_dev: int, nbytes: int) -> None:
     )
     if st != 0:
         raise RuntimeError(f"keydnn_cuda_memcpy_d2d failed with status={st}")
+
+
+def memcpy_dtod(
+    lib, *, dst_dev: int, src_dev: int, nbytes: int, sync: bool = True
+) -> None:
+    cuda_memcpy_d2d(lib, dst_dev, src_dev, nbytes)
+
+
+def memcpy_htod(
+    lib, *, dst_dev: int, src_host: np.ndarray, nbytes: int, sync: bool = True
+) -> None:
+    cuda_memcpy_h2d(lib, dst_dev, src_host, nbytes)
+
+
+def memcpy_dtoh(
+    lib, *, dst_host: np.ndarray, src_dev: int, nbytes: int, sync: bool = True
+) -> None:
+    cuda_memcpy_d2h(lib, dst_host, src_dev, nbytes)

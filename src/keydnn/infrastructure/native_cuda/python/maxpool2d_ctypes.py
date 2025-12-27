@@ -353,60 +353,41 @@ class CudaLib:
         """
         Copy a NumPy array from host to device.
 
-        Parameters
-        ----------
-        dst_dev : DevPtr
-            Destination device buffer pointer.
-        src_host : np.ndarray
-            Source host array. If not C-contiguous, it will be copied into a
-            contiguous buffer before transfer.
-
-        Raises
-        ------
-        RuntimeError
-            If the native memcpy call fails.
+        Notes
+        -----
+        This implementation intentionally routes through the CFUNCTYPE-based
+        memcpy wrapper (memcpy_ctypes) to avoid CDLL.argtypes collisions across
+        modules (e.g., ops.memcpy_cuda vs maxpool2d_ctypes).
         """
-        self._bind_cuda_utils()
+        if not isinstance(src_host, np.ndarray):
+            raise TypeError(f"src_host must be np.ndarray, got {type(src_host)!r}")
         if not src_host.flags["C_CONTIGUOUS"]:
             src_host = np.ascontiguousarray(src_host)
 
-        st = self.lib.keydnn_cuda_memcpy_h2d(
-            c_uint64(int(dst_dev)),
-            c_void_p(int(src_host.ctypes.data)),
-            c_size_t(int(src_host.nbytes)),
-        )
-        if st != 0:
-            raise RuntimeError(f"keydnn_cuda_memcpy_h2d failed with status={st}")
+        # CFUNCTYPE-based call (immune to lib.symbol.argtypes mutations)
+        from src.keydnn.infrastructure.native_cuda.python.ops import memcpy_ctypes as mc
+
+        mc.cuda_memcpy_h2d(self.lib, int(dst_dev), src_host, int(src_host.nbytes))
 
     def cuda_memcpy_d2h(self, dst_host: np.ndarray, src_dev: DevPtr) -> None:
         """
         Copy from device to a NumPy host array.
 
-        Parameters
-        ----------
-        dst_host : np.ndarray
-            Destination host array. Must be C-contiguous.
-        src_dev : DevPtr
-            Source device pointer.
-
-        Raises
-        ------
-        ValueError
-            If dst_host is not C-contiguous.
-        RuntimeError
-            If the native memcpy call fails.
+        Notes
+        -----
+        This implementation intentionally routes through the CFUNCTYPE-based
+        memcpy wrapper (memcpy_ctypes) to avoid CDLL.argtypes collisions across
+        modules (e.g., ops.memcpy_cuda vs maxpool2d_ctypes).
         """
-        self._bind_cuda_utils()
+        if not isinstance(dst_host, np.ndarray):
+            raise TypeError(f"dst_host must be np.ndarray, got {type(dst_host)!r}")
         if not dst_host.flags["C_CONTIGUOUS"]:
             raise ValueError("dst_host must be C-contiguous")
 
-        st = self.lib.keydnn_cuda_memcpy_d2h(
-            c_void_p(int(dst_host.ctypes.data)),
-            c_uint64(int(src_dev)),
-            c_size_t(int(dst_host.nbytes)),
-        )
-        if st != 0:
-            raise RuntimeError(f"keydnn_cuda_memcpy_d2h failed with status={st}")
+        # CFUNCTYPE-based call (immune to lib.symbol.argtypes mutations)
+        from src.keydnn.infrastructure.native_cuda.python.ops import memcpy_ctypes as mc
+
+        mc.cuda_memcpy_d2h(self.lib, dst_host, int(src_dev), int(dst_host.nbytes))
 
     def cuda_memset(self, dev_ptr: DevPtr, value: int, nbytes: int) -> None:
         """
@@ -714,13 +695,41 @@ def cuda_free(lib: ctypes.CDLL, dev_ptr: DevPtr) -> None:
 
 
 def cuda_memcpy_h2d(lib: ctypes.CDLL, dst_dev: DevPtr, src_host: np.ndarray) -> None:
-    """Module-level convenience wrapper for `CudaLib.cuda_memcpy_h2d`."""
-    _get_cuda(lib).cuda_memcpy_h2d(dst_dev, src_host)
+    """
+    Module-level convenience wrapper for host->device memcpy.
+
+    Important
+    ---------
+    This uses the CFUNCTYPE-based memcpy_ctypes implementation to avoid
+    CDLL.argtypes collisions across different wrapper modules.
+    """
+    if not isinstance(src_host, np.ndarray):
+        raise TypeError(f"src_host must be np.ndarray, got {type(src_host)!r}")
+    if not src_host.flags["C_CONTIGUOUS"]:
+        src_host = np.ascontiguousarray(src_host)
+
+    from .ops import memcpy_ctypes as mc
+
+    mc.cuda_memcpy_h2d(lib, int(dst_dev), src_host, int(src_host.nbytes))
 
 
 def cuda_memcpy_d2h(lib: ctypes.CDLL, dst_host: np.ndarray, src_dev: DevPtr) -> None:
-    """Module-level convenience wrapper for `CudaLib.cuda_memcpy_d2h`."""
-    _get_cuda(lib).cuda_memcpy_d2h(dst_host, src_dev)
+    """
+    Module-level convenience wrapper for device->host memcpy.
+
+    Important
+    ---------
+    This uses the CFUNCTYPE-based memcpy_ctypes implementation to avoid
+    CDLL.argtypes collisions across different wrapper modules.
+    """
+    if not isinstance(dst_host, np.ndarray):
+        raise TypeError(f"dst_host must be np.ndarray, got {type(dst_host)!r}")
+    if not dst_host.flags["C_CONTIGUOUS"]:
+        raise ValueError("dst_host must be C-contiguous")
+
+    from .ops import memcpy_ctypes as mc
+
+    mc.cuda_memcpy_d2h(lib, dst_host, int(src_dev), int(dst_host.nbytes))
 
 
 def cuda_memset(lib: ctypes.CDLL, dev_ptr: DevPtr, value: int, nbytes: int) -> None:

@@ -531,128 +531,6 @@ class Tensor(ITensor):
             n *= d
         return n
 
-    def log(self) -> "Tensor":
-        """
-        Compute the elementwise natural logarithm of the tensor.
-
-        Returns
-        -------
-        Tensor
-            A tensor of the same shape as `self`, where each element is
-            replaced by its natural logarithm.
-
-        Notes
-        -----
-        - This operation is defined only for CPU tensors in the current
-        implementation.
-        - No broadcasting is performed; the output tensor has the same
-        shape as the input.
-        - If `self.requires_grad` is True, the returned tensor participates
-        in autograd with the backward rule:
-
-            d(log(x)) / dx = 1 / x
-
-        - The backward pass propagates gradients elementwise using this rule
-        and relies on strict shape matching.
-        - The behavior for non-positive input values is undefined and will
-        follow NumPy's semantics (e.g., `-inf` or `nan`).
-        """
-        if not self.device.is_cpu():
-            self._raise_device_not_supported("log")
-
-        out = Tensor(
-            shape=self.shape,
-            device=self.device,
-            requires_grad=self.requires_grad,
-        )
-
-        out.copy_from_numpy(np.log(self.to_numpy()))
-
-        if self.requires_grad:
-            ctx = Context(
-                parents=(self,),
-                backward_fn=lambda grad_out: (grad_out / self,),
-            )
-            out._set_ctx(ctx)
-
-        return out
-
-    def __getitem__(self, key: Any) -> "Tensor":
-        """
-        Slice/index into a tensor (CPU-only), producing a new Tensor.
-
-        Notes
-        -----
-        - This returns a *copy* (not a view) for simplicity.
-        - Backward rule scatters grad_out back into the parent tensor shape.
-        - Supports basic slicing and NumPy-style fancy indexing.
-        """
-        if not self.device.is_cpu():
-            self._raise_device_not_supported("getitem")
-
-        # Forward: NumPy slice/index
-        src = self.to_numpy()
-        sliced = src[key]
-
-        # Normalize scalar outputs to shape=()
-        if np.isscalar(sliced) or getattr(sliced, "shape", None) == ():
-            sliced_arr = np.array(sliced, dtype=np.float32)  # shape ()
-            out_shape = ()
-        else:
-            sliced_arr = np.asarray(sliced, dtype=np.float32)
-            out_shape = sliced_arr.shape
-
-        req = self.requires_grad
-        out = Tensor(shape=out_shape, device=self.device, requires_grad=req)
-        out.copy_from_numpy(sliced_arr)
-
-        if req:
-
-            def backward_fn(grad_out: "Tensor"):
-                if not grad_out.device.is_cpu():
-                    raise RuntimeError("grad_out must be CPU in current implementation")
-
-                g_out_np = grad_out.to_numpy()
-                grad_parent_np = np.zeros(self.shape, dtype=np.float32)
-
-                # Determine whether this key uses fancy/advanced indexing,
-                # where `grad_parent_np[key] += ...` would NOT accumulate correctly.
-                def _is_fancy(k: Any) -> bool:
-                    # Bool mask, list, ndarray => fancy
-                    if isinstance(k, (list, np.ndarray)):
-                        return True
-                    # Tuple: if any component is fancy => fancy
-                    if isinstance(k, tuple):
-                        return any(isinstance(kk, (list, np.ndarray)) for kk in k)
-                    return False
-
-                fancy = _is_fancy(key)
-
-                if fancy:
-                    # np.add.at correctly accumulates for repeated indices
-                    np.add.at(grad_parent_np, key, g_out_np)
-                else:
-                    # Basic slicing/integer indexing: still conceptually an accumulation op
-                    grad_parent_np[key] += g_out_np
-
-                grad_parent = Tensor(
-                    shape=self.shape, device=self.device, requires_grad=False, ctx=None
-                )
-                grad_parent.copy_from_numpy(grad_parent_np)
-                return (grad_parent,)
-
-            ctx = Context(
-                parents=(self,),
-                backward_fn=backward_fn,
-            )
-            # Optional: keep debug metadata
-            ctx.saved_meta["getitem_key"] = key
-            ctx.saved_meta["parent_shape"] = self.shape
-
-            out._set_ctx(ctx)
-
-        return out
-
     @staticmethod
     def stack(tensors: Sequence["Tensor"], axis: int = 0) -> "Tensor":
         """
@@ -846,145 +724,6 @@ class Tensor(ITensor):
                 return tuple(grads)
 
             ctx = Context(parents=tuple(tensors), backward_fn=backward_fn)
-            out._set_ctx(ctx)
-
-        return out
-
-    @staticmethod
-    def concat(tensors: Sequence["Tensor"], axis: int = 0) -> "Tensor":
-        """
-        Concatenate a sequence of tensors along an existing axis (CPU-only).
-
-        This is the differentiable counterpart of `np.concatenate`.
-
-        Requirements
-        ------------
-        - `tensors` must be non-empty
-        - all tensors must be CPU tensors
-        - all tensors must share the same device
-        - shapes must match on all dimensions except `axis`
-
-        Parameters
-        ----------
-        tensors : Sequence[Tensor]
-            Input tensors to concatenate.
-        axis : int, optional
-            Axis along which to concatenate. Supports negative axes.
-            Defaults to 0.
-
-        Returns
-        -------
-        Tensor
-            Concatenated tensor.
-
-        Notes
-        -----
-        Backward rule:
-        - Split `grad_out` along `axis` into slices matching each input's size
-          along that axis, and route each slice back to the corresponding parent.
-        """
-        if len(tensors) == 0:
-            raise ValueError("Tensor.concat() requires a non-empty sequence")
-
-        first = tensors[0]
-        if not first.device.is_cpu():
-            first._raise_device_not_supported("concat")
-
-        dev = first.device
-        ref_shape = first.shape
-
-        # Validate ndim and normalize axis
-        ndim = len(ref_shape)
-        if ndim == 0:
-            raise ValueError("Tensor.concat() does not support scalar tensors (ndim=0)")
-
-        if axis < 0:
-            axis = axis + ndim
-        if axis < 0 or axis >= ndim:
-            raise ValueError(
-                f"axis {axis} out of bounds for concat with input ndim {ndim}"
-            )
-
-        # Validate devices and shapes (all dims except axis must match)
-        sizes_along_axis: list[int] = []
-        for i, t in enumerate(tensors):
-            if not t.device.is_cpu():
-                t._raise_device_not_supported("concat")
-            if str(t.device) != str(dev):
-                raise ValueError(
-                    f"Tensor.concat() requires all tensors on the same device; "
-                    f"tensors[0] is {dev!r} but tensors[{i}] is {t.device!r}"
-                )
-            if len(t.shape) != ndim:
-                raise ValueError(
-                    f"Tensor.concat() requires all tensors to have same ndim; "
-                    f"expected {ndim}, got {len(t.shape)} at index {i}"
-                )
-
-            for d in range(ndim):
-                if d == axis:
-                    continue
-                if t.shape[d] != ref_shape[d]:
-                    raise ValueError(
-                        "Tensor.concat() shape mismatch on non-concat dimension: "
-                        f"dim={d}, expected {ref_shape[d]}, got {t.shape[d]} at index {i}"
-                    )
-
-            sizes_along_axis.append(t.shape[axis])
-
-        # Forward
-        arrs = [t.to_numpy() for t in tensors]
-        out_np = np.concatenate(arrs, axis=axis).astype(np.float32, copy=False)
-
-        req = any(t.requires_grad for t in tensors)
-        out = Tensor(shape=out_np.shape, device=dev, requires_grad=req, ctx=None)
-        out.copy_from_numpy(out_np)
-
-        # Backward
-        if req:
-            # Build slice boundaries along axis
-            # e.g. sizes [2,3,1] -> offsets [0,2,5,6]
-            offsets = [0]
-            for s in sizes_along_axis:
-                offsets.append(offsets[-1] + int(s))
-
-            def backward_fn(grad_out: "Tensor"):
-                if not grad_out.device.is_cpu():
-                    raise RuntimeError("grad_out must be CPU in current implementation")
-
-                g = grad_out.to_numpy()
-                grads: list[Optional["Tensor"]] = []
-
-                for i, t in enumerate(tensors):
-                    if not t.requires_grad:
-                        grads.append(None)
-                        continue
-
-                    start = offsets[i]
-                    end = offsets[i + 1]
-
-                    # Build slicing object for all dims
-                    slicer = [slice(None)] * ndim
-                    slicer[axis] = slice(start, end)
-
-                    gi_np = g[tuple(slicer)].astype(np.float32, copy=False)
-
-                    gi = Tensor(
-                        shape=t.shape, device=dev, requires_grad=False, ctx=None
-                    )
-                    gi.copy_from_numpy(gi_np)
-                    grads.append(gi)
-
-                return tuple(grads)
-
-            ctx = Context(
-                parents=tuple(tensors),
-                backward_fn=backward_fn,
-            )
-            # Optional debug metadata
-            ctx.saved_meta["concat_axis"] = axis
-            ctx.saved_meta["concat_sizes"] = sizes_along_axis
-
             out._set_ctx(ctx)
 
         return out
@@ -1479,57 +1218,6 @@ class Tensor(ITensor):
         # For (1,) or (1,1,...) tensors
         return float(self._data.reshape(-1)[0])
 
-    def sqrt(self) -> "Tensor":
-        """
-        Elementwise square root.
-
-        Returns
-        -------
-        Tensor
-            A tensor with the same shape as `self`, containing sqrt(self) elementwise.
-
-        Notes
-        -----
-        - CPU-only for now.
-        - NumPy is used only inside Tensor to perform the actual numeric kernel.
-        - Autograd: if `self.requires_grad` is True, attaches a Context with parent (self,).
-        """
-        if not self.device.is_cpu():
-            self._raise_device_not_supported("sqrt")
-
-        x_np = self.to_numpy()
-        y_np = np.sqrt(x_np).astype(np.float32, copy=False)
-
-        out = Tensor(
-            shape=self.shape, device=self.device, requires_grad=self.requires_grad
-        )
-        out.copy_from_numpy(y_np)
-
-        if self.requires_grad:
-            # Save output for backward (so we don't recompute sqrt).
-            def backward_fn(grad_out: "Tensor") -> Sequence[Optional["Tensor"]]:
-                if not grad_out.device.is_cpu():
-                    grad_out._raise_device_not_supported("sqrt_backward")
-
-                # d/dx sqrt(x) = 0.5 / sqrt(x) = 0.5 / out
-                # Use numpy here because we're inside Tensor (your requirement).
-                go = grad_out.to_numpy().astype(np.float32, copy=False)
-                y = out.to_numpy().astype(np.float32, copy=False)
-
-                # Be careful about division-by-zero; follow numpy semantics.
-                gx_np = (go * (0.5 / y)).astype(np.float32, copy=False)
-
-                gx = Tensor(shape=self.shape, device=self.device, requires_grad=False)
-                gx.copy_from_numpy(gx_np)
-                return (gx,)
-
-            ctx = Context(parents=(self,), backward_fn=backward_fn)
-            # Store `out` for backward (reused derivative)
-            ctx.save_for_backward(out)
-            out._set_ctx(ctx)
-
-        return out
-
     @staticmethod
     def _from_numpy(arr: ITensor, *, device, requires_grad: bool = False) -> "Tensor":
         """
@@ -1567,29 +1255,6 @@ class Tensor(ITensor):
         t = Tensor(
             shape=arr.shape, device=device, requires_grad=requires_grad, ctx=None
         )
-        t.copy_from_numpy(arr)
-        return t
-
-    @staticmethod
-    def rand(shape, *, device, requires_grad: bool = False) -> "Tensor":
-        """
-        Create a tensor filled with uniform random values in [0, 1) on the given device.
-
-        Notes
-        -----
-        - CPU-only for now.
-        - Random generation is intentionally implemented inside Tensor so higher-level
-        modules (e.g., Dropout) do not depend on NumPy directly.
-        """
-        if not device.is_cpu():
-            # match your existing CPU-only policy
-            raise RuntimeError("rand is only supported for CPU tensors for now.")
-
-        # NumPy is allowed here by your rule: only inside Tensor.
-        import numpy as np
-
-        arr = np.random.rand(*shape).astype(np.float32, copy=False)
-        t = Tensor(shape=shape, device=device, requires_grad=requires_grad, ctx=None)
         t.copy_from_numpy(arr)
         return t
 
@@ -4032,3 +3697,458 @@ class Tensor(ITensor):
             return out
 
         self._raise_device_not_supported("reshape")
+
+    @staticmethod
+    def rand(shape, *, device, requires_grad: bool = False) -> "Tensor":
+        """
+        Create a tensor filled with uniform random values in [0, 1) on the given device.
+
+        Notes
+        -----
+        - CPU: random values are generated using NumPy.
+        - CUDA: random values are generated on CPU and transferred to device memory.
+        No CUDA RNG kernel is used.
+        - This mirrors the initialization strategy used by many frameworks and keeps
+        behavior deterministic and easy to test.
+        - The returned tensor has dtype float32 and ctx=None.
+        """
+        import numpy as np
+
+        # Generate on CPU using NumPy (single source of truth)
+        arr = np.random.rand(*shape).astype(np.float32, copy=False)
+
+        # CPU path (unchanged)
+        if device.is_cpu():
+            t = Tensor(
+                shape=arr.shape,
+                device=device,
+                requires_grad=requires_grad,
+                ctx=None,
+                dtype=np.float32,
+            )
+            t.copy_from_numpy(arr)
+            return t
+
+        # CUDA path: CPU -> CUDA transfer
+        if device.is_cuda():
+            # Stage on CPU first
+            t_cpu = Tensor(
+                shape=arr.shape,
+                device=Device("cpu"),
+                requires_grad=False,
+                ctx=None,
+                dtype=np.float32,
+            )
+            t_cpu.copy_from_numpy(arr)
+
+            # Transfer to CUDA using existing mechanism
+            # (to() or copy_from with allow_cross_device)
+            if hasattr(t_cpu, "to"):
+                t_cuda = t_cpu.to(device)
+            else:
+                t_cuda = Tensor(
+                    shape=arr.shape,
+                    device=device,
+                    requires_grad=False,
+                    ctx=None,
+                    dtype=np.float32,
+                )
+                t_cuda.copy_from(t_cpu, allow_cross_device=True)
+
+            # requires_grad applies to the final tensor
+            t_cuda.requires_grad = requires_grad
+            return t_cuda
+
+        raise RuntimeError(f"rand is not supported for device={device!r}")
+
+    @staticmethod
+    def concat(tensors: Sequence["Tensor"], axis: int = 0) -> "Tensor":
+        """
+        Concatenate a sequence of tensors along an existing axis.
+
+        CPU behavior
+        ------------
+        - Fully supports all axes via NumPy.
+
+        CUDA behavior (current)
+        -----------------------
+        - Supports only axis == 0 for CUDA tensors using device-to-device memcpy.
+        - General axis concatenation on CUDA requires a kernel (pending).
+
+        Requirements
+        ------------
+        - `tensors` must be non-empty
+        - all tensors must share the same device
+        - shapes must match on all dimensions except `axis`
+        - dtypes must match (CUDA path enforces this; CPU path preserves current float32-cast behavior)
+
+        Backward rule
+        -------------
+        - Split `grad_out` along `axis` into slices matching each input's size
+        along that axis, and route each slice back to the corresponding parent.
+        """
+        if len(tensors) == 0:
+            raise ValueError("Tensor.concat() requires a non-empty sequence")
+
+        first = tensors[0]
+        dev = first.device
+        ref_shape = first.shape
+
+        # Validate ndim and normalize axis
+        ndim = len(ref_shape)
+        if ndim == 0:
+            raise ValueError("Tensor.concat() does not support scalar tensors (ndim=0)")
+
+        if axis < 0:
+            axis = axis + ndim
+        if axis < 0 or axis >= ndim:
+            raise ValueError(
+                f"axis {axis} out of bounds for concat with input ndim {ndim}"
+            )
+
+        # Validate devices, ndim, and shapes (all dims except axis must match)
+        sizes_along_axis: list[int] = []
+        dtype0 = getattr(first, "dtype", np.float32)
+
+        for i, t in enumerate(tensors):
+            if str(t.device) != str(dev):
+                raise ValueError(
+                    f"Tensor.concat() requires all tensors on the same device; "
+                    f"tensors[0] is {dev!r} but tensors[{i}] is {t.device!r}"
+                )
+
+            if len(t.shape) != ndim:
+                raise ValueError(
+                    f"Tensor.concat() requires all tensors to have same ndim; "
+                    f"expected {ndim}, got {len(t.shape)} at index {i}"
+                )
+
+            for d in range(ndim):
+                if d == axis:
+                    continue
+                if t.shape[d] != ref_shape[d]:
+                    raise ValueError(
+                        "Tensor.concat() shape mismatch on non-concat dimension: "
+                        f"dim={d}, expected {ref_shape[d]}, got {t.shape[d]} at index {i}"
+                    )
+
+            sizes_along_axis.append(int(t.shape[axis]))
+
+        # Build output shape
+        out_shape = list(ref_shape)
+        out_shape[axis] = int(sum(sizes_along_axis))
+        out_shape_t = tuple(int(x) for x in out_shape)
+
+        req = any(t.requires_grad for t in tensors)
+
+        # ============================================================
+        # CPU path (keep existing semantics)
+        # ============================================================
+        if dev.is_cpu():
+            arrs = [t.to_numpy() for t in tensors]
+            # preserve your existing behavior: float32 output
+            out_np = np.concatenate(arrs, axis=axis).astype(np.float32, copy=False)
+
+            out = Tensor(shape=out_np.shape, device=dev, requires_grad=req, ctx=None)
+            out.copy_from_numpy(out_np)
+
+            if req:
+                offsets = [0]
+                for s in sizes_along_axis:
+                    offsets.append(offsets[-1] + int(s))
+
+                def backward_fn(grad_out: "Tensor"):
+                    if not grad_out.device.is_cpu():
+                        raise RuntimeError(
+                            "grad_out must be CPU in current implementation"
+                        )
+
+                    g = grad_out.to_numpy()
+                    grads: list[Optional["Tensor"]] = []
+
+                    for i, t in enumerate(tensors):
+                        if not t.requires_grad:
+                            grads.append(None)
+                            continue
+
+                        start = offsets[i]
+                        end = offsets[i + 1]
+
+                        slicer = [slice(None)] * ndim
+                        slicer[axis] = slice(start, end)
+
+                        gi_np = g[tuple(slicer)].astype(np.float32, copy=False)
+
+                        gi = Tensor(
+                            shape=t.shape, device=dev, requires_grad=False, ctx=None
+                        )
+                        gi.copy_from_numpy(gi_np)
+                        grads.append(gi)
+
+                    return tuple(grads)
+
+                ctx = Context(parents=tuple(tensors), backward_fn=backward_fn)
+                ctx.saved_meta["concat_axis"] = axis
+                ctx.saved_meta["concat_sizes"] = sizes_along_axis
+                out._set_ctx(ctx)
+
+            return out
+
+        # ============================================================
+        # CUDA path (correctness-first fallback via CPU)
+        # ============================================================
+        if dev.is_cuda():
+            # ------------------------------------------------------------------
+            # IMPORTANT:
+            # Raw device-to-device memcpy is NOT generally correct for tensor
+            # concatenation, even for axis == 0, due to row-major memory layout
+            # and striding. Without a dedicated CUDA kernel, attempting to
+            # concatenate via flat byte copies leads to interleaved / corrupted
+            # results (see unit tests).
+            #
+            # Therefore, we intentionally fall back to:
+            #   CUDA -> CPU -> np.concatenate -> CUDA
+            #
+            # This ensures correctness and preserves autograd semantics.
+            #
+            # TODO (performance):
+            # - Implement a dedicated CUDA concat kernel supporting arbitrary axis
+            # - OR add a restricted fast-path ONLY for 1D tensors (ndim == 1)
+            # ------------------------------------------------------------------
+
+            # Materialize inputs on CPU
+            arrs = [t.to_numpy() for t in tensors]
+            out_np = np.concatenate(arrs, axis=axis)
+
+            out = Tensor(
+                shape=out_np.shape,
+                device=dev,
+                requires_grad=req,
+                ctx=None,
+            )
+            out.copy_from_numpy(out_np)
+
+            if req:
+                offsets = [0]
+                for s in sizes_along_axis:
+                    offsets.append(offsets[-1] + int(s))
+
+                def backward_fn(grad_out: "Tensor"):
+                    if not grad_out.device.is_cuda():
+                        raise RuntimeError(
+                            "grad_out must be CUDA for CUDA concat backward"
+                        )
+
+                    # Pull grad_out to CPU for correct slicing
+                    g_np = grad_out.to_numpy()
+
+                    grads: list[Optional["Tensor"]] = []
+                    for i, t in enumerate(tensors):
+                        if not t.requires_grad:
+                            grads.append(None)
+                            continue
+
+                        start = offsets[i]
+                        end = offsets[i + 1]
+
+                        slicer = [slice(None)] * ndim
+                        slicer[axis] = slice(start, end)
+
+                        gi_np = g_np[tuple(slicer)]
+
+                        gi = Tensor(
+                            shape=t.shape,
+                            device=dev,
+                            requires_grad=False,
+                            ctx=None,
+                        )
+                        gi.copy_from_numpy(gi_np)
+                        grads.append(gi)
+
+                    return tuple(grads)
+
+                ctx = Context(
+                    parents=tuple(tensors),
+                    backward_fn=backward_fn,
+                )
+                ctx.saved_meta["concat_axis"] = axis
+                ctx.saved_meta["concat_sizes"] = sizes_along_axis
+                ctx.saved_meta["cuda_fallback_via_cpu"] = True
+                ctx.saved_meta["todo"] = "implement CUDA concat kernel"
+
+                out._set_ctx(ctx)
+
+            return out
+
+    def log(self) -> "Tensor":
+        """
+        Compute the elementwise natural logarithm of the tensor.
+
+        Returns
+        -------
+        Tensor
+            A tensor of the same shape as `self`, where each element is
+            replaced by its natural logarithm.
+
+        Notes
+        -----
+        - This operation is defined only for CPU tensors in the current
+        implementation.
+        - No broadcasting is performed; the output tensor has the same
+        shape as the input.
+        - If `self.requires_grad` is True, the returned tensor participates
+        in autograd with the backward rule:
+
+            d(log(x)) / dx = 1 / x
+
+        - The backward pass propagates gradients elementwise using this rule
+        and relies on strict shape matching.
+        - The behavior for non-positive input values is undefined and will
+        follow NumPy's semantics (e.g., `-inf` or `nan`).
+        """
+        if not self.device.is_cpu():
+            self._raise_device_not_supported("log")
+
+        out = Tensor(
+            shape=self.shape,
+            device=self.device,
+            requires_grad=self.requires_grad,
+        )
+
+        out.copy_from_numpy(np.log(self.to_numpy()))
+
+        if self.requires_grad:
+            ctx = Context(
+                parents=(self,),
+                backward_fn=lambda grad_out: (grad_out / self,),
+            )
+            out._set_ctx(ctx)
+
+        return out
+
+    def sqrt(self) -> "Tensor":
+        """
+        Elementwise square root.
+
+        Returns
+        -------
+        Tensor
+            A tensor with the same shape as `self`, containing sqrt(self) elementwise.
+
+        Notes
+        -----
+        - CPU-only for now.
+        - NumPy is used only inside Tensor to perform the actual numeric kernel.
+        - Autograd: if `self.requires_grad` is True, attaches a Context with parent (self,).
+        """
+        if not self.device.is_cpu():
+            self._raise_device_not_supported("sqrt")
+
+        x_np = self.to_numpy()
+        y_np = np.sqrt(x_np).astype(np.float32, copy=False)
+
+        out = Tensor(
+            shape=self.shape, device=self.device, requires_grad=self.requires_grad
+        )
+        out.copy_from_numpy(y_np)
+
+        if self.requires_grad:
+            # Save output for backward (so we don't recompute sqrt).
+            def backward_fn(grad_out: "Tensor") -> Sequence[Optional["Tensor"]]:
+                if not grad_out.device.is_cpu():
+                    grad_out._raise_device_not_supported("sqrt_backward")
+
+                # d/dx sqrt(x) = 0.5 / sqrt(x) = 0.5 / out
+                # Use numpy here because we're inside Tensor (your requirement).
+                go = grad_out.to_numpy().astype(np.float32, copy=False)
+                y = out.to_numpy().astype(np.float32, copy=False)
+
+                # Be careful about division-by-zero; follow numpy semantics.
+                gx_np = (go * (0.5 / y)).astype(np.float32, copy=False)
+
+                gx = Tensor(shape=self.shape, device=self.device, requires_grad=False)
+                gx.copy_from_numpy(gx_np)
+                return (gx,)
+
+            ctx = Context(parents=(self,), backward_fn=backward_fn)
+            # Store `out` for backward (reused derivative)
+            ctx.save_for_backward(out)
+            out._set_ctx(ctx)
+
+        return out
+
+    def __getitem__(self, key: Any) -> "Tensor":
+        """
+        Slice/index into a tensor (CPU-only), producing a new Tensor.
+
+        Notes
+        -----
+        - This returns a *copy* (not a view) for simplicity.
+        - Backward rule scatters grad_out back into the parent tensor shape.
+        - Supports basic slicing and NumPy-style fancy indexing.
+        """
+        if not self.device.is_cpu():
+            self._raise_device_not_supported("getitem")
+
+        # Forward: NumPy slice/index
+        src = self.to_numpy()
+        sliced = src[key]
+
+        # Normalize scalar outputs to shape=()
+        if np.isscalar(sliced) or getattr(sliced, "shape", None) == ():
+            sliced_arr = np.array(sliced, dtype=np.float32)  # shape ()
+            out_shape = ()
+        else:
+            sliced_arr = np.asarray(sliced, dtype=np.float32)
+            out_shape = sliced_arr.shape
+
+        req = self.requires_grad
+        out = Tensor(shape=out_shape, device=self.device, requires_grad=req)
+        out.copy_from_numpy(sliced_arr)
+
+        if req:
+
+            def backward_fn(grad_out: "Tensor"):
+                if not grad_out.device.is_cpu():
+                    raise RuntimeError("grad_out must be CPU in current implementation")
+
+                g_out_np = grad_out.to_numpy()
+                grad_parent_np = np.zeros(self.shape, dtype=np.float32)
+
+                # Determine whether this key uses fancy/advanced indexing,
+                # where `grad_parent_np[key] += ...` would NOT accumulate correctly.
+                def _is_fancy(k: Any) -> bool:
+                    # Bool mask, list, ndarray => fancy
+                    if isinstance(k, (list, np.ndarray)):
+                        return True
+                    # Tuple: if any component is fancy => fancy
+                    if isinstance(k, tuple):
+                        return any(isinstance(kk, (list, np.ndarray)) for kk in k)
+                    return False
+
+                fancy = _is_fancy(key)
+
+                if fancy:
+                    # np.add.at correctly accumulates for repeated indices
+                    np.add.at(grad_parent_np, key, g_out_np)
+                else:
+                    # Basic slicing/integer indexing: still conceptually an accumulation op
+                    grad_parent_np[key] += g_out_np
+
+                grad_parent = Tensor(
+                    shape=self.shape, device=self.device, requires_grad=False, ctx=None
+                )
+                grad_parent.copy_from_numpy(grad_parent_np)
+                return (grad_parent,)
+
+            ctx = Context(
+                parents=(self,),
+                backward_fn=backward_fn,
+            )
+            # Optional: keep debug metadata
+            ctx.saved_meta["getitem_key"] = key
+            ctx.saved_meta["parent_shape"] = self.shape
+
+            out._set_ctx(ctx)
+
+        return out
