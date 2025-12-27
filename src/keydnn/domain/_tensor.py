@@ -19,6 +19,7 @@ from __future__ import annotations
 from typing import Any, Optional, Protocol, Sequence, Union, runtime_checkable
 
 from .device._device_protocol import DeviceLike
+from .device._device import Device
 
 Number = Union[int, float]
 
@@ -1039,5 +1040,43 @@ class ITensor(Protocol):
         --------------
         Uses only `gt` + `neg`:
             a <= b  <=>  not (a > b)
+        """
+        ...
+
+    def to(self, device: "Device", *, copy: bool = True) -> "ITensor":
+        """
+        Return a tensor on the specified device.
+
+        Parameters
+        ----------
+        device : Device
+            Target device (e.g., Device("cpu"), Device("cuda:0")).
+        copy : bool, optional
+            If True (default), always returns a new tensor.
+            If False and the device matches, may return self.
+
+        Notes
+        -----
+        - This method performs a device transfer via NumPy as an intermediate
+        representation when moving between CPU and CUDA.
+        - Gradients are NOT transferred automatically.
+        - Autograd history is NOT preserved across device moves.
+        """
+        ...
+
+    def clone(self) -> "ITensor":
+        """
+        Create a deep copy of this tensor.
+
+        The cloned tensor:
+        - has the same shape, dtype, and device as `self`
+        - owns independent storage (CPU or CUDA)
+        - does NOT share autograd history (ctx is None)
+        - does NOT propagate requires_grad (set to False)
+
+        Returns
+        -------
+        ITensor
+            A new tensor with copied data.
         """
         ...

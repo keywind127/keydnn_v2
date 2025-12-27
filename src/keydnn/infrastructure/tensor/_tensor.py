@@ -2206,6 +2206,59 @@ class Tensor(ITensor):
             Tensor._get_cuda_lib._lib = load_keydnn_cuda_native()
         return Tensor._get_cuda_lib._lib
 
+    # def _ensure_cuda_alloc(self, *, dtype) -> None:
+    #     """
+    #     Ensure that a CUDA tensor has an allocated device buffer.
+
+    #     This method allocates device memory sized to
+    #     `numel * dtype.itemsize` and stores the resulting device pointer on
+    #     the tensor instance. Memory contents are left uninitialized.
+
+    #     Parameters
+    #     ----------
+    #     dtype
+    #         Desired NumPy-compatible data type for the device buffer.
+
+    #     Raises
+    #     ------
+    #     RuntimeError
+    #         If called on a tensor whose device is not CUDA.
+
+    #     Notes
+    #     -----
+    #     - Zero-sized tensors do not allocate device memory; their device pointer
+    #     is set to `0`.
+    #     - This method does not perform any data initialization (e.g., zeros or
+    #     ones); it is purely an allocation helper.
+    #     - Device selection is performed internally based on `self.device.index`.
+    #     """
+    #     import numpy as np
+    #     from ..native_cuda.python.avgpool2d_ctypes import cuda_set_device, cuda_malloc
+
+    #     if not self.device.is_cuda():
+    #         raise RuntimeError("_ensure_cuda_alloc is only valid for CUDA tensors.")
+
+    #     dtype = np.dtype(dtype)
+    #     numel = self._numel_from_shape()
+
+    #     # zero-sized: represent as null pointer
+    #     if numel == 0:
+    #         self._data = (
+    #             0  # store device ptr here (adjust if you have a dedicated field)
+    #         )
+    #         self._dtype = dtype
+    #         return
+
+    #     lib = self._get_cuda_lib()
+    #     cuda_set_device(lib, int(self.device.index or 0))
+
+    #     nbytes = int(numel) * int(dtype.itemsize)
+    #     dev_ptr = cuda_malloc(lib, nbytes)
+
+    #     # Store device pointer on tensor. Adjust if your tensor uses another attribute.
+    #     self._data = int(dev_ptr)
+    #     self._dtype = dtype
+
     def _ensure_cuda_alloc(self, *, dtype) -> None:
         """
         Ensure that a CUDA tensor has an allocated device buffer.
@@ -2214,26 +2267,19 @@ class Tensor(ITensor):
         `numel * dtype.itemsize` and stores the resulting device pointer on
         the tensor instance. Memory contents are left uninitialized.
 
-        Parameters
-        ----------
-        dtype
-            Desired NumPy-compatible data type for the device buffer.
-
-        Raises
-        ------
-        RuntimeError
-            If called on a tensor whose device is not CUDA.
-
         Notes
         -----
-        - Zero-sized tensors do not allocate device memory; their device pointer
-        is set to `0`.
-        - This method does not perform any data initialization (e.g., zeros or
-        ones); it is purely an allocation helper.
-        - Device selection is performed internally based on `self.device.index`.
+        - If the tensor already has an allocated CUDA buffer, this is a no-op
+        (idempotent) unless the requested dtype would require a different
+        allocation size.
+        - If a re-allocation is required (dtype/size mismatch), the old buffer
+        should be freed (TODO: implement/verify cuda_free usage).
         """
         import numpy as np
         from ..native_cuda.python.avgpool2d_ctypes import cuda_set_device, cuda_malloc
+
+        # If you have cuda_free available somewhere, import it too:
+        # from ..native_cuda.python.avgpool2d_ctypes import cuda_free
 
         if not self.device.is_cuda():
             raise RuntimeError("_ensure_cuda_alloc is only valid for CUDA tensors.")
@@ -2243,19 +2289,35 @@ class Tensor(ITensor):
 
         # zero-sized: represent as null pointer
         if numel == 0:
-            self._data = (
-                0  # store device ptr here (adjust if you have a dedicated field)
-            )
+            self._data = 0
             self._dtype = dtype
             return
+
+        # Compute required size
+        required_nbytes = int(numel) * int(dtype.itemsize)
+
+        # If already allocated, only accept it if compatible
+        cur_ptr = int(getattr(self, "_data", 0) or 0)
+        cur_dtype = getattr(self, "_dtype", None)
+        if cur_ptr != 0 and cur_dtype is not None:
+            cur_dtype = np.dtype(cur_dtype)
+            cur_nbytes = int(numel) * int(cur_dtype.itemsize)
+
+            # Same shape implied; if size matches, keep existing buffer
+            if cur_nbytes == required_nbytes:
+                # Keep current allocation, just update dtype metadata if needed
+                self._dtype = dtype
+                return
+
+            # Otherwise, we need to reallocate (shape same but dtype size differs).
+            # TODO: free old device pointer to avoid leaks once cuda_free is wired.
+            # cuda_free(lib, cur_ptr)
+            # self._data = 0
 
         lib = self._get_cuda_lib()
         cuda_set_device(lib, int(self.device.index or 0))
 
-        nbytes = int(numel) * int(dtype.itemsize)
-        dev_ptr = cuda_malloc(lib, nbytes)
-
-        # Store device pointer on tensor. Adjust if your tensor uses another attribute.
+        dev_ptr = cuda_malloc(lib, required_nbytes)
         self._data = int(dev_ptr)
         self._dtype = dtype
 
@@ -3992,39 +4054,93 @@ class Tensor(ITensor):
 
         Notes
         -----
-        - This operation is defined only for CPU tensors in the current
-        implementation.
-        - No broadcasting is performed; the output tensor has the same
-        shape as the input.
-        - If `self.requires_grad` is True, the returned tensor participates
-        in autograd with the backward rule:
+        CPU behavior
+        ------------
+        - Uses NumPy for the forward kernel on CPU tensors.
+
+        CUDA behavior (workaround)
+        --------------------------
+        - For CUDA tensors, this method currently performs a CPU round-trip:
+        device -> host (to_numpy) -> NumPy log -> device (copy_from_numpy).
+        - This preserves correctness and autograd semantics, but is not optimized.
+
+        Autograd
+        --------
+        If `self.requires_grad` is True, the returned tensor participates in
+        autograd with the backward rule:
 
             d(log(x)) / dx = 1 / x
 
-        - The backward pass propagates gradients elementwise using this rule
-        and relies on strict shape matching.
-        - The behavior for non-positive input values is undefined and will
-        follow NumPy's semantics (e.g., `-inf` or `nan`).
+        The behavior for non-positive input values follows NumPy semantics
+        (e.g., `-inf` or `nan`).
+
+        TODO
+        ----
+        Implement a native CUDA kernel for log (and a fused backward) to avoid
+        device<->host transfers.
         """
-        if not self.device.is_cpu():
-            self._raise_device_not_supported("log")
-
-        out = Tensor(
-            shape=self.shape,
-            device=self.device,
-            requires_grad=self.requires_grad,
-        )
-
-        out.copy_from_numpy(np.log(self.to_numpy()))
-
-        if self.requires_grad:
-            ctx = Context(
-                parents=(self,),
-                backward_fn=lambda grad_out: (grad_out / self,),
+        # ============================================================
+        # CPU path (KEEP EXACT SEMANTICS)
+        # ============================================================
+        if self.device.is_cpu():
+            out = Tensor(
+                shape=self.shape,
+                device=self.device,
+                requires_grad=self.requires_grad,
             )
-            out._set_ctx(ctx)
 
-        return out
+            out.copy_from_numpy(np.log(self.to_numpy()))
+
+            if self.requires_grad:
+                ctx = Context(
+                    parents=(self,),
+                    backward_fn=lambda grad_out: (grad_out / self,),
+                )
+                out._set_ctx(ctx)
+
+            return out
+
+        # ============================================================
+        # CUDA path (CPU workaround)
+        # ============================================================
+        if self.device.is_cuda():
+            # Forward: D2H -> NumPy -> H2D
+            x_np = self.to_numpy()  # should be a CPU ndarray even if self is CUDA
+            y_np = np.log(x_np).astype(np.float32, copy=False)
+
+            out = Tensor(
+                shape=self.shape,
+                device=self.device,
+                requires_grad=self.requires_grad,
+                ctx=None,
+            )
+            # Ensure output has a device buffer; dtype should match your tensor dtype.
+            out._ensure_cuda_alloc(dtype=np.dtype(getattr(self, "dtype", np.float32)))
+            out.copy_from_numpy(y_np)
+
+            if self.requires_grad:
+
+                def backward_fn(grad_out: "Tensor"):
+                    if not grad_out.device.is_cuda():
+                        raise RuntimeError(
+                            "grad_out must be CUDA for CUDA log backward"
+                        )
+                    if str(grad_out.device) != str(self.device):
+                        raise RuntimeError(
+                            f"grad_out device mismatch: expected {self.device!r}, got {grad_out.device!r}"
+                        )
+                    # d/dx log(x) = 1/x
+                    return (grad_out / self,)
+
+                ctx = Context(parents=(self,), backward_fn=backward_fn)
+                ctx.saved_meta["cuda_workaround"] = True
+                ctx.saved_meta["op"] = "log"
+                out._set_ctx(ctx)
+
+            return out
+
+        self._raise_device_not_supported("log")
+        raise RuntimeError("Unreachable")
 
     def sqrt(self) -> "Tensor":
         """
@@ -4037,45 +4153,213 @@ class Tensor(ITensor):
 
         Notes
         -----
-        - CPU-only for now.
-        - NumPy is used only inside Tensor to perform the actual numeric kernel.
-        - Autograd: if `self.requires_grad` is True, attaches a Context with parent (self,).
+        CPU behavior
+        ------------
+        - Uses NumPy for the forward kernel on CPU tensors.
+
+        CUDA behavior (workaround)
+        --------------------------
+        - For CUDA tensors, this method currently performs a CPU round-trip:
+        device -> host (to_numpy) -> NumPy sqrt -> device (copy_from_numpy).
+        - This preserves correctness and autograd semantics, but is not optimized.
+
+        Autograd
+        --------
+        If `self.requires_grad` is True, attaches a Context with parent (self,).
+
+        TODO
+        ----
+        Implement a native CUDA kernel for sqrt (and optionally a fused backward) to
+        avoid device<->host transfers.
         """
-        if not self.device.is_cpu():
-            self._raise_device_not_supported("sqrt")
+        # ============================================================
+        # CPU path (KEEP EXACT SEMANTICS)
+        # ============================================================
+        if self.device.is_cpu():
+            x_np = self.to_numpy()
+            y_np = np.sqrt(x_np).astype(np.float32, copy=False)
 
-        x_np = self.to_numpy()
-        y_np = np.sqrt(x_np).astype(np.float32, copy=False)
+            out = Tensor(
+                shape=self.shape, device=self.device, requires_grad=self.requires_grad
+            )
+            out.copy_from_numpy(y_np)
 
-        out = Tensor(
-            shape=self.shape, device=self.device, requires_grad=self.requires_grad
+            if self.requires_grad:
+
+                def backward_fn(grad_out: "Tensor") -> Sequence[Optional["Tensor"]]:
+                    if not grad_out.device.is_cpu():
+                        grad_out._raise_device_not_supported("sqrt_backward")
+
+                    go = grad_out.to_numpy().astype(np.float32, copy=False)
+                    y = out.to_numpy().astype(np.float32, copy=False)
+
+                    gx_np = (go * (0.5 / y)).astype(np.float32, copy=False)
+
+                    gx = Tensor(
+                        shape=self.shape, device=self.device, requires_grad=False
+                    )
+                    gx.copy_from_numpy(gx_np)
+                    return (gx,)
+
+                ctx = Context(parents=(self,), backward_fn=backward_fn)
+                ctx.save_for_backward(out)
+                out._set_ctx(ctx)
+
+            return out
+
+        # ============================================================
+        # CUDA path (CPU workaround)
+        # ============================================================
+        if self.device.is_cuda():
+            # Forward: D2H -> NumPy -> H2D
+            x_np = self.to_numpy()
+            y_np = np.sqrt(x_np).astype(np.float32, copy=False)
+
+            out = Tensor(
+                shape=self.shape,
+                device=self.device,
+                requires_grad=self.requires_grad,
+                ctx=None,
+            )
+            out._ensure_cuda_alloc(dtype=np.dtype(getattr(self, "dtype", np.float32)))
+            out.copy_from_numpy(y_np)
+
+            if self.requires_grad:
+
+                def backward_fn(grad_out: "Tensor") -> Sequence[Optional["Tensor"]]:
+                    if not grad_out.device.is_cuda():
+                        raise RuntimeError(
+                            "grad_out must be CUDA for CUDA sqrt backward"
+                        )
+                    if str(grad_out.device) != str(self.device):
+                        raise RuntimeError(
+                            f"grad_out device mismatch: expected {self.device!r}, got {grad_out.device!r}"
+                        )
+
+                    # d/dx sqrt(x) = 0.5 / sqrt(x) = 0.5 / out
+                    return (grad_out * (0.5 / out),)
+
+                ctx = Context(parents=(self,), backward_fn=backward_fn)
+                ctx.saved_meta["cuda_workaround"] = True
+                ctx.saved_meta["op"] = "sqrt"
+                out._set_ctx(ctx)
+
+            return out
+
+        self._raise_device_not_supported("sqrt")
+        raise RuntimeError("Unreachable")
+
+    def to(self, device: "Device", *, copy: bool = True) -> "Tensor":
+        """
+        Return a tensor on the specified device.
+
+        Parameters
+        ----------
+        device : Device
+            Target device (e.g., Device("cpu"), Device("cuda:0")).
+        copy : bool, optional
+            If True (default), always returns a new tensor.
+            If False and the device matches, may return self.
+
+        Notes
+        -----
+        - This method performs a device transfer via NumPy as an intermediate
+        representation when moving between CPU and CUDA.
+        - Gradients are NOT transferred automatically.
+        - Autograd history is NOT preserved across device moves.
+        """
+        if str(device) == str(self.device):
+            return self if not copy else self.clone()
+
+        # ---- CPU -> CUDA ----
+        if self.device.is_cpu() and device.is_cuda():
+            arr = self.to_numpy()
+
+            out = Tensor(
+                shape=self.shape,
+                device=device,
+                requires_grad=False,  # explicit reset
+                ctx=None,
+            )
+            out._ensure_cuda_alloc(dtype=np.dtype(arr.dtype))
+            out.copy_from_numpy(arr)
+            return out
+
+        # ---- CUDA -> CPU ----
+        if self.device.is_cuda() and device.is_cpu():
+            arr = self.to_numpy()
+
+            out = Tensor(
+                shape=self.shape,
+                device=device,
+                requires_grad=False,
+                ctx=None,
+            )
+            out.copy_from_numpy(arr)
+            return out
+
+        raise RuntimeError(
+            f"Tensor.to(): unsupported device transfer {self.device!r} -> {device!r}"
         )
-        out.copy_from_numpy(y_np)
 
-        if self.requires_grad:
-            # Save output for backward (so we don't recompute sqrt).
-            def backward_fn(grad_out: "Tensor") -> Sequence[Optional["Tensor"]]:
-                if not grad_out.device.is_cpu():
-                    grad_out._raise_device_not_supported("sqrt_backward")
+    def clone(self) -> "Tensor":
+        """
+        Deep copy of tensor data into a new Tensor.
 
-                # d/dx sqrt(x) = 0.5 / sqrt(x) = 0.5 / out
-                # Use numpy here because we're inside Tensor (your requirement).
-                go = grad_out.to_numpy().astype(np.float32, copy=False)
-                y = out.to_numpy().astype(np.float32, copy=False)
+        - CPU: copies the underlying NumPy array.
+        - CUDA: allocates a new device buffer and performs D2D memcpy.
 
-                # Be careful about division-by-zero; follow numpy semantics.
-                gx_np = (go * (0.5 / y)).astype(np.float32, copy=False)
+        Notes
+        -----
+        - clone() returns a tensor with requires_grad=False and no ctx by default
+        (typical framework behavior for cloning raw storage). If you want to
+        preserve requires_grad, you can add a flag later.
+        """
+        out = Tensor(
+            shape=self.shape, device=self.device, requires_grad=False, ctx=None
+        )
 
-                gx = Tensor(shape=self.shape, device=self.device, requires_grad=False)
-                gx.copy_from_numpy(gx_np)
-                return (gx,)
+        # -------------------------
+        # CPU path
+        # -------------------------
+        if self.device.is_cpu():
+            out.copy_from_numpy(self.to_numpy().copy())
+            return out
 
-            ctx = Context(parents=(self,), backward_fn=backward_fn)
-            # Store `out` for backward (reused derivative)
-            ctx.save_for_backward(out)
-            out._set_ctx(ctx)
+        # -------------------------
+        # CUDA path
+        # -------------------------
+        if self.device.is_cuda():
+            from ..native_cuda.python.ops import memcpy_ctypes as mc
 
-        return out
+            y = Tensor(
+                shape=self.shape, device=self.device, requires_grad=False, ctx=None
+            )
+            y._ensure_cuda_alloc(dtype=getattr(self, "dtype", np.float32))
+
+            self._ensure_cuda_alloc(dtype=getattr(self, "dtype", np.float32))
+
+            lib = self._get_cuda_lib()
+
+            dtype = getattr(self, "dtype", np.float32)
+            itemsize = int(np.dtype(dtype).itemsize)
+
+            numel = 1
+            for d in self.shape:
+                numel *= int(d)
+
+            nbytes = int(numel * itemsize)
+
+            if nbytes > 0:
+                mc.memcpy_dtod(
+                    lib,
+                    dst_dev=int(y.data),
+                    src_dev=int(self.data),
+                    nbytes=nbytes,
+                    sync=True,
+                )
+
+            return y
 
     def __getitem__(self, key: Any) -> "Tensor":
         """

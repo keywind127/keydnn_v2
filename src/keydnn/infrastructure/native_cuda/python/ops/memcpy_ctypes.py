@@ -108,3 +108,60 @@ def memcpy_dtoh(
     lib, *, dst_host: np.ndarray, src_dev: int, nbytes: int, sync: bool = True
 ) -> None:
     cuda_memcpy_d2h(lib, dst_host, src_dev, nbytes)
+
+
+# ---------------------------------------------------------------------
+# Compatibility aliases (preferred public API used by Tensor ops/tests)
+# ---------------------------------------------------------------------
+
+from ..global_avgpool2d_ctypes import cuda_synchronize  # type: ignore
+
+
+def memcpy_htod(
+    lib,
+    *,
+    dst_dev: int,
+    src_host: np.ndarray,
+    nbytes: int,
+    sync: bool = True,
+) -> None:
+    """
+    Host-to-device memcpy (compat alias).
+
+    Matches the keyword-only signature used across tests and Tensor ops.
+    """
+    cuda_memcpy_h2d(lib, dst_dev=dst_dev, src_host=src_host, nbytes=nbytes)
+    if sync:
+        cuda_synchronize(lib)
+
+
+def memcpy_dtoh(
+    lib,
+    *,
+    dst_host: np.ndarray,
+    src_dev: int,
+    nbytes: int,
+    sync: bool = True,
+) -> None:
+    """
+    Device-to-host memcpy (compat alias).
+    """
+    cuda_memcpy_d2h(lib, dst_host=dst_host, src_dev=src_dev, nbytes=nbytes)
+    if sync:
+        cuda_synchronize(lib)
+
+
+def memcpy_dtod(
+    lib,
+    *,
+    dst_dev: int,
+    src_dev: int,
+    nbytes: int,
+    sync: bool = True,
+) -> None:
+    """
+    Device-to-device memcpy (compat alias).
+    """
+    cuda_memcpy_d2d(lib, dst_dev=dst_dev, src_dev=src_dev, nbytes=nbytes)
+    if sync:
+        cuda_synchronize(lib)
