@@ -205,7 +205,7 @@ static inline int keydnn_debug_require_device_or_managed(const void* p, const ch
 // ----------------------------
 // Upload helper: uint64[K] host -> device
 // ----------------------------
-KEYDNN_EXPORT int keydnn_cuda_upload_u64_array(
+/*KEYDNN_EXPORT int keydnn_cuda_upload_u64_array(
     std::uint64_t* dst_dev_u64,
     const std::uint64_t* src_host_u64,
     std::int64_t K
@@ -235,7 +235,7 @@ KEYDNN_EXPORT int keydnn_cuda_upload_u64_array(
     if (st != cudaSuccess) return keydnn_cuda_fail("cudaDeviceSynchronize(upload_u64)", st);
 
     return 0;
-}
+}*/
 
 // ----------------------------
 // Stack forward kernel (gather) ¡X u64 pointer array
@@ -298,6 +298,166 @@ __global__ void stack_bwd_u64_kernel(
 // ----------------------------
 // Launch helpers
 // ----------------------------
+//template <typename T>
+//static inline int stack_fwd_u64_impl(
+//    const std::uint64_t* xs_u64_dev,
+//    std::int64_t K,
+//    std::int64_t pre,
+//    std::int64_t post,
+//    T* y
+//) {
+//    if (!xs_u64_dev) return -1;
+//    if (!y) return -2;
+//    if (K <= 0) return -3;
+//    if (pre < 0) return -4;
+//    if (post < 0) return -5;
+//
+//    const std::int64_t out_numel = pre * K * post;
+//    if (out_numel == 0) return 0;
+//
+//    keydnn_debug_append(
+//        "[stack_fwd_u64_impl] xs_u64_dev=%p y=%p K=%lld pre=%lld post=%lld out_numel=%lld",
+//        (const void*)xs_u64_dev,
+//        (void*)y,
+//        (long long)K,
+//        (long long)pre,
+//        (long long)post,
+//        (long long)out_numel
+//    );
+//
+//    const int block = 256;
+//    const int grid = static_cast<int>((out_numel + block - 1) / block);
+//
+//    stack_fwd_u64_kernel<T> << <grid, block >> > (xs_u64_dev, K, pre, post, y);
+//
+//    cudaError_t st = cudaGetLastError();
+//    if (st != cudaSuccess) return keydnn_cuda_fail("stack_fwd_u64_kernel launch", st);
+//
+//    st = cudaDeviceSynchronize();
+//    if (st != cudaSuccess) return keydnn_cuda_fail("stack_fwd_u64_kernel sync", st);
+//
+//    return 0;
+//}
+//
+//template <typename T>
+//static inline int stack_bwd_u64_impl(
+//    const T* dy,
+//    std::int64_t K,
+//    std::int64_t pre,
+//    std::int64_t post,
+//    const std::uint64_t* dxs_u64_dev
+//) {
+//    if (!dy) return -1;
+//    if (!dxs_u64_dev) return -2;
+//    if (K <= 0) return -3;
+//    if (pre < 0) return -4;
+//    if (post < 0) return -5;
+//
+//    const std::int64_t out_numel = pre * K * post;
+//    if (out_numel == 0) return 0;
+//
+//    const int block = 256;
+//    const int grid = static_cast<int>((out_numel + block - 1) / block);
+//
+//    // ---- Debug pointer validation (host-side, pre-launch) ----
+//    if (g_keydnn_cuda_debug_enabled) {
+//        int stp = 0;
+//
+//        // log pointer kinds
+//        stp = keydnn_debug_check_ptr((const void*)dy, "dy");
+//        if (stp != 0) return stp;
+//
+//        stp = keydnn_debug_check_ptr((const void*)dxs_u64_dev, "dxs_u64_dev");
+//        if (stp != 0) return stp;
+//
+//        // enforce dy and dxs_u64_dev must be device/managed
+//        stp = keydnn_debug_require_device_or_managed((const void*)dy, "dy");
+//        if (stp != 0) return stp;
+//
+//        stp = keydnn_debug_require_device_or_managed((const void*)dxs_u64_dev, "dxs_u64_dev");
+//        if (stp != 0) return stp;
+//
+//        const int n = (K < 4) ? (int)K : 4;
+//        std::uint64_t host_u64[4] = { 0, 0, 0, 0 };
+//
+//        cudaError_t st = cudaMemcpy(
+//            host_u64,
+//            dxs_u64_dev,
+//            sizeof(std::uint64_t) * (size_t)n,
+//            cudaMemcpyDeviceToHost
+//        );
+//        if (st != cudaSuccess) return keydnn_cuda_fail("memcpy dxs_u64_dev D2H sample", st);
+//
+//        for (int i = 0; i < n; ++i) {
+//            const void* p = (const void*)(uintptr_t)host_u64[i];
+//
+//            // log pointer kind
+//            int stx = keydnn_debug_check_ptr(p, "dxs_u64[i]");
+//            if (stx != 0) return stx;
+//
+//            // enforce each sampled dx pointer must be device/managed
+//            stx = keydnn_debug_require_device_or_managed(p, "dxs_u64[i]");
+//            if (stx != 0) return stx;
+//        }
+//
+//        keydnn_debug_append(
+//            "[stack_bwd_u64_impl] pointers OK | dy=%p dxs_u64_dev=%p K=%lld pre=%lld post=%lld out_numel=%lld grid=%d block=%d sample0=0x%llx",
+//            (const void*)dy, (const void*)dxs_u64_dev,
+//            (long long)K, (long long)pre, (long long)post, (long long)out_numel,
+//            grid, block,
+//            (unsigned long long)host_u64[0]
+//        );
+//
+//        // Clear stale error so a subsequent "invalid argument" is definitely from THIS launch
+//        cudaGetLastError();
+//    }
+//    // ---- End debug validation ----
+//
+//    stack_bwd_u64_kernel<T> << <grid, block >> > (dy, K, pre, post, dxs_u64_dev);
+//
+//    cudaError_t st = cudaGetLastError();
+//    if (st != cudaSuccess) return keydnn_cuda_fail("stack_bwd_u64_kernel launch", st);
+//
+//    st = cudaDeviceSynchronize();
+//    if (st != cudaSuccess) return keydnn_cuda_fail("stack_bwd_u64_kernel sync", st);
+//
+//    return 0;
+//}
+
+// keydnn_cuda_stack.cu (edited portions)
+
+KEYDNN_EXPORT int keydnn_cuda_upload_u64_array(
+    std::uint64_t* dst_dev_u64,
+    const std::uint64_t* src_host_u64,
+    std::int64_t K
+) {
+    if (!dst_dev_u64) return -1;
+    if (!src_host_u64) return -2;
+    if (K < 0) return -3;
+    if (K == 0) return 0;
+
+    keydnn_debug_append(
+        "[upload_u64] dst_dev_u64=%p src_host_u64=%p K=%lld bytes=%llu",
+        (void*)dst_dev_u64,
+        (const void*)src_host_u64,
+        (long long)K,
+        (unsigned long long)(static_cast<size_t>(K) * sizeof(std::uint64_t))
+    );
+
+    cudaError_t st = cudaMemcpy(
+        dst_dev_u64,
+        src_host_u64,
+        static_cast<size_t>(K) * sizeof(std::uint64_t),
+        cudaMemcpyHostToDevice
+    );
+    if (st != cudaSuccess) return keydnn_cuda_fail("cudaMemcpy(H2D u64 array)", st);
+
+    // NO cudaDeviceSynchronize() here.
+    // Ordering is guaranteed on the default stream; caller can sync if desired.
+
+    return 0;
+}
+
 template <typename T>
 static inline int stack_fwd_u64_impl(
     const std::uint64_t* xs_u64_dev,
@@ -333,8 +493,8 @@ static inline int stack_fwd_u64_impl(
     cudaError_t st = cudaGetLastError();
     if (st != cudaSuccess) return keydnn_cuda_fail("stack_fwd_u64_kernel launch", st);
 
-    st = cudaDeviceSynchronize();
-    if (st != cudaSuccess) return keydnn_cuda_fail("stack_fwd_u64_kernel sync", st);
+    // NO cudaDeviceSynchronize() here.
+    // Caller decides whether to sync (or later D2H memcpy will effectively sync).
 
     return 0;
 }
@@ -359,18 +519,16 @@ static inline int stack_bwd_u64_impl(
     const int block = 256;
     const int grid = static_cast<int>((out_numel + block - 1) / block);
 
-    // ---- Debug pointer validation (host-side, pre-launch) ----
+    // Debug validation stays, but DO NOT sync. (You already do D2H sampling with cudaMemcpy.)
     if (g_keydnn_cuda_debug_enabled) {
         int stp = 0;
 
-        // log pointer kinds
         stp = keydnn_debug_check_ptr((const void*)dy, "dy");
         if (stp != 0) return stp;
 
         stp = keydnn_debug_check_ptr((const void*)dxs_u64_dev, "dxs_u64_dev");
         if (stp != 0) return stp;
 
-        // enforce dy and dxs_u64_dev must be device/managed
         stp = keydnn_debug_require_device_or_managed((const void*)dy, "dy");
         if (stp != 0) return stp;
 
@@ -390,12 +548,8 @@ static inline int stack_bwd_u64_impl(
 
         for (int i = 0; i < n; ++i) {
             const void* p = (const void*)(uintptr_t)host_u64[i];
-
-            // log pointer kind
             int stx = keydnn_debug_check_ptr(p, "dxs_u64[i]");
             if (stx != 0) return stx;
-
-            // enforce each sampled dx pointer must be device/managed
             stx = keydnn_debug_require_device_or_managed(p, "dxs_u64[i]");
             if (stx != 0) return stx;
         }
@@ -408,21 +562,19 @@ static inline int stack_bwd_u64_impl(
             (unsigned long long)host_u64[0]
         );
 
-        // Clear stale error so a subsequent "invalid argument" is definitely from THIS launch
-        cudaGetLastError();
+        cudaGetLastError(); // clear stale
     }
-    // ---- End debug validation ----
 
     stack_bwd_u64_kernel<T> << <grid, block >> > (dy, K, pre, post, dxs_u64_dev);
 
     cudaError_t st = cudaGetLastError();
     if (st != cudaSuccess) return keydnn_cuda_fail("stack_bwd_u64_kernel launch", st);
 
-    st = cudaDeviceSynchronize();
-    if (st != cudaSuccess) return keydnn_cuda_fail("stack_bwd_u64_kernel sync", st);
+    // NO cudaDeviceSynchronize() here.
 
     return 0;
 }
+
 
 // ----------------------------
 // Exported C ABI

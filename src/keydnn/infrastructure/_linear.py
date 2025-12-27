@@ -374,8 +374,11 @@ class Linear(Module):
 
             if self.bias is not None:
                 batch = x_shape[0]
-                b2d = Tensor.stack([self.bias] * int(batch), axis=0)  # (batch, out)
-                y = y + b2d
+                # b2d = Tensor.stack([self.bias] * int(batch), axis=0)  # (batch, out)
+                # y = y + b2d
+                from .ops.bias_add_cuda_ext import bias_add_inplace
+
+                bias_add_inplace(y, self.bias, device=0, sync=False)
 
             if not req:
                 return y

@@ -31,6 +31,15 @@ Notes
   (overwrite semantics). If you need accumulation, do it outside this module.
 - Temporary device allocations made by the ctypes wrappers (pointer arrays) are
   explicitly freed here.
+
+Performance notes
+-----------------
+This module is written to avoid implicit global synchronizations.
+
+- Both forward and backward calls accept `sync` (default False). When False, the
+  CUDA work is enqueued on the current stream and may complete asynchronously.
+- For benchmarking correctness or latency-sensitive boundaries, pass `sync=True`
+  (or synchronize in your benchmark harness around timing windows).
 """
 
 from __future__ import annotations
@@ -188,6 +197,8 @@ def stack_forward(
     *,
     axis: int = 0,
     device: int = 0,
+    sync: bool = False,
+    debug_verify_ptrs: bool = False,
 ) -> Tensor:
     """
     Stack CUDA tensors along a new axis (forward pass).
@@ -210,6 +221,12 @@ def stack_forward(
         the range [-ndim-1, ndim]. Defaults to 0.
     device : int, optional
         CUDA device ordinal passed to `cuda_set_device`. Defaults to 0.
+    sync : bool, optional
+        If True, synchronizes after kernel launch in the ctypes layer. Defaults
+        to False for performance (async execution).
+    debug_verify_ptrs : bool, optional
+        If True, ctypes layer may read back and validate device pointer arrays.
+        Defaults to False for performance.
 
     Returns
     -------
@@ -276,6 +293,7 @@ def stack_forward(
         xs_dev_ptrs = [int(t.data) for t in tensors]
 
         # The ctypes wrapper allocates the pointer-array on device and returns it.
+        # IMPORTANT: default sync=False to avoid sync-storms in callers like Linear(bias=True).
         xs_ptrs_dev = _stack_fwd(
             lib,
             xs_dev_ptrs=xs_dev_ptrs,
@@ -283,7 +301,8 @@ def stack_forward(
             pre=int(pre),
             post=int(post),
             dtype=dt,
-            sync=True,
+            sync=bool(sync),
+            debug_verify_ptrs=bool(debug_verify_ptrs),
         )
 
         out = Tensor._from_devptr(
@@ -312,6 +331,8 @@ def stack_backward(
     axis: int,
     K: int,
     device: int = 0,
+    sync: bool = False,
+    debug_verify_ptrs: bool = False,
 ) -> List[Tensor]:
     """
     Compute input gradients for CUDA stack (backward pass).
@@ -336,6 +357,12 @@ def stack_backward(
         Number of stacked tensors (size of the inserted dimension).
     device : int, optional
         CUDA device ordinal passed to `cuda_set_device`. Defaults to 0.
+    sync : bool, optional
+        If True, synchronizes after kernel launch in the ctypes layer. Defaults
+        to False for performance (async execution).
+    debug_verify_ptrs : bool, optional
+        If True, ctypes layer may read back and validate device pointer arrays.
+        Defaults to False for performance.
 
     Returns
     -------
@@ -380,6 +407,7 @@ def stack_backward(
         for _ in range(int(K)):
             dx_devs.append(cuda_malloc(lib, nbytes_dx))
 
+        # IMPORTANT: default sync=False to avoid sync-storms.
         dxs_ptrs_dev = _stack_bwd(
             lib,
             dy_dev=int(grad_out.data),
@@ -387,7 +415,8 @@ def stack_backward(
             pre=int(pre),
             post=int(post),
             dtype=dt,
-            sync=True,
+            sync=bool(sync),
+            debug_verify_ptrs=bool(debug_verify_ptrs),
         )
 
         grads: List[Tensor] = [
