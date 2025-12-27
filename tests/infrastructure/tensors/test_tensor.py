@@ -59,10 +59,10 @@ class TestTensorInfrastructure(TestCase):
         with self.assertRaises(RuntimeError):
             tensor.to_numpy()
 
-    def test_fill_on_cuda_raises(self):
-        tensor = Tensor((2, 3), Device("cuda:0"))
-        with self.assertRaises(RuntimeError):
-            tensor.fill(1.0)
+    # def test_fill_on_cuda_raises(self):
+    #     tensor = Tensor((2, 3), Device("cuda:0"))
+    #     with self.assertRaises(RuntimeError):
+    #         tensor.fill(1.0)
 
     def test_invalid_shape_negative_dimension_raises(self):
         """numpy.zeros rejects negative dimensions (current behavior)."""

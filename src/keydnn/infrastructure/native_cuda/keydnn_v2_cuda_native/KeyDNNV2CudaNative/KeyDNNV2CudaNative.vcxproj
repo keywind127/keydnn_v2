@@ -94,6 +94,7 @@
     <CudaCompile Include="keydnn_mul.cu" />
     <CudaCompile Include="keydnn_pad2d_cuda.cu" />
     <CudaCompile Include="keydnn_reduce_cuda.cu" />
+    <CudaCompile Include="keydnn_tensor_arithmetic.cu" />
     <CudaCompile Include="keydnn_transpose2d.cu" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

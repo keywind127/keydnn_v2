@@ -376,24 +376,6 @@ class Tensor(ITensor):
         """
         return self._ctx
 
-    def fill(self, value: float) -> None:
-        """
-        Fill the tensor with a scalar value (CPU-only).
-
-        Parameters
-        ----------
-        value : float
-            Scalar value used to fill the underlying array.
-
-        Raises
-        ------
-        RuntimeError
-            If called on a non-CPU tensor.
-        """
-        if not self._device.is_cpu():
-            raise RuntimeError("fill() is only available for CPU tensors.")
-        self._data.fill(value)
-
     def debug_storage_repr(self) -> str:
         """
         Return a stable, human-readable description of underlying storage.
@@ -561,435 +543,6 @@ class Tensor(ITensor):
         """
         if a.shape != b.shape:
             raise ValueError(f"Shape mismatch: {a.shape} vs {b.shape}")
-
-    # ----------------------------
-    # Unary ops
-    # ----------------------------
-    def __neg__(self) -> "Tensor":
-        """
-        Elementwise negation.
-
-        Returns
-        -------
-        Tensor
-            A tensor containing `-self` (elementwise).
-
-        Notes
-        -----
-        If `self.requires_grad` is True, the returned tensor will carry an
-        attached `Context` that computes `d(-x)/dx = -1`.
-        """
-        if self._device.is_cpu():
-            out = Tensor(
-                shape=self.shape, device=self.device, requires_grad=self.requires_grad
-            )
-            out.copy_from_numpy(-self.to_numpy())
-
-            if self.requires_grad:
-                ctx = Context(
-                    parents=(self,),
-                    backward_fn=lambda grad_out: (-(grad_out),),
-                )
-                out._set_ctx(ctx)
-            return out
-
-        self._raise_device_not_supported("neg")
-
-    # ----------------------------
-    # Addition / Subtraction
-    # ----------------------------
-    # def __add__(self, other: Union["Tensor", Number]) -> "Tensor":
-    #     """
-    #     Elementwise addition.
-
-    #     Parameters
-    #     ----------
-    #     other : Union[Tensor, Number]
-    #         Right-hand operand. Scalars are lifted to tensors matching this
-    #         tensor's shape and device.
-
-    #     Returns
-    #     -------
-    #     Tensor
-    #         Result of `self + other` (elementwise).
-
-    #     Notes
-    #     -----
-    #     Backward rule (elementwise, no broadcasting):
-    #     - d(a + b)/da = 1
-    #     - d(a + b)/db = 1
-    #     """
-    #     other_t = self._as_tensor_like(other, self)
-
-    #     if self._device.is_cpu() and other_t.device.is_cpu():
-    #         self._binary_op_shape_check(self, other_t)
-
-    #         req = self._result_requires_grad(self, other_t)
-    #         out = Tensor(shape=self.shape, device=self.device, requires_grad=req)
-    #         out.copy_from_numpy(self.to_numpy() + other_t.to_numpy())
-
-    #         if req:
-    #             ctx = Context(
-    #                 parents=(self, other_t),
-    #                 backward_fn=lambda grad_out: (grad_out, grad_out),
-    #             )
-    #             out._set_ctx(ctx)
-    #         return out
-
-    #     self._raise_device_not_supported("add")
-
-    def __add__(self, other: Union["Tensor", Number]) -> "Tensor":
-        """
-        Elementwise addition.
-
-        Parameters
-        ----------
-        other : Union[Tensor, Number]
-            Right-hand operand. Scalars are lifted to tensors matching this
-            tensor's shape and device.
-
-        Returns
-        -------
-        Tensor
-            Result of `self + other` (elementwise).
-
-        Notes
-        -----
-        Backward rule (elementwise, no broadcasting):
-        - d(a + b)/da = 1
-        - d(a + b)/db = 1
-        """
-        other_t = self._as_tensor_like(other, self)
-
-        # -----------------------------
-        # CPU path (existing)
-        # -----------------------------
-        if self._device.is_cpu() and other_t.device.is_cpu():
-            self._binary_op_shape_check(self, other_t)
-
-            req = self._result_requires_grad(self, other_t)
-            out = Tensor(shape=self.shape, device=self.device, requires_grad=req)
-            out.copy_from_numpy(self.to_numpy() + other_t.to_numpy())
-
-            if req:
-                ctx = Context(
-                    parents=(self, other_t),
-                    backward_fn=lambda grad_out: (grad_out, grad_out),
-                )
-                out._set_ctx(ctx)
-            return out
-
-        # -----------------------------
-        # CUDA fallback (TEMPORARY):
-        # DtoH -> NumPy add -> HtoD
-        # -----------------------------
-        if self._device.is_cuda() and other_t.device.is_cuda():
-            self._binary_op_shape_check(self, other_t)
-
-            # NOTE: correctness-first fallback, slow but unblocks CUDA Linear tests.
-            a_np = self.to_numpy()
-            b_np = other_t.to_numpy()
-            y_np = a_np + b_np
-
-            req = self._result_requires_grad(self, other_t)
-
-            # Create CUDA output + allocate device buffer, then memcpy HtoD
-            import numpy as np
-
-            y_np = np.asarray(y_np)
-            if not y_np.flags["C_CONTIGUOUS"]:
-                y_np = np.ascontiguousarray(y_np)
-
-            out = Tensor(shape=self.shape, device=self.device, requires_grad=req)
-            if hasattr(out, "_ensure_cuda_alloc") and callable(
-                getattr(out, "_ensure_cuda_alloc")
-            ):
-                out._ensure_cuda_alloc(dtype=np.dtype(y_np.dtype))
-
-            dst = int(getattr(out, "data", 0))
-            if dst == 0:
-                raise RuntimeError(
-                    "CUDA add fallback produced output with data == 0 after allocation."
-                )
-
-            # Robust import for cudaMemcpyHtoD
-            def _import_cudaMemcpyHtoD():
-                try:
-                    from ..native_cuda.python.maxpool2d_ctypes import cudaMemcpyHtoD  # type: ignore
-
-                    return cudaMemcpyHtoD
-                except Exception:
-                    pass
-                try:
-                    from ..native_cuda.python.global_avgpool2d_ctypes import cudaMemcpyHtoD  # type: ignore
-
-                    return cudaMemcpyHtoD
-                except Exception:
-                    pass
-                try:
-                    from ..native_cuda.python.avgpool2d_ctypes import cudaMemcpyHtoD  # type: ignore
-
-                    return cudaMemcpyHtoD
-                except Exception:
-                    pass
-                raise ImportError(
-                    "Could not import cudaMemcpyHtoD from known native_cuda ctypes modules. "
-                    "Expose a cudaMemcpyHtoD wrapper or add its module path here."
-                )
-
-            cudaMemcpyHtoD = _import_cudaMemcpyHtoD()
-
-            # Get CUDA native library handle
-            if hasattr(out, "_get_cuda_lib") and callable(
-                getattr(out, "_get_cuda_lib")
-            ):
-                lib = out._get_cuda_lib()
-            else:
-                lib = Tensor._get_cuda_lib()
-
-            cudaMemcpyHtoD(lib, dst, y_np, int(y_np.nbytes))
-
-            if req:
-                ctx = Context(
-                    parents=(self, other_t),
-                    backward_fn=lambda grad_out: (grad_out, grad_out),
-                )
-                out._set_ctx(ctx)
-
-            return out
-
-        self._raise_device_not_supported("add")
-
-    def __radd__(self, other: Number) -> "Tensor":
-        """
-        Right-hand addition to support `scalar + Tensor`.
-
-        Parameters
-        ----------
-        other : Number
-            Left-hand scalar operand.
-
-        Returns
-        -------
-        Tensor
-            Result of `other + self`.
-        """
-        return self.__add__(other)
-
-    def __sub__(self, other: Union["Tensor", Number]) -> "Tensor":
-        """
-        Elementwise subtraction.
-
-        Parameters
-        ----------
-        other : Union[Tensor, Number]
-            Right-hand operand. Scalars are lifted to tensors matching this
-            tensor's shape and device.
-
-        Returns
-        -------
-        Tensor
-            Result of `self - other` (elementwise).
-
-        Notes
-        -----
-        Backward rule (elementwise, no broadcasting):
-        - d(a - b)/da = 1
-        - d(a - b)/db = -1
-        """
-        other_t = self._as_tensor_like(other, self)
-
-        if self._device.is_cpu() and other_t.device.is_cpu():
-            self._binary_op_shape_check(self, other_t)
-
-            req = self._result_requires_grad(self, other_t)
-            out = Tensor(shape=self.shape, device=self.device, requires_grad=req)
-            out.copy_from_numpy(self.to_numpy() - other_t.to_numpy())
-
-            if req:
-                ctx = Context(
-                    parents=(self, other_t),
-                    backward_fn=lambda grad_out: (grad_out, -grad_out),
-                )
-                out._set_ctx(ctx)
-            return out
-
-        self._raise_device_not_supported("sub")
-
-    def __rsub__(self, other: Number) -> "Tensor":
-        """
-        Right-hand subtraction to support `scalar - Tensor`.
-
-        Parameters
-        ----------
-        other : Number
-            Left-hand scalar operand.
-
-        Returns
-        -------
-        Tensor
-            Result of `other - self`.
-        """
-        other_t = self._as_tensor_like(other, self)
-        return other_t.__sub__(self)
-
-    # ----------------------------
-    # Multiplication
-    # ----------------------------
-    def __mul__(self, other: Union["Tensor", Number]) -> "Tensor":
-        """
-        Elementwise multiplication.
-
-        Parameters
-        ----------
-        other : Union[Tensor, Number]
-            Right-hand operand. Scalars are lifted to tensors matching this
-            tensor's shape and device.
-
-        Returns
-        -------
-        Tensor
-            Result of `self * other` (elementwise).
-
-        Notes
-        -----
-        Backward rule (elementwise, no broadcasting):
-        - d(a * b)/da = b
-        - d(a * b)/db = a
-        """
-        other_t = self._as_tensor_like(other, self)
-
-        if self._device.is_cpu() and other_t.device.is_cpu():
-            self._binary_op_shape_check(self, other_t)
-
-            req = self._result_requires_grad(self, other_t)
-            out = Tensor(shape=self.shape, device=self.device, requires_grad=req)
-            out.copy_from_numpy(self.to_numpy() * other_t.to_numpy())
-
-            if req:
-                ctx = Context(
-                    parents=(self, other_t),
-                    backward_fn=lambda grad_out: (grad_out * other_t, grad_out * self),
-                )
-                out._set_ctx(ctx)
-            return out
-
-        self._raise_device_not_supported("mul")
-
-    def __rmul__(self, other: Number) -> "Tensor":
-        """
-        Right-hand multiplication to support `scalar * Tensor`.
-
-        Parameters
-        ----------
-        other : Number
-            Left-hand scalar operand.
-
-        Returns
-        -------
-        Tensor
-            Result of `other * self`.
-        """
-        return self.__mul__(other)
-
-    # ----------------------------
-    # True division
-    # ----------------------------
-    def __truediv__(self, other: Union["Tensor", Number]) -> "Tensor":
-        """
-        Elementwise true division.
-
-        Parameters
-        ----------
-        other : Union[Tensor, Number]
-            Right-hand operand. Scalars are lifted to tensors matching this
-            tensor's shape and device.
-
-        Returns
-        -------
-        Tensor
-            Result of `self / other` (elementwise).
-
-        Notes
-        -----
-        Backward rule (elementwise, no broadcasting):
-        - d(a / b)/da = 1 / b
-        - d(a / b)/db = -a / (b^2)
-        """
-        other_t = self._as_tensor_like(other, self)
-
-        if self._device.is_cpu() and other_t.device.is_cpu():
-            self._binary_op_shape_check(self, other_t)
-
-            req = self._result_requires_grad(self, other_t)
-            out = Tensor(shape=self.shape, device=self.device, requires_grad=req)
-            out.copy_from_numpy(self.to_numpy() / other_t.to_numpy())
-
-            if req:
-                ctx = Context(
-                    parents=(self, other_t),
-                    backward_fn=lambda grad_out: (
-                        grad_out / other_t,
-                        -(grad_out * self) / (other_t * other_t),
-                    ),
-                )
-                out._set_ctx(ctx)
-            return out
-
-        self._raise_device_not_supported("truediv")
-
-    def __rtruediv__(self, other: Number) -> "Tensor":
-        """
-        Right-hand division to support `scalar / Tensor`.
-
-        Parameters
-        ----------
-        other : Number
-            Left-hand scalar operand.
-
-        Returns
-        -------
-        Tensor
-            Result of `other / self`.
-        """
-        other_t = self._as_tensor_like(other, self)
-        return other_t.__truediv__(self)
-
-    # ----------------------------
-    # Comparisons (no grad)
-    # ----------------------------
-    def __gt__(self, other: Union["Tensor", Number]) -> "Tensor":
-        """
-        Elementwise greater-than comparison (no gradients).
-
-        Parameters
-        ----------
-        other : Union[Tensor, Number]
-            Right-hand operand. Scalars are lifted to tensors matching this
-            tensor's shape and device.
-
-        Returns
-        -------
-        Tensor
-            A float32 tensor with 1.0 where `self > other`, else 0.0.
-
-        Notes
-        -----
-        Comparison operations do not participate in autograd in this minimal
-        implementation (the result always has `requires_grad=False`).
-        """
-        other_t = self._as_tensor_like(other, self)
-
-        if self._device.is_cpu() and other_t.device.is_cpu():
-            self._binary_op_shape_check(self, other_t)
-
-            out = Tensor(shape=self.shape, device=self.device, requires_grad=False)
-            out.copy_from_numpy(
-                (self.to_numpy() > other_t.to_numpy()).astype(np.float32)
-            )
-            return out
-
-        self._raise_device_not_supported("gt")
 
     def numel(self) -> int:
         """
@@ -3477,3 +3030,687 @@ class Tensor(ITensor):
             out._set_ctx(ctx)
 
         return out
+
+    def fill(self, value: float) -> None:
+        """
+        Fill the tensor with a scalar value (CPU-only).
+
+        Parameters
+        ----------
+        value : float
+            Scalar value used to fill the underlying array.
+
+        Raises
+        ------
+        RuntimeError
+            If called on a non-CPU tensor.
+        """
+        if self._device.is_cpu():
+            self._data.fill(value)
+            return
+
+        if self._device.is_cuda():
+            # ensure device buffer exists before calling native fill
+            self._ensure_cuda_alloc(dtype=self.dtype)
+
+            from ..ops.fill_cuda_ext import fill_ as _fill_cuda_
+
+            _fill_cuda_(
+                self, float(value), device=int(self._device.index or 0), sync=True
+            )
+            return
+
+        self._raise_device_not_supported("fill")
+
+    # ----------------------------
+    # True division
+    # ----------------------------
+    def __truediv__(self, other: Union["Tensor", Number]) -> "Tensor":
+        """
+        Elementwise true division.
+
+        Parameters
+        ----------
+        other : Union[Tensor, Number]
+            Right-hand operand. Scalars are lifted to tensors matching this
+            tensor's shape and device.
+
+        Returns
+        -------
+        Tensor
+            Result of `self / other` (elementwise).
+
+        Notes
+        -----
+        Backward rule (elementwise, no broadcasting):
+        - d(a / b)/da = 1 / b
+        - d(a / b)/db = -a / (b^2)
+        """
+        other_t = self._as_tensor_like(other, self)
+
+        # ----------------------------
+        # CPU path (backward compatible)
+        # ----------------------------
+        if self._device.is_cpu() and other_t.device.is_cpu():
+            self._binary_op_shape_check(self, other_t)
+
+            req = self._result_requires_grad(self, other_t)
+            out = Tensor(shape=self.shape, device=self.device, requires_grad=req)
+            out.copy_from_numpy(self.to_numpy() / other_t.to_numpy())
+
+            if req:
+                ctx = Context(
+                    parents=(self, other_t),
+                    backward_fn=lambda grad_out: (
+                        grad_out / other_t,
+                        -(grad_out * self) / (other_t * other_t),
+                    ),
+                )
+                out._set_ctx(ctx)
+            return out
+
+        # ----------------------------
+        # CUDA path (device-pointer, no to_numpy)
+        # ----------------------------
+        if self._device.is_cuda() and other_t.device.is_cuda():
+            self._binary_op_shape_check(self, other_t)
+
+            # Enforce dtype policy consistent with CUDA kernels (f32/f64 only, same dtype)
+            import numpy as np
+
+            dt_a = np.dtype(self.dtype)
+            dt_b = np.dtype(other_t.dtype)
+            if dt_a not in (np.float32, np.float64) or dt_b not in (
+                np.float32,
+                np.float64,
+            ):
+                raise TypeError(
+                    f"CUDA truediv supports float32/float64 only; got self.dtype={dt_a}, other.dtype={dt_b}"
+                )
+            if dt_a != dt_b:
+                raise TypeError(
+                    f"CUDA truediv requires matching dtypes; got {dt_a} vs {dt_b}"
+                )
+
+            # Require same CUDA device placement
+            if self.device != other_t.device and str(self.device) != str(
+                other_t.device
+            ):
+                raise ValueError(
+                    f"device mismatch: self.device={self.device} vs other.device={other_t.device}"
+                )
+
+            from ..ops.tensor_arithmetic_cuda_ext import div as _cuda_div
+
+            device_index = int(self._device.index or 0)
+            req = self._result_requires_grad(self, other_t)
+
+            out = _cuda_div(self, other_t, device=device_index)
+            out.requires_grad = bool(req)
+
+            if req:
+                # grad_a = grad_out / b
+                # grad_b = -(grad_out * a) / (b*b)
+                # Use existing Tensor ops; for CUDA these should route to CUDA-friendly paths.
+                ctx = Context(
+                    parents=(self, other_t),
+                    backward_fn=lambda grad_out: (
+                        grad_out / other_t,
+                        -(grad_out * self) / (other_t * other_t),
+                    ),
+                )
+                out._set_ctx(ctx)
+
+            return out
+
+        self._raise_device_not_supported("truediv")
+
+    def __rtruediv__(self, other: Number) -> "Tensor":
+        """
+        Right-hand division to support `scalar / Tensor`.
+
+        Parameters
+        ----------
+        other : Number
+            Left-hand scalar operand.
+
+        Returns
+        -------
+        Tensor
+            Result of `other / self`.
+        """
+        other_t = self._as_tensor_like(other, self)
+        return other_t.__truediv__(self)
+
+    # ----------------------------
+    # Python 2 legacy division alias
+    # ----------------------------
+    def __div__(self, other: Union["Tensor", Number]) -> "Tensor":
+        """
+        Elementwise division (legacy alias for true division).
+
+        Notes
+        -----
+        Python 3 uses `__truediv__` for `/`. This method exists for compatibility
+        with code that still calls `__div__` explicitly.
+        """
+        return self.__truediv__(other)
+
+    def __rdiv__(self, other: Number) -> "Tensor":
+        """
+        Right-hand division (legacy alias for right true division).
+
+        Notes
+        -----
+        Python 3 uses `__rtruediv__`. This method exists for compatibility with
+        code that still calls `__rdiv__` explicitly.
+        """
+        return self.__rtruediv__(other)
+
+    # ----------------------------
+    # Addition / Subtraction
+    # ----------------------------
+    def __add__(self, other: Union["Tensor", Number]) -> "Tensor":
+        """
+        Elementwise addition.
+
+        Parameters
+        ----------
+        other : Union[Tensor, Number]
+            Right-hand operand. Scalars are lifted to tensors matching this
+            tensor's shape and device.
+
+        Returns
+        -------
+        Tensor
+            Result of `self + other` (elementwise).
+
+        Notes
+        -----
+        Backward rule (elementwise, no broadcasting):
+        - d(a + b)/da = 1
+        - d(a + b)/db = 1
+        """
+        other_t = self._as_tensor_like(other, self)
+
+        # -----------------------------
+        # CPU path (existing)
+        # -----------------------------
+        if self._device.is_cpu() and other_t.device.is_cpu():
+            self._binary_op_shape_check(self, other_t)
+
+            req = self._result_requires_grad(self, other_t)
+            out = Tensor(shape=self.shape, device=self.device, requires_grad=req)
+            out.copy_from_numpy(self.to_numpy() + other_t.to_numpy())
+
+            if req:
+                ctx = Context(
+                    parents=(self, other_t),
+                    backward_fn=lambda grad_out: (grad_out, grad_out),
+                )
+                out._set_ctx(ctx)
+            return out
+
+        # -----------------------------
+        # CUDA path (device-pointer elementwise)
+        # -----------------------------
+        if self._device.is_cuda() and other_t.device.is_cuda():
+            self._binary_op_shape_check(self, other_t)
+
+            # dtype must match for our CUDA kernels
+            if np.dtype(self.dtype) != np.dtype(other_t.dtype):
+                raise TypeError(
+                    f"dtype mismatch: self.dtype={np.dtype(self.dtype)} vs other.dtype={np.dtype(other_t.dtype)}"
+                )
+
+            req = self._result_requires_grad(self, other_t)
+
+            # Use your CUDA ext wrapper (allocates output and returns CUDA Tensor)
+            from ..ops.tensor_arithmetic_cuda_ext import add as _cuda_add
+
+            # Prefer the tensor's device index if available; otherwise default 0
+            device_index = int(getattr(self._device, "index", 0) or 0)
+
+            out = _cuda_add(self, other_t, device=device_index)
+            out.requires_grad = bool(req)  # ensure flag matches CPU behavior
+
+            if req:
+                ctx = Context(
+                    parents=(self, other_t),
+                    backward_fn=lambda grad_out: (grad_out, grad_out),
+                )
+                out._set_ctx(ctx)
+
+            return out
+
+        self._raise_device_not_supported("add")
+
+    def __radd__(self, other: Number) -> "Tensor":
+        """
+        Right-hand addition to support `scalar + Tensor`.
+
+        Parameters
+        ----------
+        other : Number
+            Left-hand scalar operand.
+
+        Returns
+        -------
+        Tensor
+            Result of `other + self`.
+        """
+        return self.__add__(other)
+
+    def __sub__(self, other: Union["Tensor", Number]) -> "Tensor":
+        """
+        Elementwise subtraction.
+
+        Parameters
+        ----------
+        other : Union[Tensor, Number]
+            Right-hand operand. Scalars are lifted to tensors matching this
+            tensor's shape and device.
+
+        Returns
+        -------
+        Tensor
+            Result of `self - other` (elementwise).
+
+        Notes
+        -----
+        Backward rule (elementwise, no broadcasting):
+        - d(a - b)/da = 1
+        - d(a - b)/db = -1
+        """
+        other_t = self._as_tensor_like(other, self)
+
+        # -----------------------------
+        # CPU path (existing)
+        # -----------------------------
+        if self._device.is_cpu() and other_t.device.is_cpu():
+            self._binary_op_shape_check(self, other_t)
+
+            req = self._result_requires_grad(self, other_t)
+            out = Tensor(shape=self.shape, device=self.device, requires_grad=req)
+            out.copy_from_numpy(self.to_numpy() - other_t.to_numpy())
+
+            if req:
+                ctx = Context(
+                    parents=(self, other_t),
+                    backward_fn=lambda grad_out: (grad_out, -grad_out),
+                )
+                out._set_ctx(ctx)
+            return out
+
+        # -----------------------------
+        # CUDA path (device-pointer elementwise)
+        # -----------------------------
+        if self._device.is_cuda() and other_t.device.is_cuda():
+            self._binary_op_shape_check(self, other_t)
+
+            if np.dtype(self.dtype) != np.dtype(other_t.dtype):
+                raise TypeError(
+                    f"dtype mismatch: self.dtype={np.dtype(self.dtype)} vs other.dtype={np.dtype(other_t.dtype)}"
+                )
+
+            req = self._result_requires_grad(self, other_t)
+
+            from ..ops.tensor_arithmetic_cuda_ext import sub as _cuda_sub
+
+            device_index = int(getattr(self._device, "index", 0) or 0)
+
+            out = _cuda_sub(self, other_t, device=device_index)
+            out.requires_grad = bool(req)
+
+            if req:
+                ctx = Context(
+                    parents=(self, other_t),
+                    backward_fn=lambda grad_out: (grad_out, -grad_out),
+                )
+                out._set_ctx(ctx)
+
+            return out
+
+        self._raise_device_not_supported("sub")
+
+    def __rsub__(self, other: Number) -> "Tensor":
+        """
+        Right-hand subtraction to support `scalar - Tensor`.
+
+        Parameters
+        ----------
+        other : Number
+            Left-hand scalar operand.
+
+        Returns
+        -------
+        Tensor
+            Result of `other - self`.
+        """
+        other_t = self._as_tensor_like(other, self)
+        return other_t.__sub__(self)
+
+    # ----------------------------
+    # Comparisons (no grad)
+    # ----------------------------
+    def __gt__(self, other: Union["Tensor", Number]) -> "Tensor":
+        """
+        Elementwise greater-than comparison (no gradients).
+
+        Parameters
+        ----------
+        other : Union[Tensor, Number]
+            Right-hand operand. Scalars are lifted to tensors matching this
+            tensor's shape and device.
+
+        Returns
+        -------
+        Tensor
+            A float32 tensor with 1.0 where `self > other`, else 0.0.
+
+        Notes
+        -----
+        Comparison operations do not participate in autograd in this minimal
+        implementation (the result always has `requires_grad=False`).
+        """
+        other_t = self._as_tensor_like(other, self)
+
+        # -----------------------------
+        # CPU path
+        # -----------------------------
+        if self._device.is_cpu() and other_t.device.is_cpu():
+            self._binary_op_shape_check(self, other_t)
+
+            out = Tensor(shape=self.shape, device=self.device, requires_grad=False)
+            out.copy_from_numpy(
+                (self.to_numpy() > other_t.to_numpy()).astype(np.float32)
+            )
+            return out
+
+        # -----------------------------
+        # CUDA path
+        # -----------------------------
+        if self._device.is_cuda() and other_t.device.is_cuda():
+            self._binary_op_shape_check(self, other_t)
+
+            # dtype must match for CUDA comparison kernels
+            if np.dtype(self.dtype) != np.dtype(other_t.dtype):
+                raise TypeError(
+                    f"dtype mismatch: self.dtype={np.dtype(self.dtype)} vs other.dtype={np.dtype(other_t.dtype)}"
+                )
+
+            from ..ops.tensor_arithmetic_cuda_ext import gt as _cuda_gt
+
+            device_index = int(getattr(self._device, "index", 0) or 0)
+            out = _cuda_gt(self, other_t, device=device_index)
+
+            # Explicitly ensure no gradients
+            out.requires_grad = False
+            return out
+
+        self._raise_device_not_supported("gt")
+
+    # ----------------------------
+    # Unary ops
+    # ----------------------------
+    def __neg__(self) -> "Tensor":
+        """
+        Elementwise negation.
+
+        Returns
+        -------
+        Tensor
+            A tensor containing `-self` (elementwise).
+
+        Notes
+        -----
+        If `self.requires_grad` is True, the returned tensor will carry an
+        attached `Context` that computes `d(-x)/dx = -1`.
+        """
+        # -----------------------------
+        # CPU path
+        # -----------------------------
+        if self._device.is_cpu():
+            out = Tensor(
+                shape=self.shape,
+                device=self.device,
+                requires_grad=self.requires_grad,
+            )
+            out.copy_from_numpy(-self.to_numpy())
+
+            if self.requires_grad:
+                ctx = Context(
+                    parents=(self,),
+                    backward_fn=lambda grad_out: (-(grad_out),),
+                )
+                out._set_ctx(ctx)
+
+            return out
+
+        # -----------------------------
+        # CUDA path
+        # -----------------------------
+        if self._device.is_cuda():
+            from ..ops.tensor_arithmetic_cuda_ext import neg as _cuda_neg
+
+            device_index = int(getattr(self._device, "index", 0) or 0)
+            out = _cuda_neg(self, device=device_index)
+
+            # Preserve autograd semantics
+            out.requires_grad = bool(self.requires_grad)
+
+            if self.requires_grad:
+                ctx = Context(
+                    parents=(self,),
+                    backward_fn=lambda grad_out: (-(grad_out),),
+                )
+                out._set_ctx(ctx)
+
+            return out
+
+        self._raise_device_not_supported("neg")
+
+    # ----------------------------
+    # Comparisons (no grad)
+    # ----------------------------
+    def __ge__(self, other: Union["Tensor", Number]) -> "Tensor":
+        """
+        Elementwise greater-than-or-equal comparison (no gradients).
+
+        Parameters
+        ----------
+        other : Union[Tensor, Number]
+            Right-hand operand. Scalars are lifted to tensors matching this
+            tensor's shape and device.
+
+        Returns
+        -------
+        Tensor
+            A float32 tensor with 1.0 where `self >= other`, else 0.0.
+
+        Notes
+        -----
+        Comparison operations do not participate in autograd in this minimal
+        implementation (the result always has `requires_grad=False`).
+
+        Implementation
+        --------------
+        Uses only `gt` + `neg`:
+            a >= b  <=>  not (b > a)
+        """
+        other_t = self._as_tensor_like(other, self)
+
+        # Ensure same shape (and implicitly same device support path via __gt__)
+        self._binary_op_shape_check(self, other_t)
+
+        # ge = 1 - (other > self)
+        gt = other_t.__gt__(self)  # float32 mask
+        one = self._as_tensor_like(1.0, gt)
+        out = one - gt
+
+        out.requires_grad = False
+        return out
+
+    def __lt__(self, other: Union["Tensor", Number]) -> "Tensor":
+        """
+        Elementwise less-than comparison (no gradients).
+
+        Parameters
+        ----------
+        other : Union[Tensor, Number]
+            Right-hand operand. Scalars are lifted to tensors matching this
+            tensor's shape and device.
+
+        Returns
+        -------
+        Tensor
+            A float32 tensor with 1.0 where `self < other`, else 0.0.
+
+        Notes
+        -----
+        Comparison operations do not participate in autograd in this minimal
+        implementation (the result always has `requires_grad=False`).
+
+        Implementation
+        --------------
+        Uses only `gt`:
+            a < b  <=>  b > a
+        """
+        other_t = self._as_tensor_like(other, self)
+        self._binary_op_shape_check(self, other_t)
+
+        out = other_t.__gt__(self)
+        out.requires_grad = False
+        return out
+
+    def __le__(self, other: Union["Tensor", Number]) -> "Tensor":
+        """
+        Elementwise less-than-or-equal comparison (no gradients).
+
+        Parameters
+        ----------
+        other : Union[Tensor, Number]
+            Right-hand operand. Scalars are lifted to tensors matching this
+            tensor's shape and device.
+
+        Returns
+        -------
+        Tensor
+            A float32 tensor with 1.0 where `self <= other`, else 0.0.
+
+        Notes
+        -----
+        Comparison operations do not participate in autograd in this minimal
+        implementation (the result always has `requires_grad=False`).
+
+        Implementation
+        --------------
+        Uses only `gt` + `neg`:
+            a <= b  <=>  not (a > b)
+        """
+        other_t = self._as_tensor_like(other, self)
+        self._binary_op_shape_check(self, other_t)
+
+        # le = 1 - (self > other)
+        gt = self.__gt__(other_t)  # float32 mask
+        one = self._as_tensor_like(1.0, gt)
+        out = one - gt
+
+        out.requires_grad = False
+        return out
+
+    # ----------------------------
+    # Multiplication
+    # ----------------------------
+    def __mul__(self, other: Union["Tensor", Number]) -> "Tensor":
+        """
+        Elementwise multiplication.
+
+        Parameters
+        ----------
+        other : Union[Tensor, Number]
+            Right-hand operand. Scalars are lifted to tensors matching this
+            tensor's shape and device.
+
+        Returns
+        -------
+        Tensor
+            Result of `self * other` (elementwise).
+
+        Notes
+        -----
+        Backward rule (elementwise, no broadcasting):
+        - d(a * b)/da = b
+        - d(a * b)/db = a
+        """
+        other_t = self._as_tensor_like(other, self)
+
+        # -----------------------------
+        # CPU path (existing)
+        # -----------------------------
+        if self._device.is_cpu() and other_t.device.is_cpu():
+            self._binary_op_shape_check(self, other_t)
+
+            req = self._result_requires_grad(self, other_t)
+            out = Tensor(shape=self.shape, device=self.device, requires_grad=req)
+            out.copy_from_numpy(self.to_numpy() * other_t.to_numpy())
+
+            if req:
+                ctx = Context(
+                    parents=(self, other_t),
+                    backward_fn=lambda grad_out: (grad_out * other_t, grad_out * self),
+                )
+                out._set_ctx(ctx)
+            return out
+
+        # -----------------------------
+        # CUDA path
+        # -----------------------------
+        if self._device.is_cuda() and other_t.device.is_cuda():
+            self._binary_op_shape_check(self, other_t)
+
+            # Enforce same dtype semantics as other CUDA arithmetic ops ext
+            import numpy as np
+
+            dt_self = np.dtype(self.dtype)
+            dt_other = np.dtype(other_t.dtype)
+            if dt_self != dt_other:
+                raise TypeError(
+                    f"dtype mismatch: self.dtype={dt_self} vs other.dtype={dt_other}"
+                )
+
+            from ..ops.mul_cuda_ext import mul_forward as _cuda_mul
+
+            device_index = int(getattr(self.device, "index", 0) or 0)
+            out = _cuda_mul(self, other_t, device=device_index, sync=True)
+
+            # Autograd (same rule as CPU)
+            req = self._result_requires_grad(self, other_t)
+            out.requires_grad = bool(req)  # ensure flag matches graph needs
+
+            if req:
+                ctx = Context(
+                    parents=(self, other_t),
+                    backward_fn=lambda grad_out: (grad_out * other_t, grad_out * self),
+                )
+                out._set_ctx(ctx)
+
+            return out
+
+        self._raise_device_not_supported("mul")
+
+    def __rmul__(self, other: Number) -> "Tensor":
+        """
+        Right-hand multiplication to support `scalar * Tensor`.
+
+        Parameters
+        ----------
+        other : Number
+            Left-hand scalar operand.
+
+        Returns
+        -------
+        Tensor
+            Result of `other * self`.
+        """
+        return self.__mul__(other)

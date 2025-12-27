@@ -935,3 +935,109 @@ class ITensor(Protocol):
             A string describing the tensor's shape, device, and storage details.
         """
         ...
+
+    def __div__(self, other: Union["ITensor", Number]) -> "ITensor":
+        """
+        Elementwise division (legacy alias for true division).
+
+        Notes
+        -----
+        Python 3 uses `__truediv__` for `/`. This method exists for compatibility
+        with code that still calls `__div__` explicitly.
+        """
+        ...
+
+    def __rdiv__(self, other: Number) -> "ITensor":
+        """
+        Right-hand division (legacy alias for right true division).
+
+        Notes
+        -----
+        Python 3 uses `__rtruediv__`. This method exists for compatibility with
+        code that still calls `__rdiv__` explicitly.
+        """
+        ...
+
+    # ----------------------------
+    # Comparisons (no grad)
+    # ----------------------------
+    def __ge__(self, other: Union["ITensor", Number]) -> "ITensor":
+        """
+        Elementwise greater-than-or-equal comparison (no gradients).
+
+        Parameters
+        ----------
+        other : Union[Tensor, Number]
+            Right-hand operand. Scalars are lifted to tensors matching this
+            tensor's shape and device.
+
+        Returns
+        -------
+        Tensor
+            A float32 tensor with 1.0 where `self >= other`, else 0.0.
+
+        Notes
+        -----
+        Comparison operations do not participate in autograd in this minimal
+        implementation (the result always has `requires_grad=False`).
+
+        Implementation
+        --------------
+        Uses only `gt` + `neg`:
+            a >= b  <=>  not (b > a)
+        """
+        ...
+
+    def __lt__(self, other: Union["ITensor", Number]) -> "ITensor":
+        """
+        Elementwise less-than comparison (no gradients).
+
+        Parameters
+        ----------
+        other : Union[Tensor, Number]
+            Right-hand operand. Scalars are lifted to tensors matching this
+            tensor's shape and device.
+
+        Returns
+        -------
+        Tensor
+            A float32 tensor with 1.0 where `self < other`, else 0.0.
+
+        Notes
+        -----
+        Comparison operations do not participate in autograd in this minimal
+        implementation (the result always has `requires_grad=False`).
+
+        Implementation
+        --------------
+        Uses only `gt`:
+            a < b  <=>  b > a
+        """
+        ...
+
+    def __le__(self, other: Union["ITensor", Number]) -> "ITensor":
+        """
+        Elementwise less-than-or-equal comparison (no gradients).
+
+        Parameters
+        ----------
+        other : Union[Tensor, Number]
+            Right-hand operand. Scalars are lifted to tensors matching this
+            tensor's shape and device.
+
+        Returns
+        -------
+        Tensor
+            A float32 tensor with 1.0 where `self <= other`, else 0.0.
+
+        Notes
+        -----
+        Comparison operations do not participate in autograd in this minimal
+        implementation (the result always has `requires_grad=False`).
+
+        Implementation
+        --------------
+        Uses only `gt` + `neg`:
+            a <= b  <=>  not (a > b)
+        """
+        ...

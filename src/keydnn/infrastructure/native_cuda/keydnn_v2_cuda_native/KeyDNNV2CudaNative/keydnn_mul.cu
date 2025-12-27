@@ -13,10 +13,18 @@ static int mul_launch(const T* a, const T* b, T* y, int numel) {
     if (numel == 0) return 0;
     if (!a || !b || !y) return 2;
 
+    // Clear any stale CUDA error from earlier kernels
+    (void)cudaGetLastError();
+
     int block = 256;
     int grid = (numel + block - 1) / block;
     mul_kernel<T> << <grid, block >> > (a, b, y, numel);
+
     cudaError_t st = cudaGetLastError();
+    if (st != cudaSuccess) return 3;
+
+    // Optional but recommended: surface runtime failures deterministically
+    st = cudaDeviceSynchronize();
     return (st == cudaSuccess) ? 0 : 3;
 }
 

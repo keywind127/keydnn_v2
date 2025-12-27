@@ -34,18 +34,21 @@ static inline int fill_cuda_impl(T* y, std::int64_t numel, T value) {
     if (numel < 0) return -2;
     if (numel == 0) return 0;
 
+    // Clear any stale error from prior CUDA work on this host thread.
+    (void)cudaGetLastError();
+
     const int block = 256;
     const int grid = static_cast<int>((numel + block - 1) / block);
 
     fill_kernel<T> << <grid, block >> > (y, numel, value);
 
     cudaError_t st = cudaGetLastError();
-    if (st != cudaSuccess) return keydnn_cuda_ok(st);
+    if (st != cudaSuccess) return static_cast<int>(st);
 
-    // Keep same ¡§surface runtime failures¡¨ behavior you used in avgpool backward.
     st = cudaDeviceSynchronize();
-    return keydnn_cuda_ok(st);
+    return static_cast<int>(st);
 }
+
 
 // ----------------------------
 // Exported C ABI
