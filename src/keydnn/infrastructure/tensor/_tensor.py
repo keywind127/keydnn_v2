@@ -4375,17 +4375,16 @@ class Tensor(ITensor):
         Backward rule:
             d(exp(x))/dx = exp(x)
 
-        CUDA behavior (workaround)
-        --------------------------
-        - Currently implemented as a CPU fallback:
-            1) D2H copy of `self` to CPU
-            2) NumPy exp on CPU
-            3) H2D copy of the result back to CUDA
-        - Backward uses the saved output tensor `out` (on the same device as the result).
+        CUDA behavior
+        -------------
+        - Uses the native CUDA unary exp kernel via `unary_cuda_ext.exp_forward`.
+        - Operates directly on device pointers (no NumPy round-trip).
         """
         import numpy as np
 
-        # CPU path: pure NumPy, stays on CPU
+        # -------------------------
+        # CPU path (NumPy)
+        # -------------------------
         if self.device.is_cpu():
             out = Tensor(
                 shape=self.shape, device=self.device, requires_grad=self.requires_grad
@@ -4393,6 +4392,7 @@ class Tensor(ITensor):
             out.copy_from_numpy(np.exp(self.to_numpy()).astype(np.float32, copy=False))
 
             if self.requires_grad:
+                # Save output to reuse in backward
                 ctx = Context(
                     parents=(self,),
                     backward_fn=lambda grad_out: (grad_out * out,),
@@ -4401,18 +4401,21 @@ class Tensor(ITensor):
 
             return out
 
-        # CUDA path (workaround): cuda -> cpu -> exp -> cpu -> cuda
+        # -------------------------
+        # CUDA path (native kernel)
+        # -------------------------
         if self.device.is_cuda():
-            out = Tensor(
-                shape=self.shape, device=self.device, requires_grad=self.requires_grad
+            # exp_forward returns requires_grad=False by design; we attach ctx below if needed.
+            from ..ops.unary_cuda_ext import exp_forward as _exp_forward
+
+            out = _exp_forward(
+                self, device=self.device.index if hasattr(self.device, "index") else 0
             )
 
-            # D2H via to_numpy(), compute on CPU
-            cpu_arr = self.to_numpy()
-            cpu_exp = np.exp(cpu_arr).astype(np.float32, copy=False)
-
-            # H2D via copy_from_numpy() into a CUDA tensor
-            out.copy_from_numpy(cpu_exp)
+            # Preserve autograd participation
+            out.requires_grad = (
+                self.requires_grad
+            )  # if your Tensor allows attribute set
 
             if self.requires_grad:
                 ctx = Context(

@@ -41,7 +41,6 @@ extern "C" {
 	KEYDNN_CUDA_API int keydnn_cuda_gt_f64(const double* a, const double* b, float* y, int64_t n);
 
 
-
 } // extern "C"
 
 
