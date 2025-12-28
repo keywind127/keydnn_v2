@@ -285,6 +285,130 @@ static inline int max_axis2d_backward_impl(const T* grad_out, const int64_t* idx
 }
 
 // ----------------------------
+// sum axis 2D forward
+// axis=1: reduce cols for each row -> y[rows]
+// axis=0: reduce rows for each col -> y[cols]
+// ----------------------------
+template <typename T>
+__global__ void sum_axis2d_forward_axis1_kernel(
+    const T* __restrict__ x,
+    T* __restrict__ y,
+    int rows, int cols
+) {
+    int r = blockIdx.x * blockDim.x + threadIdx.x;
+    if (r >= rows) return;
+
+    const int base = r * cols;
+    T acc = static_cast<T>(0);
+    for (int c = 0; c < cols; ++c) {
+        acc += x[base + c];
+    }
+    y[r] = acc;
+}
+
+template <typename T>
+__global__ void sum_axis2d_forward_axis0_kernel(
+    const T* __restrict__ x,
+    T* __restrict__ y,
+    int rows, int cols
+) {
+    int c = blockIdx.x * blockDim.x + threadIdx.x;
+    if (c >= cols) return;
+
+    T acc = static_cast<T>(0);
+    for (int r = 0; r < rows; ++r) {
+        acc += x[r * cols + c];
+    }
+    y[c] = acc;
+}
+
+template <typename T>
+static inline int sum_axis2d_forward_impl(
+    const T* x, T* y,
+    int rows, int cols, int axis
+) {
+    if (!x || !y) return -1;
+    if (rows <= 0 || cols <= 0) return -2;
+    if (!(axis == 0 || axis == 1)) return -3;
+
+    const int block = 256;
+    if (axis == 1) {
+        const int grid = (rows + block - 1) / block;
+        sum_axis2d_forward_axis1_kernel<T> << <grid, block >> > (x, y, rows, cols);
+    }
+    else {
+        const int grid = (cols + block - 1) / block;
+        sum_axis2d_forward_axis0_kernel<T> << <grid, block >> > (x, y, rows, cols);
+    }
+
+    cudaError_t st = cudaGetLastError();
+    if (st != cudaSuccess) return keydnn_cuda_ok(st);
+    st = cudaDeviceSynchronize();
+    return keydnn_cuda_ok(st);
+}
+
+// ----------------------------
+// sum axis 2D backward (broadcast)
+// axis=1: grad_x[r,c] = grad_out[r]
+// axis=0: grad_x[r,c] = grad_out[c]
+// ----------------------------
+template <typename T>
+__global__ void sum_axis2d_backward_axis1_kernel(
+    const T* __restrict__ grad_out,
+    T* __restrict__ grad_x,
+    int rows, int cols
+) {
+    int64_t i = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+    const int64_t n = static_cast<int64_t>(rows) * static_cast<int64_t>(cols);
+    if (i >= n) return;
+
+    int r = static_cast<int>(i / cols);
+    grad_x[i] = grad_out[r];
+}
+
+template <typename T>
+__global__ void sum_axis2d_backward_axis0_kernel(
+    const T* __restrict__ grad_out,
+    T* __restrict__ grad_x,
+    int rows, int cols
+) {
+    int64_t i = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+    const int64_t n = static_cast<int64_t>(rows) * static_cast<int64_t>(cols);
+    if (i >= n) return;
+
+    int c = static_cast<int>(i % cols);
+    grad_x[i] = grad_out[c];
+}
+
+template <typename T>
+static inline int sum_axis2d_backward_impl(
+    const T* grad_out, T* grad_x,
+    int rows, int cols, int axis
+) {
+    if (!grad_out || !grad_x) return -1;
+    if (rows <= 0 || cols <= 0) return -2;
+    if (!(axis == 0 || axis == 1)) return -3;
+
+    const int block = 256;
+    const int64_t n = static_cast<int64_t>(rows) * static_cast<int64_t>(cols);
+    const int grid = static_cast<int>((n + block - 1) / block);
+
+    if (axis == 1) {
+        sum_axis2d_backward_axis1_kernel<T> << <grid, block >> > (grad_out, grad_x, rows, cols);
+    }
+    else {
+        sum_axis2d_backward_axis0_kernel<T> << <grid, block >> > (grad_out, grad_x, rows, cols);
+    }
+
+    cudaError_t st = cudaGetLastError();
+    if (st != cudaSuccess) return keydnn_cuda_ok(st);
+    st = cudaDeviceSynchronize();
+    return keydnn_cuda_ok(st);
+}
+
+
+
+// ----------------------------
 // Exported C ABI functions
 // ----------------------------
 int keydnn_cuda_sum_all_f32(const float* x, float* y, int64_t numel) {
@@ -329,4 +453,18 @@ int keydnn_cuda_max_axis2d_backward_f32(const float* grad_out, const int64_t* id
 }
 int keydnn_cuda_max_axis2d_backward_f64(const double* grad_out, const int64_t* idx, double* grad_x, int rows, int cols, int axis) {
     return max_axis2d_backward_impl<double>(grad_out, idx, grad_x, rows, cols, axis);
+}
+
+int keydnn_cuda_sum_axis2d_forward_f32(const float* x, float* y, int rows, int cols, int axis) {
+    return sum_axis2d_forward_impl<float>(x, y, rows, cols, axis);
+}
+int keydnn_cuda_sum_axis2d_forward_f64(const double* x, double* y, int rows, int cols, int axis) {
+    return sum_axis2d_forward_impl<double>(x, y, rows, cols, axis);
+}
+
+int keydnn_cuda_sum_axis2d_backward_f32(const float* grad_out, float* grad_x, int rows, int cols, int axis) {
+    return sum_axis2d_backward_impl<float>(grad_out, grad_x, rows, cols, axis);
+}
+int keydnn_cuda_sum_axis2d_backward_f64(const double* grad_out, double* grad_x, int rows, int cols, int axis) {
+    return sum_axis2d_backward_impl<double>(grad_out, grad_x, rows, cols, axis);
 }

@@ -4449,61 +4449,110 @@ class Tensor(ITensor):
         Backward rule:
             Gradient is broadcast back to input shape.
         """
+        import numpy as np
+
         # -----------------------
-        # CUDA path (all-reduce only)
+        # CUDA path
         # -----------------------
         if self.device.is_cuda():
-            if axis is not None:
-                raise NotImplementedError(
-                    "Tensor.sum(axis=...) for CUDA is not implemented yet "
-                    "(only axis=None / sum_all is supported)."
-                )
-
+            # NOTE: keep current dtype policy (float32) until Tensor tracks dtype end-to-end
             dtype = np.float32  # TODO: replace with self.dtype if you track it
-            numel = int(self.numel())
 
-            out_shape = () if not keepdims else tuple(1 for _ in self.shape)
+            # Normalize/validate axis
+            axis_ = None
+            if axis is not None:
+                if not isinstance(axis, int):
+                    raise TypeError("axis must be int or None")
+                ndim = len(self.shape)
+                axis_ = axis if axis >= 0 else ndim + axis
+                if axis_ < 0 or axis_ >= ndim:
+                    raise ValueError(f"axis {axis} out of bounds for ndim {ndim}")
 
-            # IMPORTANT: do not assume Tensor(...) auto-allocates device memory.
-            # Allocate dev scalar explicitly if needed.
-            from ..native_cuda.python.maxpool2d_ctypes import (
-                load_keydnn_cuda_native as _load_lib,
-            )
-            from ..ops.reduce_cuda import (
-                sum_all_cuda as _sum_all_cuda,
-                sum_backward_fill_cuda as _sum_bwd_fill_cuda,
-            )
-
-            from ..native_cuda.python.maxpool2d_ctypes import (
-                load_keydnn_cuda_native as _load_lib,
-                cuda_malloc as _cuda_malloc,
-                cuda_synchronize as _cuda_sync,
-            )
-
-            lib = _load_lib()
-
-            out = Tensor(
-                shape=out_shape, device=self.device, requires_grad=self.requires_grad
+            # Tensor-boundary CUDA reduce wrappers (no direct ctypes usage here)
+            from ..ops.reduce_cuda_ext import (
+                sum_all_forward as _sum_all_forward,
+                sum_backward_fill_forward as _sum_backward_fill_forward,
+                sum_axis2d_forward as _sum_axis2d_forward,
+                sum_axis2d_backward as _sum_axis2d_backward,
             )
 
-            # robustly get/set devptrs via `.data` (your tests/free code uses this)
-            x_dev = int(self.data)
+            # -----------------------
+            # forward
+            # -----------------------
+            if axis_ is None:
+                # returns a CUDA scalar tensor (shape=())
+                out = _sum_all_forward(self, device=0, sync=True)
 
-            y_dev = int(getattr(out, "data", 0) or 0)
-            if y_dev == 0:
-                y_dev = int(_cuda_malloc(lib, int(np.dtype(dtype).itemsize)))
-                # wrap/attach devptr to out
-                out = Tensor._from_devptr(
-                    dev_ptr=y_dev,
-                    shape=out_shape,
-                    device=self.device,
-                    requires_grad=self.requires_grad,
-                    ctx=None,
-                    dtype=dtype,
+                if keepdims:
+                    # best-effort reshape to (1,1,...) to match CPU semantics
+                    new_shape = tuple(1 for _ in self.shape)
+                    if hasattr(out, "reshape") and callable(getattr(out, "reshape")):
+                        out = out.reshape(new_shape)  # type: ignore[call-arg]
+                    else:
+                        # If reshape isn't implemented for CUDA tensors in this repo yet,
+                        # keepdims=True cannot be represented without a metadata-only view.
+                        raise NotImplementedError(
+                            "keepdims=True for CUDA sum_all requires Tensor.reshape support"
+                        )
+
+                if self.requires_grad:
+
+                    def backward_fn(grad_out: "Tensor"):
+                        if not grad_out.device.is_cuda():
+                            raise RuntimeError(
+                                "grad_out must be CUDA for CUDA Tensor.sum backward"
+                            )
+
+                        # grad_out is scalar (or keepdims scalar-view) on CUDA.
+                        # Fill a flat grad buffer then reshape to input shape.
+                        numel = int(self.numel())
+                        gx_flat = _sum_backward_fill_forward(
+                            grad_out, numel=numel, device=0, sync=True
+                        )
+
+                        if hasattr(gx_flat, "reshape") and callable(
+                            getattr(gx_flat, "reshape")
+                        ):
+                            gx = gx_flat.reshape(self.shape)  # type: ignore[call-arg]
+                        else:
+                            # As above: without reshape, we can't re-interpret the same buffer.
+                            raise NotImplementedError(
+                                "CUDA sum backward requires Tensor.reshape support"
+                            )
+
+                        return (gx,)
+
+                    ctx = Context(parents=(self,), backward_fn=backward_fn)
+                    ctx.saved_meta["axis"] = axis
+                    ctx.saved_meta["keepdims"] = keepdims
+                    out._set_ctx(ctx)
+
+                return out
+
+            # axis != None: currently support 2D only (matches your native reduce impl style)
+            if len(self.shape) != 2:
+                raise NotImplementedError(
+                    "Tensor.sum(axis=...) for CUDA is currently implemented for 2D tensors only."
                 )
 
-            _sum_all_cuda(lib, x_dev=x_dev, y_dev=y_dev, numel=numel, dtype=dtype)
-            _cuda_sync(lib)
+            rows, cols = int(self.shape[0]), int(self.shape[1])
+
+            # forward output as a 1D CUDA tensor: (cols,) for axis=0, (rows,) for axis=1
+            out_base = _sum_axis2d_forward(self, axis=int(axis_), device=0, sync=True)
+
+            # keepdims reshape
+            if keepdims:
+                kd_shape = (1, cols) if axis_ == 0 else (rows, 1)
+                if hasattr(out_base, "reshape") and callable(
+                    getattr(out_base, "reshape")
+                ):
+                    out = out_base.reshape(kd_shape)  # type: ignore[call-arg]
+                else:
+                    raise NotImplementedError(
+                        "keepdims=True for CUDA sum(axis=...) requires Tensor.reshape support"
+                    )
+            else:
+                out = out_base
 
             if self.requires_grad:
 
@@ -4513,37 +4562,102 @@ class Tensor(ITensor):
                             "grad_out must be CUDA for CUDA Tensor.sum backward"
                         )
 
-                    go_dev = int(grad_out.data)
+                    go = grad_out
 
-                    grad = Tensor(
-                        shape=self.shape, device=self.device, requires_grad=False
-                    )
+                    # For keepdims=True, upstream grad arrives as (1, cols) or (rows, 1),
+                    # but reduce_cuda_ext.sum_axis2d_backward expects (cols,) / (rows,).
+                    # Since CUDA reshape/view may not exist yet, allocate a 1D buffer and
+                    # copy device->device (layout is identical for contiguous memory).
+                    if keepdims:
+                        if axis_ == 0:
+                            expected = (1, cols)
+                            squeezed_shape = (cols,)
+                            n = cols
+                        else:
+                            expected = (rows, 1)
+                            squeezed_shape = (rows,)
+                            n = rows
 
-                    gx_dev = int(getattr(grad, "data", 0) or 0)
-                    if gx_dev == 0:
-                        gx_dev = int(
-                            _cuda_malloc(
-                                lib, int(numel) * int(np.dtype(dtype).itemsize)
+                        if tuple(int(d) for d in go.shape) != expected:
+                            raise ValueError(
+                                f"grad_out shape mismatch: expected {expected} for axis={axis_}, "
+                                f"got {tuple(go.shape)}"
                             )
+
+                        # Allocate a 1D CUDA buffer and memcpy D2D from grad_out
+                        import ctypes
+
+                        from ..ops.pool2d_cuda import (
+                            _load_cuda_lib,
+                            cuda_set_device,
+                            cuda_malloc,
                         )
-                        grad = Tensor._from_devptr(
-                            dev_ptr=gx_dev,
-                            shape=self.shape,
+
+                        lib = _load_cuda_lib()
+                        cuda_set_device(lib, 0)
+
+                        nbytes = int(n) * int(np.dtype(dtype).itemsize)
+                        go_dev = int(cuda_malloc(lib, int(nbytes)))
+
+                        # Prefer dedicated wrapper if present; else bind DLL symbol.
+                        try:
+                            from ..native_cuda.python.ops import memcpy_ctypes as mc  # type: ignore
+
+                            if hasattr(mc, "cuda_memcpy_d2d"):
+                                mc.cuda_memcpy_d2d(
+                                    lib,
+                                    dst_dev=int(go_dev),
+                                    src_dev=int(go.data),
+                                    nbytes=int(nbytes),
+                                )
+                            else:
+                                raise AttributeError
+                        except Exception:
+                            if not hasattr(lib, "keydnn_cuda_memcpy_d2d"):
+                                raise RuntimeError(
+                                    "Missing device-to-device memcpy: expected "
+                                    "`memcpy_ctypes.cuda_memcpy_d2d` or DLL symbol `keydnn_cuda_memcpy_d2d`."
+                                )
+
+                            fn = lib.keydnn_cuda_memcpy_d2d
+                            # int keydnn_cuda_memcpy_d2d(uint64_t dst_dev, uint64_t src_dev, size_t nbytes)
+                            fn.argtypes = [
+                                ctypes.c_uint64,
+                                ctypes.c_uint64,
+                                ctypes.c_size_t,
+                            ]
+                            fn.restype = ctypes.c_int
+
+                            st = int(
+                                fn(
+                                    ctypes.c_uint64(int(go_dev)),
+                                    ctypes.c_uint64(int(go.data)),
+                                    ctypes.c_size_t(int(nbytes)),
+                                )
+                            )
+                            if st != 0:
+                                raise RuntimeError(
+                                    f"keydnn_cuda_memcpy_d2d failed with status={st}"
+                                )
+
+                        # Wrap as a 1D CUDA Tensor (Tensor takes ownership of go_dev)
+                        go = Tensor._from_devptr(
+                            int(go_dev),
+                            shape=squeezed_shape,
+                            dtype=np.dtype(dtype),
                             device=self.device,
                             requires_grad=False,
-                            ctx=None,
-                            dtype=dtype,
                         )
 
-                    _sum_bwd_fill_cuda(
-                        lib,
-                        grad_out_dev=go_dev,  # scalar on device
-                        grad_x_dev=gx_dev,
-                        numel=numel,
-                        dtype=dtype,
+                    gx = _sum_axis2d_backward(
+                        go,
+                        rows=rows,
+                        cols=cols,
+                        axis=int(axis_),
+                        device=0,
+                        sync=True,
                     )
-                    _cuda_sync(lib)
-                    return (grad,)
+                    return (gx,)
 
                 ctx = Context(parents=(self,), backward_fn=backward_fn)
                 ctx.saved_meta["axis"] = axis

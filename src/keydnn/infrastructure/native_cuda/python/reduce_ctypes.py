@@ -8,12 +8,15 @@ Exports expected in the CUDA DLL:
 - keydnn_cuda_mean_backward_fill_f32 / _f64
 - keydnn_cuda_max_axis2d_forward_f32 / _f64
 - keydnn_cuda_max_axis2d_backward_f32 / _f64
+- keydnn_cuda_sum_axis2d_forward_f32 / _f64
+- keydnn_cuda_sum_axis2d_backward_f32 / _f64
 
 Assumptions
 -----------
 - Device pointers are uintptr_t handles (Python int).
 - Input tensors are contiguous.
 - Max axis is implemented only for 2D tensors with axis in {0,1}.
+- Sum axis is implemented only for 2D tensors with axis in {0,1}.
 """
 
 from __future__ import annotations
@@ -27,59 +30,27 @@ DevPtr = int
 
 def _bind_reduce(lib: ctypes.CDLL) -> None:
     # sum_all
-    lib.keydnn_cuda_sum_all_f32.argtypes = [
-        POINTER(c_float),
-        POINTER(c_float),
-        c_int64,
-    ]
+    lib.keydnn_cuda_sum_all_f32.argtypes = [POINTER(c_float), POINTER(c_float), c_int64]
     lib.keydnn_cuda_sum_all_f32.restype = c_int
-    lib.keydnn_cuda_sum_all_f64.argtypes = [
-        POINTER(c_double),
-        POINTER(c_double),
-        c_int64,
-    ]
+    lib.keydnn_cuda_sum_all_f64.argtypes = [POINTER(c_double), POINTER(c_double), c_int64]
     lib.keydnn_cuda_sum_all_f64.restype = c_int
 
     # mean_all
-    lib.keydnn_cuda_mean_all_f32.argtypes = [
-        POINTER(c_float),
-        POINTER(c_float),
-        c_int64,
-    ]
+    lib.keydnn_cuda_mean_all_f32.argtypes = [POINTER(c_float), POINTER(c_float), c_int64]
     lib.keydnn_cuda_mean_all_f32.restype = c_int
-    lib.keydnn_cuda_mean_all_f64.argtypes = [
-        POINTER(c_double),
-        POINTER(c_double),
-        c_int64,
-    ]
+    lib.keydnn_cuda_mean_all_f64.argtypes = [POINTER(c_double), POINTER(c_double), c_int64]
     lib.keydnn_cuda_mean_all_f64.restype = c_int
 
     # sum backward fill
-    lib.keydnn_cuda_sum_backward_fill_f32.argtypes = [
-        POINTER(c_float),
-        POINTER(c_float),
-        c_int64,
-    ]
+    lib.keydnn_cuda_sum_backward_fill_f32.argtypes = [POINTER(c_float), POINTER(c_float), c_int64]
     lib.keydnn_cuda_sum_backward_fill_f32.restype = c_int
-    lib.keydnn_cuda_sum_backward_fill_f64.argtypes = [
-        POINTER(c_double),
-        POINTER(c_double),
-        c_int64,
-    ]
+    lib.keydnn_cuda_sum_backward_fill_f64.argtypes = [POINTER(c_double), POINTER(c_double), c_int64]
     lib.keydnn_cuda_sum_backward_fill_f64.restype = c_int
 
     # mean backward fill
-    lib.keydnn_cuda_mean_backward_fill_f32.argtypes = [
-        POINTER(c_float),
-        POINTER(c_float),
-        c_int64,
-    ]
+    lib.keydnn_cuda_mean_backward_fill_f32.argtypes = [POINTER(c_float), POINTER(c_float), c_int64]
     lib.keydnn_cuda_mean_backward_fill_f32.restype = c_int
-    lib.keydnn_cuda_mean_backward_fill_f64.argtypes = [
-        POINTER(c_double),
-        POINTER(c_double),
-        c_int64,
-    ]
+    lib.keydnn_cuda_mean_backward_fill_f64.argtypes = [POINTER(c_double), POINTER(c_double), c_int64]
     lib.keydnn_cuda_mean_backward_fill_f64.restype = c_int
 
     # max axis2d forward/backward (idx is int64)
@@ -120,6 +91,41 @@ def _bind_reduce(lib: ctypes.CDLL) -> None:
         c_int,
     ]
     lib.keydnn_cuda_max_axis2d_backward_f64.restype = c_int
+
+    # sum axis2d forward/backward
+    lib.keydnn_cuda_sum_axis2d_forward_f32.argtypes = [
+        POINTER(c_float),
+        POINTER(c_float),
+        c_int,
+        c_int,
+        c_int,
+    ]
+    lib.keydnn_cuda_sum_axis2d_forward_f32.restype = c_int
+    lib.keydnn_cuda_sum_axis2d_forward_f64.argtypes = [
+        POINTER(c_double),
+        POINTER(c_double),
+        c_int,
+        c_int,
+        c_int,
+    ]
+    lib.keydnn_cuda_sum_axis2d_forward_f64.restype = c_int
+
+    lib.keydnn_cuda_sum_axis2d_backward_f32.argtypes = [
+        POINTER(c_float),
+        POINTER(c_float),
+        c_int,
+        c_int,
+        c_int,
+    ]
+    lib.keydnn_cuda_sum_axis2d_backward_f32.restype = c_int
+    lib.keydnn_cuda_sum_axis2d_backward_f64.argtypes = [
+        POINTER(c_double),
+        POINTER(c_double),
+        c_int,
+        c_int,
+        c_int,
+    ]
+    lib.keydnn_cuda_sum_axis2d_backward_f64.restype = c_int
 
 
 def _as_ptr_float(dev_ptr: DevPtr):
@@ -312,3 +318,81 @@ def max_axis2d_backward_cuda(
 
     if st != 0:
         raise RuntimeError(f"keydnn_cuda_max_axis2d_backward failed with status={st}")
+
+
+def sum_axis2d_forward_cuda(
+    lib: ctypes.CDLL,
+    *,
+    x_dev: DevPtr,
+    y_dev: DevPtr,
+    rows: int,
+    cols: int,
+    axis: int,
+    dtype: np.dtype,
+) -> None:
+    _bind_reduce(lib)
+    if axis not in (0, 1):
+        raise ValueError("axis must be 0 or 1 for sum_axis2d_forward_cuda")
+
+    if dtype == np.float32:
+        st = lib.keydnn_cuda_sum_axis2d_forward_f32(
+            _as_ptr_float(x_dev),
+            _as_ptr_float(y_dev),
+            int(rows),
+            int(cols),
+            int(axis),
+        )
+    elif dtype == np.float64:
+        st = lib.keydnn_cuda_sum_axis2d_forward_f64(
+            _as_ptr_double(x_dev),
+            _as_ptr_double(y_dev),
+            int(rows),
+            int(cols),
+            int(axis),
+        )
+    else:
+        raise TypeError(
+            f"sum_axis2d_forward_cuda supports float32/float64 only, got {dtype}"
+        )
+
+    if st != 0:
+        raise RuntimeError(f"keydnn_cuda_sum_axis2d_forward failed with status={st}")
+
+
+def sum_axis2d_backward_cuda(
+    lib: ctypes.CDLL,
+    *,
+    grad_out_dev: DevPtr,
+    grad_x_dev: DevPtr,
+    rows: int,
+    cols: int,
+    axis: int,
+    dtype: np.dtype,
+) -> None:
+    _bind_reduce(lib)
+    if axis not in (0, 1):
+        raise ValueError("axis must be 0 or 1 for sum_axis2d_backward_cuda")
+
+    if dtype == np.float32:
+        st = lib.keydnn_cuda_sum_axis2d_backward_f32(
+            _as_ptr_float(grad_out_dev),
+            _as_ptr_float(grad_x_dev),
+            int(rows),
+            int(cols),
+            int(axis),
+        )
+    elif dtype == np.float64:
+        st = lib.keydnn_cuda_sum_axis2d_backward_f64(
+            _as_ptr_double(grad_out_dev),
+            _as_ptr_double(grad_x_dev),
+            int(rows),
+            int(cols),
+            int(axis),
+        )
+    else:
+        raise TypeError(
+            f"sum_axis2d_backward_cuda supports float32/float64 only, got {dtype}"
+        )
+
+    if st != 0:
+        raise RuntimeError(f"keydnn_cuda_sum_axis2d_backward failed with status={st}")

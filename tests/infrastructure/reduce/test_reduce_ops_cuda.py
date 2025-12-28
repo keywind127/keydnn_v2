@@ -15,6 +15,8 @@ Covered ops
 - mean_backward_fill_cuda
 - max_axis2d_forward_cuda
 - max_axis2d_backward_cuda (with zero_grad_x=True)
+- sum_axis2d_forward_cuda
+- sum_axis2d_backward_cuda
 
 Assumptions
 -----------
@@ -53,6 +55,8 @@ from src.keydnn.infrastructure.ops.reduce_cuda import (
     mean_backward_fill_cuda,
     max_axis2d_forward_cuda,
     max_axis2d_backward_cuda,
+    sum_axis2d_forward_cuda,
+    sum_axis2d_backward_cuda,
 )
 
 
@@ -118,6 +122,30 @@ def max_axis2d_backward_cpu(
             r = int(idx[c])
             grad_x[r, c] += grad_out[c]
         return grad_x
+    raise ValueError("axis must be 0 or 1")
+
+
+def sum_axis2d_forward_cpu(x: np.ndarray, *, axis: int) -> np.ndarray:
+    if x.ndim != 2:
+        raise ValueError("x must be 2D")
+    if axis not in (0, 1):
+        raise ValueError("axis must be 0 or 1")
+    return x.sum(axis=axis).astype(x.dtype, copy=False)
+
+
+def sum_axis2d_backward_cpu(
+    grad_out: np.ndarray, *, rows: int, cols: int, axis: int, dtype: np.dtype
+) -> np.ndarray:
+    if axis == 1:
+        # grad_out shape: (rows,)
+        return np.broadcast_to(grad_out.reshape(rows, 1), (rows, cols)).astype(
+            dtype, copy=False
+        )
+    if axis == 0:
+        # grad_out shape: (cols,)
+        return np.broadcast_to(grad_out.reshape(1, cols), (rows, cols)).astype(
+            dtype, copy=False
+        )
     raise ValueError("axis must be 0 or 1")
 
 
@@ -447,6 +475,105 @@ class TestReduceCudaOps(unittest.TestCase):
         self._run_max_axis2d_backward_case(np.float64, rows=13, cols=37, axis=0)
 
     # -------------------------
+    # sum axis2d forward/backward
+    # -------------------------
+
+    def _run_sum_axis2d_forward_case(
+        self, dtype: np.dtype, *, rows: int, cols: int, axis: int
+    ) -> None:
+        rng = self._rng()
+        x = rng.standard_normal((rows, cols)).astype(dtype, copy=False)
+        y_ref = sum_axis2d_forward_cpu(x, axis=axis)
+
+        x_dev = cuda_from_host(self.lib, x)
+
+        y_len = rows if axis == 1 else cols
+        y_host = np.empty((y_len,), dtype=dtype)
+        y_dev = cuda_malloc(self.lib, y_host.nbytes)
+
+        try:
+            sum_axis2d_forward_cuda(
+                self.lib,
+                x_dev=x_dev,
+                y_dev=y_dev,
+                rows=rows,
+                cols=cols,
+                axis=axis,
+                dtype=dtype,
+                sync=True,
+            )
+            cuda_memcpy_d2h(self.lib, y_host, y_dev)
+            cuda_synchronize(self.lib)
+        finally:
+            cuda_free(self.lib, x_dev)
+            cuda_free(self.lib, y_dev)
+
+        # Forward here is deterministic (single thread per row/col), so default tol is fine.
+        rtol, atol = _tols_default(dtype)
+        np.testing.assert_allclose(y_host, y_ref, rtol=rtol, atol=atol)
+
+    def _run_sum_axis2d_backward_case(
+        self, dtype: np.dtype, *, rows: int, cols: int, axis: int
+    ) -> None:
+        rng = self._rng()
+
+        go_shape = (rows,) if axis == 1 else (cols,)
+        grad_out = rng.standard_normal(go_shape).astype(dtype, copy=False)
+
+        grad_x_ref = sum_axis2d_backward_cpu(
+            grad_out, rows=rows, cols=cols, axis=axis, dtype=dtype
+        )
+
+        grad_out_dev = cuda_from_host(self.lib, grad_out)
+
+        grad_x_host = np.empty((rows, cols), dtype=dtype)
+        grad_x_dev = cuda_malloc(self.lib, grad_x_host.nbytes)
+
+        try:
+            sum_axis2d_backward_cuda(
+                self.lib,
+                grad_out_dev=grad_out_dev,
+                grad_x_dev=grad_x_dev,
+                rows=rows,
+                cols=cols,
+                axis=axis,
+                dtype=dtype,
+                sync=True,
+            )
+            cuda_memcpy_d2h(self.lib, grad_x_host, grad_x_dev)
+            cuda_synchronize(self.lib)
+        finally:
+            cuda_free(self.lib, grad_out_dev)
+            cuda_free(self.lib, grad_x_dev)
+
+        rtol, atol = _tols_default(dtype)
+        np.testing.assert_allclose(grad_x_host, grad_x_ref, rtol=rtol, atol=atol)
+
+    def test_sum_axis2d_forward_f32_axis1(self) -> None:
+        self._run_sum_axis2d_forward_case(np.float32, rows=23, cols=11, axis=1)
+
+    def test_sum_axis2d_forward_f64_axis1(self) -> None:
+        self._run_sum_axis2d_forward_case(np.float64, rows=23, cols=11, axis=1)
+
+    def test_sum_axis2d_forward_f32_axis0(self) -> None:
+        self._run_sum_axis2d_forward_case(np.float32, rows=13, cols=37, axis=0)
+
+    def test_sum_axis2d_forward_f64_axis0(self) -> None:
+        self._run_sum_axis2d_forward_case(np.float64, rows=13, cols=37, axis=0)
+
+    def test_sum_axis2d_backward_f32_axis1(self) -> None:
+        self._run_sum_axis2d_backward_case(np.float32, rows=17, cols=29, axis=1)
+
+    def test_sum_axis2d_backward_f64_axis1(self) -> None:
+        self._run_sum_axis2d_backward_case(np.float64, rows=17, cols=29, axis=1)
+
+    def test_sum_axis2d_backward_f32_axis0(self) -> None:
+        self._run_sum_axis2d_backward_case(np.float32, rows=19, cols=31, axis=0)
+
+    def test_sum_axis2d_backward_f64_axis0(self) -> None:
+        self._run_sum_axis2d_backward_case(np.float64, rows=19, cols=31, axis=0)
+
+    # -------------------------
     # Edge / validation tests
     # -------------------------
 
@@ -509,6 +636,30 @@ class TestReduceCudaOps(unittest.TestCase):
                 mean_all_cuda(
                     self.lib, x_dev=x_dev, y_dev=y_dev, numel=16, dtype=np.int32
                 )
+
+            # exercise new ops dtype validation too (use same dummy buffers)
+            with self.assertRaises(TypeError):
+                sum_axis2d_forward_cuda(
+                    self.lib,
+                    x_dev=x_dev,
+                    y_dev=y_dev,  # dummy
+                    rows=4,
+                    cols=4,
+                    axis=1,
+                    dtype=np.int32,
+                    sync=True,
+                )
+            with self.assertRaises(TypeError):
+                sum_axis2d_backward_cuda(
+                    self.lib,
+                    grad_out_dev=x_dev,  # dummy
+                    grad_x_dev=y_dev,  # dummy
+                    rows=4,
+                    cols=4,
+                    axis=1,
+                    dtype=np.int32,
+                    sync=True,
+                )
         finally:
             cuda_free(self.lib, x_dev)
             cuda_free(self.lib, y_dev)
@@ -552,6 +703,40 @@ class TestReduceCudaOps(unittest.TestCase):
             cuda_free(self.lib, x_dev)
             cuda_free(self.lib, y_dev)
             cuda_free(self.lib, idx_dev)
+
+    def test_sum_axis2d_rejects_bad_axis(self) -> None:
+        dtype = np.float32
+        x = self._rng().standard_normal((3, 4)).astype(dtype, copy=False)
+        x_dev = cuda_from_host(self.lib, x)
+        y_host = np.empty((3,), dtype=dtype)
+        y_dev = cuda_malloc(self.lib, y_host.nbytes)
+
+        try:
+            with self.assertRaises(ValueError):
+                sum_axis2d_forward_cuda(
+                    self.lib,
+                    x_dev=x_dev,
+                    y_dev=y_dev,
+                    rows=3,
+                    cols=4,
+                    axis=2,  # invalid
+                    dtype=dtype,
+                    sync=True,
+                )
+            with self.assertRaises(ValueError):
+                sum_axis2d_backward_cuda(
+                    self.lib,
+                    grad_out_dev=x_dev,  # dummy
+                    grad_x_dev=y_dev,  # dummy
+                    rows=3,
+                    cols=4,
+                    axis=-1,  # invalid
+                    dtype=dtype,
+                    sync=True,
+                )
+        finally:
+            cuda_free(self.lib, x_dev)
+            cuda_free(self.lib, y_dev)
 
 
 if __name__ == "__main__":

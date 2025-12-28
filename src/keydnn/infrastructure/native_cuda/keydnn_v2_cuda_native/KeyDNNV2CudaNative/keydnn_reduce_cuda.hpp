@@ -83,3 +83,28 @@ KEYDNN_EXPORT int keydnn_cuda_max_axis2d_backward_f64(
     const double* grad_out, const int64_t* idx, double* grad_x,
     int rows, int cols, int axis
 );
+
+// ---- sum axis 2D (axis=0 or axis=1) ----
+// x: (rows, cols) contiguous
+// axis=1 -> y: (rows)
+// axis=0 -> y: (cols)
+KEYDNN_EXPORT int keydnn_cuda_sum_axis2d_forward_f32(
+    const float* x, float* y,
+    int rows, int cols, int axis
+);
+KEYDNN_EXPORT int keydnn_cuda_sum_axis2d_forward_f64(
+    const double* x, double* y,
+    int rows, int cols, int axis
+);
+
+// Backward: broadcast grad_out back to grad_x (rows, cols).
+// axis=1 -> grad_x[r,c] = grad_out[r]
+// axis=0 -> grad_x[r,c] = grad_out[c]
+KEYDNN_EXPORT int keydnn_cuda_sum_axis2d_backward_f32(
+    const float* grad_out, float* grad_x,
+    int rows, int cols, int axis
+);
+KEYDNN_EXPORT int keydnn_cuda_sum_axis2d_backward_f64(
+    const double* grad_out, double* grad_x,
+    int rows, int cols, int axis
+);

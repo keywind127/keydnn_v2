@@ -1,3 +1,4 @@
+# infrastructure/ops/reduce_cuda.py
 """
 CUDA reduce operation wrappers for KeyDNN (infrastructure layer).
 
@@ -16,6 +17,8 @@ Implemented ops
     Backward "fill" kernels that broadcast a scalar grad_out into grad_x.
 - max_axis2d_forward_cuda / max_axis2d_backward_cuda:
     2D max reduction with argmax indices along axis {0, 1}, plus backward scatter.
+- sum_axis2d_forward_cuda / sum_axis2d_backward_cuda:
+    2D sum reduction along axis {0, 1}, plus backward broadcast.
 
 Notes
 -----
@@ -409,6 +412,150 @@ def max_axis2d_backward_cuda(
         lib,
         grad_out_dev=int(grad_out_dev),
         idx_dev=int(idx_dev),
+        grad_x_dev=int(grad_x_dev),
+        rows=int(rows),
+        cols=int(cols),
+        axis=int(axis),
+        dtype=dtype,
+    )
+
+    if sync:
+        cuda_synchronize(lib)
+
+
+def sum_axis2d_forward_cuda(
+    lib,
+    *,
+    x_dev: int,
+    y_dev: int,
+    rows: int,
+    cols: int,
+    axis: int,
+    dtype: np.dtype,
+    sync: bool = True,
+) -> None:
+    """
+    Compute 2D sum reduction along a specified axis.
+
+    Given an input matrix `x` with shape (rows, cols), this computes:
+
+    - axis == 1: y[r] = sum_c x[r, c]  -> y shape (rows,)
+    - axis == 0: y[c] = sum_r x[r, c]  -> y shape (cols,)
+
+    Parameters
+    ----------
+    lib : object
+        Loaded native CUDA library handle passed through to ctypes wrappers.
+    x_dev : int
+        Device pointer to input matrix buffer (rows * cols elements).
+    y_dev : int
+        Device pointer to output buffer for reduced sums:
+        - If axis == 0: shape (cols,)
+        - If axis == 1: shape (rows,)
+    rows : int
+        Number of rows in the input matrix.
+    cols : int
+        Number of columns in the input matrix.
+    axis : int
+        Reduction axis. Must be 0 (reduce rows) or 1 (reduce cols).
+    dtype : np.dtype
+        Element dtype. Only `np.float32` and `np.float64` are supported.
+    sync : bool, optional
+        If True, synchronizes the CUDA device after the kernel call by invoking
+        `cuda_synchronize(lib)`. Defaults to True.
+
+    Raises
+    ------
+    ValueError
+        If `axis` is not 0 or 1.
+    TypeError
+        If `dtype` is not `np.float32` or `np.float64`.
+    """
+    from ..native_cuda.python.reduce_ctypes import sum_axis2d_forward_cuda as _fwd
+
+    if axis not in (0, 1):
+        raise ValueError(f"axis must be 0 or 1, got {axis}")
+
+    if dtype not in (np.float32, np.float64):
+        raise TypeError(
+            f"sum_axis2d_forward_cuda supports float32/float64 only, got {dtype}"
+        )
+
+    _fwd(
+        lib,
+        x_dev=int(x_dev),
+        y_dev=int(y_dev),
+        rows=int(rows),
+        cols=int(cols),
+        axis=int(axis),
+        dtype=dtype,
+    )
+
+    if sync:
+        cuda_synchronize(lib)
+
+
+def sum_axis2d_backward_cuda(
+    lib,
+    *,
+    grad_out_dev: int,
+    grad_x_dev: int,
+    rows: int,
+    cols: int,
+    axis: int,
+    dtype: np.dtype,
+    sync: bool = True,
+) -> None:
+    """
+    Backward broadcast for `sum_axis2d_forward_cuda`.
+
+    This broadcasts `grad_out` back into `grad_x`:
+
+    - axis == 1: grad_x[r, c] = grad_out[r]
+    - axis == 0: grad_x[r, c] = grad_out[c]
+
+    Parameters
+    ----------
+    lib : object
+        Loaded native CUDA library handle passed through to ctypes wrappers.
+    grad_out_dev : int
+        Device pointer to upstream gradient buffer (shape depends on axis):
+        - If axis == 0: shape (cols,)
+        - If axis == 1: shape (rows,)
+    grad_x_dev : int
+        Device pointer to output gradient buffer for x (rows * cols elements).
+    rows : int
+        Number of rows in the original input matrix.
+    cols : int
+        Number of columns in the original input matrix.
+    axis : int
+        Reduction axis used in the forward pass. Must be 0 or 1.
+    dtype : np.dtype
+        Element dtype. Only `np.float32` and `np.float64` are supported.
+    sync : bool, optional
+        If True, synchronizes the CUDA device after the kernel call by invoking
+        `cuda_synchronize(lib)`. Defaults to True.
+
+    Raises
+    ------
+    ValueError
+        If `axis` is not 0 or 1.
+    TypeError
+        If `dtype` is not `np.float32` or `np.float64`.
+    """
+    from ..native_cuda.python.reduce_ctypes import sum_axis2d_backward_cuda as _bwd
+
+    if axis not in (0, 1):
+        raise ValueError(f"axis must be 0 or 1, got {axis}")
+
+    if dtype not in (np.float32, np.float64):
+        raise TypeError(
+            f"sum_axis2d_backward_cuda supports float32/float64 only, got {dtype}"
+        )
+
+    _bwd(
+        lib,
+        grad_out_dev=int(grad_out_dev),
         grad_x_dev=int(grad_x_dev),
         rows=int(rows),
         cols=int(cols),
