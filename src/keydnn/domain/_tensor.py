@@ -20,6 +20,7 @@ from typing import Any, Optional, Protocol, Sequence, Union, runtime_checkable
 
 from .device._device_protocol import DeviceLike
 from .device._device import Device
+from .types._numpy import NDArrayLike
 
 Number = Union[int, float]
 
@@ -142,7 +143,7 @@ class ITensor(Protocol):
     # ---------------------------------------------------------------------
     # Host interop / initialization utilities
     # ---------------------------------------------------------------------
-    def to_numpy(self) -> Any:
+    def to_numpy(self) -> NDArrayLike:
         """
         Convert the tensor to a backend-native array object.
 
@@ -151,7 +152,7 @@ class ITensor(Protocol):
 
         Returns
         -------
-        Any
+        NDArrayLike
             Backend-native array (e.g., `np.ndarray`).
 
         Raises
@@ -161,7 +162,7 @@ class ITensor(Protocol):
         """
         ...
 
-    def copy_from_numpy(self, arr: Any) -> None:
+    def copy_from_numpy(self, arr: NDArrayLike) -> None:
         """
         Copy data from a backend-native array object into this tensor.
 
@@ -170,7 +171,7 @@ class ITensor(Protocol):
 
         Parameters
         ----------
-        arr : Any
+        arr : NDArrayLike
             Source array-like object.
 
         Raises
@@ -1078,5 +1079,152 @@ class ITensor(Protocol):
         -------
         ITensor
             A new tensor with copied data.
+        """
+        ...
+
+    def _ensure_cuda_alloc(self, *, dtype) -> None:
+        """
+        Ensure that a CUDA tensor has an allocated device buffer.
+
+        This method allocates device memory sized to
+        `numel * dtype.itemsize` and stores the resulting device pointer on
+        the tensor instance. Memory contents are left uninitialized.
+
+        Notes
+        -----
+        - If the tensor already has an allocated CUDA buffer, this is a no-op
+        (idempotent) unless the requested dtype would require a different
+        allocation size.
+        - If a re-allocation is required (dtype/size mismatch), the old buffer
+        should be freed (TODO: implement/verify cuda_free usage).
+        """
+        ...
+
+    @staticmethod
+    def _get_cuda_lib():
+        """
+        Lazily load and cache the KeyDNN native CUDA shared library.
+
+        This method performs a local import to avoid importing CUDA-related
+        symbols during CPU-only execution. The loaded library handle is cached
+        as an attribute on the function object, acting as a simple singleton.
+
+        Returns
+        -------
+        object
+            Handle to the loaded KeyDNN CUDA native library.
+
+        Notes
+        -----
+        - The library is loaded at most once per process.
+        - This method does not perform device selection; callers are responsible
+        for invoking `cuda_set_device` as needed.
+        """
+        ...
+
+    def _numel_from_shape(self) -> int:
+        """
+        Compute the total number of elements implied by the tensor shape.
+
+        This method multiplies all dimensions in `self.shape` to obtain the
+        total element count. Dimensions are explicitly cast to `int` to avoid
+        propagation of NumPy scalar types.
+
+        Returns
+        -------
+        int
+            Total number of elements represented by the tensor shape.
+
+        Notes
+        -----
+        - An empty shape (e.g., `()`) yields 1 by convention.
+        - This helper is used by both CPU and CUDA allocation paths.
+        """
+        ...
+
+    # ----------------------------
+    # Internal helpers
+    # ----------------------------
+    def _raise_device_not_supported(self, op: str) -> None:
+        """
+        Raise a standardized 'device not supported' error for an operation.
+
+        Parameters
+        ----------
+        op : str
+            Operation name (e.g., "add", "mul", "neg").
+
+        Raises
+        ------
+        DeviceNotSupportedError
+            Always raised, indicating the operation is unavailable for the
+            current device.
+        """
+        ...
+
+    @staticmethod
+    def _result_requires_grad(*parents: "ITensor") -> bool:
+        """
+        Determine whether an operation result should require gradients.
+
+        Parameters
+        ----------
+        *parents : Tensor
+            Parent tensors participating in an operation.
+
+        Returns
+        -------
+        bool
+            True if any parent requires gradients, False otherwise.
+        """
+        ...
+
+    @staticmethod
+    def _as_tensor_like(x: Union["ITensor", Number], like: "ITensor") -> "ITensor":
+        """
+        Convert an operand into a Tensor compatible with a reference tensor.
+
+        If `x` is already a Tensor, it is returned as-is. If `x` is a Python
+        scalar, a new Tensor is created with the same shape and device as
+        `like`, filled with the scalar value.
+
+        Parameters
+        ----------
+        x : Union[Tensor, Number]
+            Operand to convert.
+        like : Tensor
+            Reference tensor providing shape/device for scalar lifting.
+
+        Returns
+        -------
+        Tensor
+            A tensor operand compatible with `like`.
+
+        Raises
+        ------
+        TypeError
+            If `x` is neither a Tensor nor a supported scalar type.
+        """
+        ...
+
+    @staticmethod
+    def _binary_op_shape_check(a: "ITensor", b: "ITensor") -> None:
+        """
+        Validate shape compatibility for binary elementwise operations.
+
+        Currently, the framework enforces strict shape equality and does not
+        implement broadcasting.
+
+        Parameters
+        ----------
+        a : Tensor
+            Left operand.
+        b : Tensor
+            Right operand.
+
+        Raises
+        ------
+        ValueError
+            If shapes do not match exactly.
         """
         ...

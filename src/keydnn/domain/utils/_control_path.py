@@ -1,35 +1,51 @@
 """
-State-based method dispatch (a.k.a. "control-path" templating) via decorators.
+State-based method dispatch ("control-path" templating) via decorators.
 
-This module provides a small mechanism for dynamically routing a single method
-call to one of several registered implementations based on an object's
-runtime `_state` value.
+This module implements a small, reusable mechanism for routing calls to a
+single method name to one of multiple registered implementations, based on
+a runtime "state" attribute on the receiver object.
 
-Core idea
----------
-- You define a *base* method on a class (its signature becomes the canonical one).
-- You then register multiple "control paths" for that method, each keyed by:
+Overview
+--------
+`create_path_builder()` returns a decorator factory ("templator") that lets you:
+
+1) Choose a *base* method on a class. Its name/signature become the public API.
+2) Register one or more implementations for specific state values.
+3) At runtime, calls to the method are dispatched by looking up
+   `getattr(self, STATE_PNAME)` and selecting the matching implementation.
+
+Dispatch key
+------------
+Each registered control path is keyed by:
+
     (ClassName, MethodName, StateVal)
-- At runtime, the wrapper looks up `self._state` and dispatches to the
-  registered implementation that matches the current state.
 
-Intended use-cases
-------------------
-- Implementing state machines where behavior changes by state without large
-  if/elif chains.
-- Providing multiple fast-paths / backends selected by a runtime flag.
-- Keeping per-state behaviors isolated as separate functions for readability.
+The mapping is stored in a closure owned by the specific builder instance,
+so different builders do not share state.
+
+Runtime contract
+----------------
+- The receiver object must provide an attribute (or property) named
+  `STATE_PNAME` (default: "_state").
+- The state value must be hashable so it can be used as part of the dispatch key.
+
+Error handling
+--------------
+If no control path is found for the current state, behavior is controlled by
+`trap_exception`:
+
+- If `trap_exception` is falsy/None: raise NotImplementedError.
+- If `trap_exception` is callable: call it as `trap_exception(method, state)`
+  for side effects (logging/metrics), then raise `trap_exception()`.
+- Otherwise: raise `trap_exception()`.
 
 Important notes
 ---------------
-- This design mutates the class: the first time you decorate a control path,
-  the original method name is replaced with a wrapper that performs dispatch.
-- Registered implementations are stored in a closure-local mapping owned by
-  `create_path_builder()`. Different builders do not share mappings.
-- The wrapper currently calls the selected sub-method without passing `self`
-  (i.e., `sm(*args, **kwargs)`), so sub-methods are expected to close over
-  the instance or to not require `self`. If you intend methods to behave like
-  normal instance methods, adjust the wrapper to call `sm(self, *args, **kwargs)`.
+- This mechanism mutates the class: the first registration for a given
+  (cls, method) replaces `cls.<method_name>` with a dispatcher wrapper.
+- The wrapper in *this* implementation invokes the selected function as
+  `sm(self, *args, **kwargs)`, i.e., the registered implementation is expected
+  to accept `self` as its first argument (normal instance-method style).
 """
 
 from typing import (
@@ -53,7 +69,7 @@ P = ParamSpec("P")
 R = TypeVar("R")
 
 
-def create_path_builder() -> Callable[
+def create_path_builder(STATE_PNAME: str = "_state") -> Callable[
     [
         Type,
         Callable[P, R],
@@ -63,36 +79,34 @@ def create_path_builder() -> Callable[
     Callable[[Callable[P, R]], Callable[P, R]],
 ]:
     """
-    Create and return a "path builder" function used to register stateful
-    control paths for methods.
+    Create a state-based dispatch builder for registering control paths.
 
-    The returned function (`templator`) is used like this:
+    Parameters
+    ----------
+    STATE_PNAME : str, optional
+        Name of the attribute/property on the receiver object that stores the
+        current state. Defaults to "_state".
 
-        decorator = create_path_builder()
+        The wrapper will read the state via:
 
-        class MyClass:
-            def foo(self, x: int) -> int: ...
-
-        @decorator(MyClass, MyClass.foo, state="A")
-        def foo_A(x: int) -> int:
-            ...
-
-        @decorator(MyClass, MyClass.foo, state="B")
-        def foo_B(x: int) -> int:
-            ...
-
-    When `MyClass.foo(...)` is called, it dispatches to `foo_A` or `foo_B`
-    depending on `self._state`.
+            getattr(self, STATE_PNAME)
 
     Returns
     -------
     Callable
-        A function with signature:
+        A "templator" function with signature:
 
-            (cls, method, state, trap_exception=None) -> decorator
+            templator(cls, method, state, trap_exception=None) -> decorator
 
-        where `decorator(sub_method)` registers `sub_method` for that control path
-        and replaces `cls.method` with a dispatcher wrapper.
+        The returned `decorator(sub_method)` registers `sub_method` for the
+        given `(cls, method, state)` and installs/updates the dispatcher wrapper
+        on `cls` under `method.__name__`.
+
+    Notes
+    -----
+    - Each call to `create_path_builder()` creates an isolated registry.
+    - The builder is intended for refactoring large methods into explicit,
+      state-specific control paths without large if/elif blocks.
     """
 
     MethodKey = namedtuple(
@@ -104,56 +118,51 @@ def create_path_builder() -> Callable[
         ],
     )
     """
-    Tuple-like key used to uniquely identify a control path.
+    Dispatch key type for registered control paths.
 
-    Fields
-    ------
-    ClassName : str
-        The owning class name.
-    MethodName : str
-        The base method name being templated.
-    StateVal : Hashable
-        The state value that selects this implementation.
+    The effective dispatch key is a triple:
+
+        (ClassName, MethodName, StateVal)
+
+    where:
+    - ClassName is `cls.__name__`
+    - MethodName is `method.__name__`
+    - StateVal is the hashable state value selected at runtime
     """
 
     methods_map: Dict[MethodKey, Callable] = {}
-    """Mapping from (class, method, state) keys to registered implementations."""
+    """
+    Registry mapping dispatch keys to implementations.
+
+    This registry is closure-local to a single builder instance, ensuring
+    separate builders do not share control paths.
+    """
 
     @runtime_checkable
     class StatefulObject(Protocol):
         """
-        Protocol describing an object that participates in state-based dispatch.
+        Runtime-checkable protocol for objects participating in dispatch.
 
-        Implementers must provide a `_state` property. The dispatcher uses this
-        property at runtime to select the correct control path implementation.
+        Objects are considered "stateful" if they expose an attribute named
+        `STATE_PNAME` (default "_state"). The dispatcher reads the current state
+        with `getattr(self, STATE_PNAME)`.
 
-        Notes
-        -----
-        - `_state` may be `None`; in that case, dispatch looks for a control path
-          registered under state `None`.
-        - Because this is runtime-checkable, the wrapper can validate that an
-          object provides the required `_state` property before dispatching.
+        This protocol is used only for runtime validation and clearer error
+        messages when the state attribute is missing.
         """
 
-        @property
-        @abstractmethod
-        def _state(self) -> Optional[Any]:
-            """Current state value used for dispatch selection."""
-            ...
+    def _state_getter() -> Optional[Any]:
+        """
+        Abstract getter used to synthesize the required state property.
 
-    STATE_PROPERTY_NAME = next(
-        (
-            name
-            for name, value in StatefulObject.__dict__.items()
-            if value is StatefulObject._state
-        )
-    )
-    """
-    Name of the state property as discovered from the protocol definition.
+        This function exists solely to attach an abstract property to the
+        `StatefulObject` protocol under the name `STATE_PNAME`.
+        """
+        ...
 
-    This is used only to produce a clearer error message when an object does
-    not satisfy `StatefulObject` at runtime.
-    """
+    # Attach a required (abstract) property to the protocol at runtime so that
+    # `isinstance(obj, StatefulObject)` can validate the presence of STATE_PNAME.
+    setattr(StatefulObject, STATE_PNAME, property(abstractmethod(_state_getter)))
 
     def templator(
         cls: Type,
@@ -164,37 +173,35 @@ def create_path_builder() -> Callable[
         ] = None,
     ) -> Callable[[Callable[P, R]], Callable[P, R]]:
         """
-        Build a decorator that registers a control path implementation.
+        Build a decorator that registers a state-specific implementation.
 
         Parameters
         ----------
         cls : Type
-            The class whose method should be wrapped for state-based dispatch.
-            The wrapper is installed on this class under `method.__name__`.
+            The class whose method will be wrapped for state-based dispatch.
+            The dispatcher wrapper is installed on this class under
+            `method.__name__`.
         method : Callable[P, R]
-            The base method being templated. Its signature and metadata (name,
-            docstring, annotations) are used for the installed wrapper via
+            The base method being templated. Its name and signature represent
+            the public API. Metadata is preserved on the wrapper via
             `functools.wraps(method)`.
         state : Hashable
             The state value that selects the decorated implementation.
-            Must be hashable so it can be used as part of the dispatch key.
+            Must be hashable to serve as part of the dispatch key.
         trap_exception : Optional[Union[Exception, Callable[[Callable[P, R], Any], None]]]
-            Controls what happens when a dispatch target is missing:
+            Determines behavior when a control path is missing for the current
+            runtime state:
 
-            - If `None`, the wrapper raises `NotImplementedError`.
-            - If an exception instance (or exception class-like callable),
-              the wrapper raises it (by calling it as `trap_exception()`).
-            - If a callable, it is invoked as `trap_exception(method, self._state)`
-              before raising `trap_exception()`.
-
-            This allows custom error reporting, logging, or metrics before failing.
+            - If falsy/None: raise NotImplementedError.
+            - If callable: invoke as `trap_exception(method, state)` for side
+              effects, then raise `trap_exception()`.
+            - Otherwise: raise `trap_exception()`.
 
         Returns
         -------
         Callable[[Callable[P, R]], Callable[P, R]]
-            A decorator that, when applied to `sub_method`, registers `sub_method`
-            for `(cls, method, state)` and installs/updates the dispatcher wrapper
-            on `cls.method.__name__`.
+            A decorator that registers `sub_method` for the given state and
+            installs/updates the dispatcher wrapper on the class.
 
         Raises
         ------
@@ -204,7 +211,7 @@ def create_path_builder() -> Callable[
         try:
             hash(state)
         except TypeError:
-            # Identify the local variable name for better error text (best effort).
+            # Best-effort: identify the local variable name for nicer messages.
             STATE_NAME = next(
                 (name for name, value in locals().items() if value is state)
             )
@@ -213,90 +220,99 @@ def create_path_builder() -> Callable[
             )
 
         smk: MethodKey = MethodKey(cls.__name__, method.__name__, state)
-        """Static method key for the control path being registered by this call."""
+        """Static key for the control path being registered by this templator."""
 
         def _get_cur_smk(self: StatefulObject) -> MethodKey:
             """
-            Compute the method key for the *current* runtime state of `self`.
+            Compute the dispatch key for the receiver's current runtime state.
 
             Parameters
             ----------
             self : StatefulObject
-                Object providing `_state`.
+                Receiver object providing the `STATE_PNAME` attribute/property.
 
             Returns
             -------
             MethodKey
-                Key with the same class/method names but using `self._state` as
-                the state value.
+                The dispatch key (ClassName, MethodName, current_state).
             """
-            return MethodKey(cls.__name__, method.__name__, self._state)
+            return MethodKey(cls.__name__, method.__name__, getattr(self, STATE_PNAME))
 
         def decorator(sub_method: Callable[P, R]) -> Callable[P, R]:
             """
-            Register `sub_method` as the implementation for the configured state.
+            Register a control-path implementation for the configured state.
 
-            This function:
-            1) stores `sub_method` in the internal dispatch map under the
-               precomputed key `(cls.__name__, method.__name__, state)`,
-            2) installs a wrapper on `cls` under `method.__name__` that:
-                - validates `self` has `_state`,
-                - finds the matching implementation by `self._state`,
-                - calls it (or raises per `trap_exception`).
+            This decorator:
+            1) Stores `sub_method` in the internal registry keyed by
+               (cls.__name__, method.__name__, state).
+            2) Installs (or overwrites) `cls.<method_name>` with a dispatcher
+               wrapper that selects an implementation based on the receiver's
+               current state.
 
             Parameters
             ----------
             sub_method : Callable[P, R]
-                The implementation to run when `self._state == state`.
+                Implementation to run when `getattr(self, STATE_PNAME) == state`.
+
+                The selected implementation is invoked as:
+
+                    sub_method(self, *args, **kwargs)
 
             Returns
             -------
             Callable[P, R]
-                The original `sub_method` (returned unchanged), enabling normal
-                decorator stacking and introspection.
+                The original `sub_method`, enabling decorator stacking and
+                straightforward introspection.
             """
             methods_map[smk] = sub_method
 
             @wraps(method)
             def wrapper(self: Any, *args: P.args, **kwargs: P.kwargs) -> Any:
                 """
-                Dispatch to a registered implementation based on `self._state`.
+                Dispatch the call to a registered state-specific implementation.
 
-                Behavior
-                --------
-                - If `self` does not satisfy `StatefulObject`, raises
-                  `NotImplementedError` indicating the missing state property.
-                - If a matching control path exists, calls it and returns its
-                  result.
-                - If no match exists:
-                    * if `trap_exception` is falsy, raises `NotImplementedError`
-                    * if `trap_exception` is callable, calls it with
-                      `(method, self._state)` then raises `trap_exception()`
-                    * otherwise raises `trap_exception()` directly
+                Parameters
+                ----------
+                self : Any
+                    Receiver object. Must expose `STATE_PNAME` to participate in
+                    dispatch.
+                *args, **kwargs
+                    Arguments forwarded to the selected implementation.
 
-                Notes
-                -----
-                The current implementation calls the selected `sub_method` as
-                `sub_method(*args, **kwargs)` (without passing `self`). This is
-                intentional in this exact code, but differs from typical bound
-                instance method semantics.
+                Returns
+                -------
+                Any
+                    Return value from the selected control-path implementation.
+
+                Raises
+                ------
+                NotImplementedError
+                    If the receiver does not expose the required state attribute,
+                    or if no control path exists and `trap_exception` is falsy.
+                Exception
+                    If `trap_exception` is provided, raised via `trap_exception()`
+                    after optional side-effect callback invocation.
                 """
                 if not isinstance(self, StatefulObject):
                     raise NotImplementedError(
                         "{} is missing attribute {} (@property)".format(
-                            type(self), repr(STATE_PROPERTY_NAME)
+                            type(self), repr(STATE_PNAME)
                         )
                     )
-                if sm := methods_map.get(_get_cur_smk(self)):
-                    return sm(*args, **kwargs)
+
+                cur_key = _get_cur_smk(self)
+                if sm := methods_map.get(cur_key):
+                    return sm(self, *args, **kwargs)
+
                 if not trap_exception:
                     raise NotImplementedError(
                         "Missing control path (state={}) for {}".format(
-                            repr(self._state), repr(method)
+                            repr(getattr(self, STATE_PNAME)), repr(method)
                         )
                     )
+
                 if callable(trap_exception):
-                    trap_exception(method, self._state)
+                    trap_exception(method, getattr(self, STATE_PNAME))
                 raise trap_exception()
 
             setattr(cls, method.__name__, wrapper)
