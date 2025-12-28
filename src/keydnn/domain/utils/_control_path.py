@@ -293,7 +293,7 @@ def create_path_builder(STATE_PNAME: str = "_state") -> Callable[
                     If `trap_exception` is provided, raised via `trap_exception()`
                     after optional side-effect callback invocation.
                 """
-                if not isinstance(self, StatefulObject):
+                if __debug__ and not isinstance(self, StatefulObject):
                     raise NotImplementedError(
                         "{} is missing attribute {} (@property)".format(
                             type(self), repr(STATE_PNAME)

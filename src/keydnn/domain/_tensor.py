@@ -16,7 +16,7 @@ so domain code can type against the full tensor API when desired.
 
 from __future__ import annotations
 
-from typing import Any, Optional, Protocol, Sequence, Union, runtime_checkable
+from typing import Any, Type, Optional, Protocol, Sequence, Union, runtime_checkable
 
 from .device._device_protocol import DeviceLike
 from .device._device import Device
@@ -743,8 +743,10 @@ class ITensor(Protocol):
         """
         ...
 
-    @staticmethod
-    def _from_numpy(arr: ITensor, *, device, requires_grad: bool = False) -> "ITensor":
+    @classmethod
+    def _from_numpy(
+        cls: Type[ITensor], arr: ITensor, *, device: Device, requires_grad: bool = False
+    ) -> "ITensor":
         """
         Create a tensor from a NumPy-compatible array.
 
@@ -793,9 +795,14 @@ class ITensor(Protocol):
         """
         ...
 
-    @staticmethod
+    @classmethod
     def full(
-        shape, fill_value: float, *, device, requires_grad: bool = False
+        cls: Type[ITensor],
+        shape: tuple,
+        fill_value: float,
+        *,
+        device: Device,
+        requires_grad: bool = False,
     ) -> "ITensor":
         """
         Create a tensor filled with a constant value.
@@ -867,9 +874,13 @@ class ITensor(Protocol):
         """
         ...
 
-    @staticmethod
+    @classmethod
     def zeros(
-        *, shape: tuple[int, ...], device, requires_grad: bool = False
+        cls: Type[ITensor],
+        *,
+        shape: tuple[int, ...],
+        device,
+        requires_grad: bool = False,
     ) -> "ITensor":
         """
         Construct a tensor filled with zeros.
@@ -890,9 +901,13 @@ class ITensor(Protocol):
         """
         ...
 
-    @staticmethod
+    @classmethod
     def ones(
-        *, shape: tuple[int, ...], device, requires_grad: bool = False
+        cls: Type[ITensor],
+        *,
+        shape: tuple[int, ...],
+        device,
+        requires_grad: bool = False,
     ) -> "ITensor":
         """
         Construct a tensor filled with ones.
@@ -914,7 +929,7 @@ class ITensor(Protocol):
         ...
 
     @property
-    def data(self) -> Any:
+    def data(self) -> Union[int, NDArrayLike]:
         """
         Return the underlying storage for this tensor.
 
