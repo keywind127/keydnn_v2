@@ -61,6 +61,7 @@ import os
 import sys
 from pathlib import Path
 from typing import Optional
+from functools import lru_cache
 
 
 def _variant_lib_name(variant: str) -> str:
@@ -116,6 +117,7 @@ def _variant_lib_name(variant: str) -> str:
     raise ValueError(f"Unknown variant: {variant!r}")
 
 
+@lru_cache(maxsize=1)
 def load_keydnn_native(lib_path: Optional[str] = None) -> ctypes.CDLL:
     """
     Load the KeyDNN native shared library via ctypes.
@@ -175,54 +177,72 @@ def load_keydnn_native(lib_path: Optional[str] = None) -> ctypes.CDLL:
 
 
 def _load_cdll_with_windows_dirs(dll_path: Path) -> ctypes.CDLL:
-    """
-    Load a native library with extra Windows DLL search path registration.
-
-    On Windows (Python 3.8+), dependent DLL lookup is restricted unless you:
-    - place dependencies next to the target DLL, or
-    - add directories via `os.add_dll_directory(...)`.
-
-    This helper registers:
-    1) The directory containing the target DLL
-    2) KEYDNN_MINGW_BIN (if set), to find MinGW runtime DLLs
-
-    Parameters
-    ----------
-    dll_path : Path
-        Absolute path to the target native library.
-
-    Returns
-    -------
-    ctypes.CDLL
-        Loaded library handle. The handle retains DLL-directory registration
-        handles to keep them alive.
-
-    Raises
-    ------
-    FileNotFoundError
-        If `dll_path` does not exist.
-    OSError
-        If the DLL exists but cannot be loaded (often due to missing dependencies).
-    """
     if not dll_path.exists():
         raise FileNotFoundError(f"Native library not found: {dll_path}")
 
-    add_dirs: list[str] = []
     handles = []
+    if sys.platform.startswith("win") and hasattr(os, "add_dll_directory"):
+        dll_dir = str(dll_path.parent)
 
-    if sys.platform.startswith("win"):
-        add_dirs.append(str(dll_path.parent))
+        try:
+            handles.append(os.add_dll_directory(dll_dir))
+        except OSError as e:
+            raise OSError(
+                f"add_dll_directory failed for dll_dir={dll_dir!r} len={len(dll_dir)} "
+                f"winerror={getattr(e, 'winerror', None)} errno={getattr(e,'errno',None)} "
+                f"filename={getattr(e,'filename',None)!r} strerror={getattr(e,'strerror',None)!r}"
+            ) from e
 
         mingw_bin = os.environ.get("KEYDNN_MINGW_BIN", "")
         if mingw_bin:
-            add_dirs.append(mingw_bin)
+            try:
+                handles.append(os.add_dll_directory(mingw_bin))
+            except OSError as e:
+                raise OSError(
+                    f"add_dll_directory failed for KEYDNN_MINGW_BIN={mingw_bin!r} "
+                    f"len={len(mingw_bin)} winerror={getattr(e,'winerror',None)} "
+                    f"filename={getattr(e,'filename',None)!r} strerror={getattr(e,'strerror',None)!r}"
+                ) from e
 
-        if hasattr(os, "add_dll_directory"):
-            for d in add_dirs:
-                if d and Path(d).exists():
-                    handles.append(os.add_dll_directory(d))
+    dll_str = str(dll_path)
+    try:
+        lib = ctypes.CDLL(dll_str)
+    except OSError as e:
+        raise OSError(
+            f"ctypes.CDLL failed for dll={dll_str!r} len={len(dll_str)} "
+            f"winerror={getattr(e, 'winerror', None)} errno={getattr(e,'errno',None)} "
+            f"filename={getattr(e,'filename',None)!r} strerror={getattr(e,'strerror',None)!r}"
+        ) from e
 
-    lib = ctypes.CDLL(str(dll_path))
-    # Keep the directory handles alive for the lifetime of the library handle.
     setattr(lib, "_keydnn_dll_dir_handles", handles)
     return lib
+
+
+# def _dbg(label: str, s: str) -> None:
+#     print(f"[DBG] {label}: len={len(s)} repr={s!r}")
+
+
+# def _load_cdll_with_windows_dirs(dll_path: Path) -> ctypes.CDLL:
+#     if not dll_path.exists():
+#         raise FileNotFoundError(f"Native library not found: {dll_path}")
+
+#     handles = []
+
+#     if sys.platform.startswith("win") and hasattr(os, "add_dll_directory"):
+#         d = str(dll_path.parent)
+#         _dbg("add_dll_directory(parent)", d)
+#         handles.append(os.add_dll_directory(d))
+
+#         mingw_bin = os.environ.get("KEYDNN_MINGW_BIN", "")
+#         _dbg("KEYDNN_MINGW_BIN(raw)", mingw_bin)
+
+#         if mingw_bin:
+#             _dbg("add_dll_directory(KEYDNN_MINGW_BIN)", mingw_bin)
+#             handles.append(os.add_dll_directory(mingw_bin))
+
+#     s = str(dll_path)
+#     _dbg("ctypes.CDLL(path)", s)
+#     lib = ctypes.CDLL(s)
+
+#     setattr(lib, "_keydnn_dll_dir_handles", handles)
+#     return lib
