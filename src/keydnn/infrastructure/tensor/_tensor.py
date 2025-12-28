@@ -4249,58 +4249,68 @@ class Tensor(ITensor):
         self._raise_device_not_supported("sqrt")
         raise RuntimeError("Unreachable")
 
-    def to(self, device: "Device", *, copy: bool = True) -> "Tensor":
-        """
-        Return a tensor on the specified device.
+    def to(self, device, *, copy: bool = False) -> "Tensor":
+        import numpy as np
+        from src.keydnn.domain.device._device import Device
 
-        Parameters
-        ----------
-        device : Device
-            Target device (e.g., Device("cpu"), Device("cuda:0")).
-        copy : bool, optional
-            If True (default), always returns a new tensor.
-            If False and the device matches, may return self.
+        if isinstance(device, str):
+            device = Device(device)
 
-        Notes
-        -----
-        - This method performs a device transfer via NumPy as an intermediate
-        representation when moving between CPU and CUDA.
-        - Gradients are NOT transferred automatically.
-        - Autograd history is NOT preserved across device moves.
-        """
+        # Same-device shortcut
         if str(device) == str(self.device):
             return self if not copy else self.clone()
 
-        # ---- CPU -> CUDA ----
+        dtype = np.dtype(getattr(self, "dtype", np.float32))
+        numel = self._numel_from_shape()
+        nbytes = int(numel) * int(dtype.itemsize)
+
+        # CPU -> CUDA
         if self.device.is_cpu() and device.is_cuda():
-            arr = self.to_numpy()
+            from ..native_cuda.python.ops import memcpy_ctypes as mc
+            import numpy as np
 
-            out = Tensor(
-                shape=self.shape,
-                device=device,
-                requires_grad=False,  # explicit reset
-                ctx=None,
-            )
-            out._ensure_cuda_alloc(dtype=np.dtype(arr.dtype))
-            out.copy_from_numpy(arr)
+            out = Tensor(shape=self.shape, device=device, requires_grad=False, ctx=None)
+            out._ensure_cuda_alloc(dtype=dtype)
+
+            lib = out._get_cuda_lib()
+
+            # IMPORTANT: ensure contiguous host buffer before raw memcpy
+            host = np.ascontiguousarray(self.to_numpy(), dtype=dtype)
+
+            nbytes = int(host.size) * int(host.dtype.itemsize)
+            if nbytes > 0:
+                mc.memcpy_htod(
+                    lib,
+                    dst_dev=int(out.data),
+                    src_host=host,
+                    nbytes=nbytes,
+                    sync=True,
+                )
             return out
 
-        # ---- CUDA -> CPU ----
+        # CUDA -> CPU
         if self.device.is_cuda() and device.is_cpu():
-            arr = self.to_numpy()
+            from ..native_cuda.python.ops import memcpy_ctypes as mc
 
-            out = Tensor(
-                shape=self.shape,
-                device=device,
-                requires_grad=False,
-                ctx=None,
-            )
-            out.copy_from_numpy(arr)
+            out = Tensor(shape=self.shape, device=device, requires_grad=False, ctx=None)
+            host = np.empty(self.shape, dtype=dtype)  # contiguous
+            lib = self._get_cuda_lib()
+
+            self._ensure_cuda_alloc(dtype=dtype)
+            if nbytes > 0:
+                mc.memcpy_dtoh(
+                    lib, dst_host=host, src_dev=int(self.data), nbytes=nbytes, sync=True
+                )
+
+            out.copy_from_numpy(host)
             return out
 
-        raise RuntimeError(
-            f"Tensor.to(): unsupported device transfer {self.device!r} -> {device!r}"
-        )
+        # CUDA -> CUDA (different device index)
+        if self.device.is_cuda() and device.is_cuda():
+            # simplest safe path for now: D2H then H2D
+            return self.to("cpu", copy=True).to(device, copy=True)
+
+        self._raise_device_not_supported("to")
 
     def clone(self) -> "Tensor":
         """
@@ -4363,76 +4373,199 @@ class Tensor(ITensor):
 
     def __getitem__(self, key: Any) -> "Tensor":
         """
-        Slice/index into a tensor (CPU-only), producing a new Tensor.
+        Slice/index into a tensor, producing a new Tensor.
 
-        Notes
-        -----
-        - This returns a *copy* (not a view) for simplicity.
+        CPU behavior
+        ------------
+        - Uses NumPy slicing/indexing and returns a *copy* (not a view).
         - Backward rule scatters grad_out back into the parent tensor shape.
         - Supports basic slicing and NumPy-style fancy indexing.
+
+        CUDA behavior (workaround)
+        --------------------------
+        - Currently implemented as a CPU fallback:
+            1) D2H copy of `self` to CPU
+            2) NumPy slicing/indexing on CPU
+            3) H2D copy of the sliced result back to CUDA
+        - Backward is also CPU-scatter + H2D copy.
+
+        TODO
+        ----
+        - Implement native CUDA gather for forward and scatter/add for backward
+        (especially to support fancy indexing efficiently and avoid round-trips).
         """
-        if not self.device.is_cpu():
-            self._raise_device_not_supported("getitem")
+        import numpy as np
 
-        # Forward: NumPy slice/index
-        src = self.to_numpy()
-        sliced = src[key]
+        # -------------------------
+        # Helpers
+        # -------------------------
+        def _is_fancy(k: Any) -> bool:
+            # Bool mask, list, ndarray => fancy
+            if isinstance(k, (list, np.ndarray)):
+                return True
+            if isinstance(k, tuple):
+                return any(isinstance(kk, (list, np.ndarray)) for kk in k)
+            return False
 
-        # Normalize scalar outputs to shape=()
-        if np.isscalar(sliced) or getattr(sliced, "shape", None) == ():
-            sliced_arr = np.array(sliced, dtype=np.float32)  # shape ()
-            out_shape = ()
-        else:
-            sliced_arr = np.asarray(sliced, dtype=np.float32)
-            out_shape = sliced_arr.shape
+        # Keep dtype handling consistent across CPU/CUDA paths.
+        # (Many of your kernels/tests assume float32; if you later support float64,
+        # this will follow `self.dtype`.)
+        dt = np.dtype(getattr(self, "dtype", np.float32))
 
-        req = self.requires_grad
-        out = Tensor(shape=out_shape, device=self.device, requires_grad=req)
-        out.copy_from_numpy(sliced_arr)
+        # -------------------------
+        # CPU path (unchanged semantics)
+        # -------------------------
+        if self.device.is_cpu():
+            src = self.to_numpy()
+            sliced = src[key]
 
-        if req:
+            # Normalize scalar outputs to shape=()
+            if np.isscalar(sliced) or getattr(sliced, "shape", None) == ():
+                sliced_arr = np.array(sliced, dtype=dt)  # shape ()
+                out_shape = ()
+            else:
+                # Ensure a real ndarray of the desired dtype (still a copy semantic).
+                sliced_arr = np.asarray(sliced, dtype=dt)
+                out_shape = sliced_arr.shape
 
-            def backward_fn(grad_out: "Tensor"):
-                if not grad_out.device.is_cpu():
-                    raise RuntimeError("grad_out must be CPU in current implementation")
+            req = self.requires_grad
+            out = Tensor(shape=out_shape, device=self.device, requires_grad=req)
+            out.copy_from_numpy(sliced_arr)
 
-                g_out_np = grad_out.to_numpy()
-                grad_parent_np = np.zeros(self.shape, dtype=np.float32)
+            if req:
 
-                # Determine whether this key uses fancy/advanced indexing,
-                # where `grad_parent_np[key] += ...` would NOT accumulate correctly.
-                def _is_fancy(k: Any) -> bool:
-                    # Bool mask, list, ndarray => fancy
-                    if isinstance(k, (list, np.ndarray)):
-                        return True
-                    # Tuple: if any component is fancy => fancy
-                    if isinstance(k, tuple):
-                        return any(isinstance(kk, (list, np.ndarray)) for kk in k)
-                    return False
+                def backward_fn(grad_out: "Tensor"):
+                    if not grad_out.device.is_cpu():
+                        raise RuntimeError(
+                            "grad_out must be CPU in current implementation"
+                        )
 
+                    g_out_np = grad_out.to_numpy()
+                    grad_parent_np = np.zeros(self.shape, dtype=dt)
+
+                    fancy = _is_fancy(key)
+                    if fancy:
+                        np.add.at(grad_parent_np, key, g_out_np)
+                    else:
+                        grad_parent_np[key] += g_out_np
+
+                    grad_parent = Tensor(
+                        shape=self.shape,
+                        device=self.device,
+                        requires_grad=False,
+                        ctx=None,
+                    )
+                    grad_parent.copy_from_numpy(grad_parent_np)
+                    return (grad_parent,)
+
+                ctx = Context(parents=(self,), backward_fn=backward_fn)
+                ctx.saved_meta["getitem_key"] = key
+                ctx.saved_meta["parent_shape"] = self.shape
+                out._set_ctx(ctx)
+
+            return out
+
+        # -------------------------
+        # CUDA path (CPU fallback workaround)
+        # -------------------------
+        if self.device.is_cuda():
+            # 1) D2H: bring self to CPU
+            x_cpu = self.to(Device("cpu"), copy=True)
+
+            # 2) NumPy slice/index on CPU
+            src = x_cpu.to_numpy()
+            sliced = src[key]
+
+            if np.isscalar(sliced) or getattr(sliced, "shape", None) == ():
+                sliced_arr = np.array(sliced, dtype=dt)  # shape ()
+                out_shape = ()
+            else:
+                # CRITICAL FIX:
+                # - NumPy slicing often returns a *strided, non-contiguous view*.
+                # - Raw memcpy assumes contiguous bytes. Force contiguity here.
+                sliced_arr = np.ascontiguousarray(sliced, dtype=dt)
+                out_shape = sliced_arr.shape
+
+            req = self.requires_grad
+            out = Tensor(
+                shape=out_shape, device=self.device, requires_grad=req, ctx=None
+            )
+            out._ensure_cuda_alloc(dtype=dt)
+
+            # 3) H2D: copy sliced result back to CUDA
+            from ..native_cuda.python.ops import memcpy_ctypes as mc
+
+            lib_out = out._get_cuda_lib()
+
+            # Ensure the host buffer passed to memcpy is contiguous
+            sliced_host = np.ascontiguousarray(sliced_arr, dtype=dt)
+            mc.memcpy_htod(
+                lib_out,
+                dst_dev=int(out.data),
+                src_host=sliced_host,
+                nbytes=int(sliced_host.nbytes),
+                sync=True,
+            )
+
+            if req:
                 fancy = _is_fancy(key)
 
-                if fancy:
-                    # np.add.at correctly accumulates for repeated indices
-                    np.add.at(grad_parent_np, key, g_out_np)
-                else:
-                    # Basic slicing/integer indexing: still conceptually an accumulation op
-                    grad_parent_np[key] += g_out_np
+                def backward_fn(grad_out: "Tensor"):
+                    # Expect CUDA grad_out for CUDA parent
+                    if not grad_out.device.is_cuda():
+                        raise RuntimeError(
+                            "grad_out must be CUDA for CUDA getitem backward"
+                        )
+                    if str(grad_out.device) != str(self.device):
+                        raise RuntimeError(
+                            f"grad_out device mismatch: expected {self.device!r}, got {grad_out.device!r}"
+                        )
 
-                grad_parent = Tensor(
-                    shape=self.shape, device=self.device, requires_grad=False, ctx=None
+                    # CPU fallback backward:
+                    # - D2H grad_out
+                    go_cpu = grad_out.to(Device("cpu"), copy=True)
+                    g_out_np = go_cpu.to_numpy()
+
+                    grad_parent_np = np.zeros(self.shape, dtype=dt)
+
+                    if fancy:
+                        np.add.at(grad_parent_np, key, g_out_np)
+                    else:
+                        grad_parent_np[key] += g_out_np
+
+                    # H2D scatter result as grad for parent
+                    grad_parent = Tensor(
+                        shape=self.shape,
+                        device=self.device,
+                        requires_grad=False,
+                        ctx=None,
+                    )
+                    grad_parent._ensure_cuda_alloc(dtype=dt)
+
+                    lib_gp = grad_parent._get_cuda_lib()
+
+                    # Ensure contiguous before memcpy (even though zeros_like is contiguous,
+                    # this keeps the rule consistent and future-proof).
+                    gp_host = np.ascontiguousarray(grad_parent_np, dtype=dt)
+
+                    mc.memcpy_htod(
+                        lib_gp,
+                        dst_dev=int(grad_parent.data),
+                        src_host=gp_host,
+                        nbytes=int(gp_host.nbytes),
+                        sync=True,
+                    )
+                    return (grad_parent,)
+
+                ctx = Context(parents=(self,), backward_fn=backward_fn)
+                ctx.saved_meta["getitem_key"] = key
+                ctx.saved_meta["parent_shape"] = self.shape
+                ctx.saved_meta["cuda_cpu_fallback"] = (
+                    True  # TODO: remove after CUDA kernel
                 )
-                grad_parent.copy_from_numpy(grad_parent_np)
-                return (grad_parent,)
+                out._set_ctx(ctx)
 
-            ctx = Context(
-                parents=(self,),
-                backward_fn=backward_fn,
-            )
-            # Optional: keep debug metadata
-            ctx.saved_meta["getitem_key"] = key
-            ctx.saved_meta["parent_shape"] = self.shape
+            return out
 
-            out._set_ctx(ctx)
-
-        return out
+        self._raise_device_not_supported("getitem")
+        raise RuntimeError("Unreachable")
