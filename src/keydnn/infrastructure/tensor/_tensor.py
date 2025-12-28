@@ -39,10 +39,17 @@ Number = Union[int, float]
 
 from .mixins.unary import TensorMixinUnary
 from .mixins.reduction import TensorMixinReduction
+from .mixins.comparison import TensorMixinComparison
 from .mixins.arithmetic import TensorMixinArithmetic
 
 
-class Tensor(TensorMixinUnary, TensorMixinReduction, TensorMixinArithmetic, ITensor):
+class Tensor(
+    TensorMixinUnary,
+    TensorMixinReduction,
+    TensorMixinComparison,
+    TensorMixinArithmetic,
+    ITensor,
+):
     """
     Concrete tensor implementation (NumPy CPU backend, CUDA placeholder).
 
@@ -2080,175 +2087,6 @@ class Tensor(TensorMixinUnary, TensorMixinReduction, TensorMixinArithmetic, ITen
             return
 
         self._raise_device_not_supported("fill")
-
-    # ----------------------------
-    # Comparisons (no grad)
-    # ----------------------------
-    def __gt__(self, other: Union["Tensor", Number]) -> "Tensor":
-        """
-        Elementwise greater-than comparison (no gradients).
-
-        Parameters
-        ----------
-        other : Union[Tensor, Number]
-            Right-hand operand. Scalars are lifted to tensors matching this
-            tensor's shape and device.
-
-        Returns
-        -------
-        Tensor
-            A float32 tensor with 1.0 where `self > other`, else 0.0.
-
-        Notes
-        -----
-        Comparison operations do not participate in autograd in this minimal
-        implementation (the result always has `requires_grad=False`).
-        """
-        other_t = self._as_tensor_like(other, self)
-
-        # -----------------------------
-        # CPU path
-        # -----------------------------
-        if self._device.is_cpu() and other_t.device.is_cpu():
-            self._binary_op_shape_check(self, other_t)
-
-            out = Tensor(shape=self.shape, device=self.device, requires_grad=False)
-            out.copy_from_numpy(
-                (self.to_numpy() > other_t.to_numpy()).astype(np.float32)
-            )
-            return out
-
-        # -----------------------------
-        # CUDA path
-        # -----------------------------
-        if self._device.is_cuda() and other_t.device.is_cuda():
-            self._binary_op_shape_check(self, other_t)
-
-            # dtype must match for CUDA comparison kernels
-            if np.dtype(self.dtype) != np.dtype(other_t.dtype):
-                raise TypeError(
-                    f"dtype mismatch: self.dtype={np.dtype(self.dtype)} vs other.dtype={np.dtype(other_t.dtype)}"
-                )
-
-            from ..ops.tensor_arithmetic_cuda_ext import gt as _cuda_gt
-
-            device_index = int(getattr(self._device, "index", 0) or 0)
-            out = _cuda_gt(self, other_t, device=device_index)
-
-            # Explicitly ensure no gradients
-            out.requires_grad = False
-            return out
-
-        self._raise_device_not_supported("gt")
-
-    # ----------------------------
-    # Comparisons (no grad)
-    # ----------------------------
-    def __ge__(self, other: Union["Tensor", Number]) -> "Tensor":
-        """
-        Elementwise greater-than-or-equal comparison (no gradients).
-
-        Parameters
-        ----------
-        other : Union[Tensor, Number]
-            Right-hand operand. Scalars are lifted to tensors matching this
-            tensor's shape and device.
-
-        Returns
-        -------
-        Tensor
-            A float32 tensor with 1.0 where `self >= other`, else 0.0.
-
-        Notes
-        -----
-        Comparison operations do not participate in autograd in this minimal
-        implementation (the result always has `requires_grad=False`).
-
-        Implementation
-        --------------
-        Uses only `gt` + `neg`:
-            a >= b  <=>  not (b > a)
-        """
-        other_t = self._as_tensor_like(other, self)
-
-        # Ensure same shape (and implicitly same device support path via __gt__)
-        self._binary_op_shape_check(self, other_t)
-
-        # ge = 1 - (other > self)
-        gt = other_t.__gt__(self)  # float32 mask
-        one = self._as_tensor_like(1.0, gt)
-        out = one - gt
-
-        out.requires_grad = False
-        return out
-
-    def __lt__(self, other: Union["Tensor", Number]) -> "Tensor":
-        """
-        Elementwise less-than comparison (no gradients).
-
-        Parameters
-        ----------
-        other : Union[Tensor, Number]
-            Right-hand operand. Scalars are lifted to tensors matching this
-            tensor's shape and device.
-
-        Returns
-        -------
-        Tensor
-            A float32 tensor with 1.0 where `self < other`, else 0.0.
-
-        Notes
-        -----
-        Comparison operations do not participate in autograd in this minimal
-        implementation (the result always has `requires_grad=False`).
-
-        Implementation
-        --------------
-        Uses only `gt`:
-            a < b  <=>  b > a
-        """
-        other_t = self._as_tensor_like(other, self)
-        self._binary_op_shape_check(self, other_t)
-
-        out = other_t.__gt__(self)
-        out.requires_grad = False
-        return out
-
-    def __le__(self, other: Union["Tensor", Number]) -> "Tensor":
-        """
-        Elementwise less-than-or-equal comparison (no gradients).
-
-        Parameters
-        ----------
-        other : Union[Tensor, Number]
-            Right-hand operand. Scalars are lifted to tensors matching this
-            tensor's shape and device.
-
-        Returns
-        -------
-        Tensor
-            A float32 tensor with 1.0 where `self <= other`, else 0.0.
-
-        Notes
-        -----
-        Comparison operations do not participate in autograd in this minimal
-        implementation (the result always has `requires_grad=False`).
-
-        Implementation
-        --------------
-        Uses only `gt` + `neg`:
-            a <= b  <=>  not (a > b)
-        """
-        other_t = self._as_tensor_like(other, self)
-        self._binary_op_shape_check(self, other_t)
-
-        # le = 1 - (self > other)
-        gt = self.__gt__(other_t)  # float32 mask
-        one = self._as_tensor_like(1.0, gt)
-        out = one - gt
-
-        out.requires_grad = False
-        return out
 
     def copy_from_numpy(self, arr) -> None:
         """
