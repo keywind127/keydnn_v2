@@ -1089,38 +1089,6 @@ class Tensor(ITensor):
         """
         return self.transpose()
 
-    def exp(self) -> "Tensor":
-        """
-        Compute the elementwise exponential of the tensor.
-
-        Returns
-        -------
-        Tensor
-            A tensor of the same shape as `self` with exp applied elementwise.
-
-        Notes
-        -----
-        Backward rule:
-            d(exp(x))/dx = exp(x)
-        """
-        if not self.device.is_cpu():
-            self._raise_device_not_supported("exp")
-
-        out = Tensor(
-            shape=self.shape, device=self.device, requires_grad=self.requires_grad
-        )
-        out.copy_from_numpy(np.exp(self.to_numpy()).astype(np.float32, copy=False))
-
-        if self.requires_grad:
-            # Save output to reuse in backward
-            ctx = Context(
-                parents=(self,),
-                backward_fn=lambda grad_out: (grad_out * out,),
-            )
-            out._set_ctx(ctx)
-
-        return out
-
     def broadcast_to(self, shape: tuple[int, ...]) -> "Tensor":
         """
         Broadcast this tensor to a target shape by explicit expansion (CPU-only).
@@ -1361,183 +1329,6 @@ class Tensor(ITensor):
             out.copy_from_numpy(a.to_numpy() + b.to_numpy())
             return out
         a._raise_device_not_supported("add_no_grad")
-
-    def sum(self, axis: Optional[int] = None, keepdims: bool = False) -> "Tensor":
-        """
-        Sum elements of the tensor.
-
-        Parameters
-        ----------
-        axis : Optional[int], optional
-            Axis along which to sum. If None, sums all elements into a scalar.
-        keepdims : bool, optional
-            If True, retains reduced dimensions with size 1.
-
-        Returns
-        -------
-        Tensor
-            Reduced tensor.
-
-        Notes
-        -----
-        Backward rule:
-            Gradient is broadcast back to input shape.
-        """
-        # -----------------------
-        # CUDA path (all-reduce only)
-        # -----------------------
-        if self.device.is_cuda():
-            if axis is not None:
-                raise NotImplementedError(
-                    "Tensor.sum(axis=...) for CUDA is not implemented yet "
-                    "(only axis=None / sum_all is supported)."
-                )
-
-            dtype = np.float32  # TODO: replace with self.dtype if you track it
-            numel = int(self.numel())
-
-            out_shape = () if not keepdims else tuple(1 for _ in self.shape)
-
-            # IMPORTANT: do not assume Tensor(...) auto-allocates device memory.
-            # Allocate dev scalar explicitly if needed.
-            from ..native_cuda.python.maxpool2d_ctypes import (
-                load_keydnn_cuda_native as _load_lib,
-            )
-            from ..ops.reduce_cuda import (
-                sum_all_cuda as _sum_all_cuda,
-                sum_backward_fill_cuda as _sum_bwd_fill_cuda,
-            )
-
-            from ..native_cuda.python.maxpool2d_ctypes import (
-                load_keydnn_cuda_native as _load_lib,
-                cuda_malloc as _cuda_malloc,
-                cuda_synchronize as _cuda_sync,
-            )
-
-            lib = _load_lib()
-
-            out = Tensor(
-                shape=out_shape, device=self.device, requires_grad=self.requires_grad
-            )
-
-            # robustly get/set devptrs via `.data` (your tests/free code uses this)
-            x_dev = int(self.data)
-
-            y_dev = int(getattr(out, "data", 0) or 0)
-            if y_dev == 0:
-                y_dev = int(_cuda_malloc(lib, int(np.dtype(dtype).itemsize)))
-                # wrap/attach devptr to out
-                out = Tensor._from_devptr(
-                    dev_ptr=y_dev,
-                    shape=out_shape,
-                    device=self.device,
-                    requires_grad=self.requires_grad,
-                    ctx=None,
-                    dtype=dtype,
-                )
-
-            _sum_all_cuda(lib, x_dev=x_dev, y_dev=y_dev, numel=numel, dtype=dtype)
-            _cuda_sync(lib)
-
-            if self.requires_grad:
-
-                def backward_fn(grad_out: "Tensor"):
-                    if not grad_out.device.is_cuda():
-                        raise RuntimeError(
-                            "grad_out must be CUDA for CUDA Tensor.sum backward"
-                        )
-
-                    go_dev = int(grad_out.data)
-
-                    grad = Tensor(
-                        shape=self.shape, device=self.device, requires_grad=False
-                    )
-
-                    gx_dev = int(getattr(grad, "data", 0) or 0)
-                    if gx_dev == 0:
-                        gx_dev = int(
-                            _cuda_malloc(
-                                lib, int(numel) * int(np.dtype(dtype).itemsize)
-                            )
-                        )
-                        grad = Tensor._from_devptr(
-                            dev_ptr=gx_dev,
-                            shape=self.shape,
-                            device=self.device,
-                            requires_grad=False,
-                            ctx=None,
-                            dtype=dtype,
-                        )
-
-                    _sum_bwd_fill_cuda(
-                        lib,
-                        grad_out_dev=go_dev,  # scalar on device
-                        grad_x_dev=gx_dev,
-                        numel=numel,
-                        dtype=dtype,
-                    )
-                    _cuda_sync(lib)
-                    return (grad,)
-
-                ctx = Context(parents=(self,), backward_fn=backward_fn)
-                ctx.saved_meta["axis"] = axis
-                ctx.saved_meta["keepdims"] = keepdims
-                out._set_ctx(ctx)
-
-            return out
-
-        # -----------------------
-        # CPU path (unchanged)
-        # -----------------------
-        if not self.device.is_cpu():
-            self._raise_device_not_supported("sum")
-
-        x_np = self.to_numpy()
-        if axis is None:
-            value = np.sum(x_np)
-            out_shape = () if not keepdims else tuple(1 for _ in self.shape)
-        else:
-            if not isinstance(axis, int):
-                raise TypeError("axis must be int or None")
-            ndim = x_np.ndim
-            axis_ = axis if axis >= 0 else ndim + axis
-            if axis_ < 0 or axis_ >= ndim:
-                raise ValueError(f"axis {axis} out of bounds for ndim {ndim}")
-            value = np.sum(x_np, axis=axis_, keepdims=keepdims)
-            out_shape = value.shape
-
-        out = Tensor(
-            shape=out_shape, device=self.device, requires_grad=self.requires_grad
-        )
-        out.copy_from_numpy(np.asarray(value, dtype=np.float32))
-
-        if self.requires_grad:
-
-            def backward_fn(grad_out: "Tensor"):
-                if not grad_out.device.is_cpu():
-                    raise RuntimeError("grad_out must be CPU in current implementation")
-
-                g = np.asarray(grad_out.to_numpy(), dtype=np.float32)
-
-                if axis is None:
-                    grad_np = np.ones(self.shape, dtype=np.float32) * float(
-                        np.asarray(g)
-                    )
-                else:
-                    if not keepdims:
-                        g = np.expand_dims(g, axis=axis_)
-                    grad_np = np.ones(self.shape, dtype=np.float32) * g
-
-                grad = Tensor(shape=self.shape, device=self.device, requires_grad=False)
-                grad.copy_from_numpy(grad_np)
-                return (grad,)
-
-            ctx = Context(parents=(self,), backward_fn=backward_fn)
-            ctx.saved_meta["axis"] = axis
-            ctx.saved_meta["keepdims"] = keepdims
-            out._set_ctx(ctx)
-
-        return out
 
     def mean(self) -> "Tensor":
         """
@@ -4569,3 +4360,244 @@ class Tensor(ITensor):
 
         self._raise_device_not_supported("getitem")
         raise RuntimeError("Unreachable")
+
+    def exp(self) -> "Tensor":
+        """
+        Compute the elementwise exponential of the tensor.
+
+        Returns
+        -------
+        Tensor
+            A tensor of the same shape as `self` with exp applied elementwise.
+
+        Notes
+        -----
+        Backward rule:
+            d(exp(x))/dx = exp(x)
+
+        CUDA behavior (workaround)
+        --------------------------
+        - Currently implemented as a CPU fallback:
+            1) D2H copy of `self` to CPU
+            2) NumPy exp on CPU
+            3) H2D copy of the result back to CUDA
+        - Backward uses the saved output tensor `out` (on the same device as the result).
+        """
+        import numpy as np
+
+        # CPU path: pure NumPy, stays on CPU
+        if self.device.is_cpu():
+            out = Tensor(
+                shape=self.shape, device=self.device, requires_grad=self.requires_grad
+            )
+            out.copy_from_numpy(np.exp(self.to_numpy()).astype(np.float32, copy=False))
+
+            if self.requires_grad:
+                ctx = Context(
+                    parents=(self,),
+                    backward_fn=lambda grad_out: (grad_out * out,),
+                )
+                out._set_ctx(ctx)
+
+            return out
+
+        # CUDA path (workaround): cuda -> cpu -> exp -> cpu -> cuda
+        if self.device.is_cuda():
+            out = Tensor(
+                shape=self.shape, device=self.device, requires_grad=self.requires_grad
+            )
+
+            # D2H via to_numpy(), compute on CPU
+            cpu_arr = self.to_numpy()
+            cpu_exp = np.exp(cpu_arr).astype(np.float32, copy=False)
+
+            # H2D via copy_from_numpy() into a CUDA tensor
+            out.copy_from_numpy(cpu_exp)
+
+            if self.requires_grad:
+                ctx = Context(
+                    parents=(self,),
+                    backward_fn=lambda grad_out: (grad_out * out,),
+                )
+                out._set_ctx(ctx)
+
+            return out
+
+        self._raise_device_not_supported("exp")
+
+    def sum(self, axis: Optional[int] = None, keepdims: bool = False) -> "Tensor":
+        """
+        Sum elements of the tensor.
+
+        Parameters
+        ----------
+        axis : Optional[int], optional
+            Axis along which to sum. If None, sums all elements into a scalar.
+        keepdims : bool, optional
+            If True, retains reduced dimensions with size 1.
+
+        Returns
+        -------
+        Tensor
+            Reduced tensor.
+
+        Notes
+        -----
+        Backward rule:
+            Gradient is broadcast back to input shape.
+        """
+        # -----------------------
+        # CUDA path (all-reduce only)
+        # -----------------------
+        if self.device.is_cuda():
+            if axis is not None:
+                raise NotImplementedError(
+                    "Tensor.sum(axis=...) for CUDA is not implemented yet "
+                    "(only axis=None / sum_all is supported)."
+                )
+
+            dtype = np.float32  # TODO: replace with self.dtype if you track it
+            numel = int(self.numel())
+
+            out_shape = () if not keepdims else tuple(1 for _ in self.shape)
+
+            # IMPORTANT: do not assume Tensor(...) auto-allocates device memory.
+            # Allocate dev scalar explicitly if needed.
+            from ..native_cuda.python.maxpool2d_ctypes import (
+                load_keydnn_cuda_native as _load_lib,
+            )
+            from ..ops.reduce_cuda import (
+                sum_all_cuda as _sum_all_cuda,
+                sum_backward_fill_cuda as _sum_bwd_fill_cuda,
+            )
+
+            from ..native_cuda.python.maxpool2d_ctypes import (
+                load_keydnn_cuda_native as _load_lib,
+                cuda_malloc as _cuda_malloc,
+                cuda_synchronize as _cuda_sync,
+            )
+
+            lib = _load_lib()
+
+            out = Tensor(
+                shape=out_shape, device=self.device, requires_grad=self.requires_grad
+            )
+
+            # robustly get/set devptrs via `.data` (your tests/free code uses this)
+            x_dev = int(self.data)
+
+            y_dev = int(getattr(out, "data", 0) or 0)
+            if y_dev == 0:
+                y_dev = int(_cuda_malloc(lib, int(np.dtype(dtype).itemsize)))
+                # wrap/attach devptr to out
+                out = Tensor._from_devptr(
+                    dev_ptr=y_dev,
+                    shape=out_shape,
+                    device=self.device,
+                    requires_grad=self.requires_grad,
+                    ctx=None,
+                    dtype=dtype,
+                )
+
+            _sum_all_cuda(lib, x_dev=x_dev, y_dev=y_dev, numel=numel, dtype=dtype)
+            _cuda_sync(lib)
+
+            if self.requires_grad:
+
+                def backward_fn(grad_out: "Tensor"):
+                    if not grad_out.device.is_cuda():
+                        raise RuntimeError(
+                            "grad_out must be CUDA for CUDA Tensor.sum backward"
+                        )
+
+                    go_dev = int(grad_out.data)
+
+                    grad = Tensor(
+                        shape=self.shape, device=self.device, requires_grad=False
+                    )
+
+                    gx_dev = int(getattr(grad, "data", 0) or 0)
+                    if gx_dev == 0:
+                        gx_dev = int(
+                            _cuda_malloc(
+                                lib, int(numel) * int(np.dtype(dtype).itemsize)
+                            )
+                        )
+                        grad = Tensor._from_devptr(
+                            dev_ptr=gx_dev,
+                            shape=self.shape,
+                            device=self.device,
+                            requires_grad=False,
+                            ctx=None,
+                            dtype=dtype,
+                        )
+
+                    _sum_bwd_fill_cuda(
+                        lib,
+                        grad_out_dev=go_dev,  # scalar on device
+                        grad_x_dev=gx_dev,
+                        numel=numel,
+                        dtype=dtype,
+                    )
+                    _cuda_sync(lib)
+                    return (grad,)
+
+                ctx = Context(parents=(self,), backward_fn=backward_fn)
+                ctx.saved_meta["axis"] = axis
+                ctx.saved_meta["keepdims"] = keepdims
+                out._set_ctx(ctx)
+
+            return out
+
+        # -----------------------
+        # CPU path (unchanged)
+        # -----------------------
+        if not self.device.is_cpu():
+            self._raise_device_not_supported("sum")
+
+        x_np = self.to_numpy()
+        if axis is None:
+            value = np.sum(x_np)
+            out_shape = () if not keepdims else tuple(1 for _ in self.shape)
+        else:
+            if not isinstance(axis, int):
+                raise TypeError("axis must be int or None")
+            ndim = x_np.ndim
+            axis_ = axis if axis >= 0 else ndim + axis
+            if axis_ < 0 or axis_ >= ndim:
+                raise ValueError(f"axis {axis} out of bounds for ndim {ndim}")
+            value = np.sum(x_np, axis=axis_, keepdims=keepdims)
+            out_shape = value.shape
+
+        out = Tensor(
+            shape=out_shape, device=self.device, requires_grad=self.requires_grad
+        )
+        out.copy_from_numpy(np.asarray(value, dtype=np.float32))
+
+        if self.requires_grad:
+
+            def backward_fn(grad_out: "Tensor"):
+                if not grad_out.device.is_cpu():
+                    raise RuntimeError("grad_out must be CPU in current implementation")
+
+                g = np.asarray(grad_out.to_numpy(), dtype=np.float32)
+
+                if axis is None:
+                    grad_np = np.ones(self.shape, dtype=np.float32) * float(
+                        np.asarray(g)
+                    )
+                else:
+                    if not keepdims:
+                        g = np.expand_dims(g, axis=axis_)
+                    grad_np = np.ones(self.shape, dtype=np.float32) * g
+
+                grad = Tensor(shape=self.shape, device=self.device, requires_grad=False)
+                grad.copy_from_numpy(grad_np)
+                return (grad,)
+
+            ctx = Context(parents=(self,), backward_fn=backward_fn)
+            ctx.saved_meta["axis"] = axis
+            ctx.saved_meta["keepdims"] = keepdims
+            out._set_ctx(ctx)
+
+        return out
