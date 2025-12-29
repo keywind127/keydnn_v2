@@ -53,7 +53,9 @@ import numpy as np
 # DLL loading
 # ---------------------------------------------------------------------
 
+from functools import lru_cache
 
+@lru_cache(maxsize = 1)
 def load_keydnn_cuda_native():
     import os
     import ctypes

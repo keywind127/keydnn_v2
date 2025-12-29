@@ -35,53 +35,51 @@ def tensor_mul_gpu(self: ITensor, other: Union["ITensor", Number]) -> "ITensor":
     """
     CUDA control path for elementwise tensor multiplication.
 
-    This implementation performs elementwise multiplication on CUDA tensors
-    using a native CUDA extension wrapper. It validates shape compatibility
-    (no broadcasting) and enforces dtype equality, consistent with the current
-    CUDA arithmetic kernels.
-
-    Parameters
-    ----------
-    self : ITensor
-        Left-hand operand tensor. Must reside on a CUDA device.
-    other : Union[ITensor, Number]
-        Right-hand operand. If a scalar, it is promoted to a tensor compatible
-        with `self` (same shape/device) via `_as_tensor_like`.
-
-    Returns
-    -------
-    ITensor
-        A CUDA tensor containing the elementwise result of ``self * other``.
-
-    Raises
-    ------
-    TypeError
-        If operand dtypes do not match.
-    NotImplementedError
-        If the device combination is not supported by this control path.
-
-    Notes
-    -----
-    - Broadcasting is not supported; shapes must match.
-    - Backward propagation follows elementwise multiplication rules:
-
-        * grad_a = grad_out * b
-        * grad_b = grad_out * a
-
-      The backward implementation uses existing Tensor operators; for CUDA
-      tensors these operators are expected to route to CUDA-compatible paths.
+    (Docstring unchanged; implementation includes a scalar fast-path to avoid
+    scalar-lifting into a full CUDA tensor.)
     """
+    import numpy as np
+
+    # Prefer the tensor's device index if available; otherwise default 0
+    device_index = int(getattr(self.device, "index", 0) or 0)
+
+    # -----------------------------
+    # CUDA scalar fast-path: y = self * alpha
+    # -----------------------------
+    if isinstance(other, (int, float)):
+        dt = np.dtype(self.dtype)
+        if dt not in (np.float32, np.float64):
+            raise TypeError(
+                f"CUDA mul scalar supports float32/float64 only; got dtype={dt}"
+            )
+
+        alpha = float(other)
+        req = bool(getattr(self, "requires_grad", False))
+
+        # New scalar ext wrapper (fast-path, no full-tensor scalar lifting)
+        from ....ops.mul_cuda_ext import mul_scalar_forward as _cuda_mul_scalar
+
+        out = _cuda_mul_scalar(self, alpha, device=device_index, sync=True)
+        out.requires_grad = bool(req)
+
+        if req:
+            # y = a * c  => dy/da = c ; scalar has no grad
+            ctx = Context(
+                parents=(self,),
+                backward_fn=lambda grad_out: (grad_out * alpha,),
+            )
+            out._set_ctx(ctx)
+
+        return out
+
+    # -----------------------------
+    # CUDA tensor path
+    # -----------------------------
     Tensor = type(self)
     other_t = self._as_tensor_like(other, self)
 
-    # -----------------------------
-    # CUDA path
-    # -----------------------------
     if other_t.device.is_cuda():
         self._binary_op_shape_check(self, other_t)
-
-        # Enforce same dtype semantics as other CUDA arithmetic ops ext
-        import numpy as np
 
         dt_self = np.dtype(self.dtype)
         dt_other = np.dtype(other_t.dtype)
@@ -92,12 +90,10 @@ def tensor_mul_gpu(self: ITensor, other: Union["ITensor", Number]) -> "ITensor":
 
         from ....ops.mul_cuda_ext import mul_forward as _cuda_mul
 
-        device_index = int(getattr(self.device, "index", 0) or 0)
         out = _cuda_mul(self, other_t, device=device_index, sync=True)
 
-        # Autograd (same rule as CPU)
         req = self._result_requires_grad(self, other_t)
-        out.requires_grad = bool(req)  # ensure flag matches graph needs
+        out.requires_grad = bool(req)
 
         if req:
             ctx = Context(

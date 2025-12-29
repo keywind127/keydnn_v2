@@ -80,3 +80,56 @@ def mul_cuda(
     )
     if st != 0:
         raise RuntimeError(f"{sym} failed with status={st}")
+
+
+def mul_scalar_cuda(
+    lib, *, a_dev: int, alpha: float, y_dev: int, numel: int, dtype: np.dtype
+) -> None:
+    """
+    Elementwise scalar multiply on CUDA: y = a * alpha
+
+    Parameters
+    ----------
+    a_dev : int
+        Device pointer to input tensor.
+    alpha : float
+        Scalar multiplier.
+    y_dev : int
+        Device pointer to output tensor.
+    numel : int
+        Number of elements.
+    dtype : np.dtype
+        np.float32 or np.float64.
+    """
+    dtype = np.dtype(dtype)
+    if dtype == np.float32:
+        sym = "keydnn_cuda_mul_scalar_f32"
+        arg_t = ctypes.c_float
+        scalar_t = ctypes.c_float
+    elif dtype == np.float64:
+        sym = "keydnn_cuda_mul_scalar_f64"
+        arg_t = ctypes.c_double
+        scalar_t = ctypes.c_double
+    else:
+        raise TypeError(f"mul_scalar_cuda supports float32/float64 only, got {dtype}")
+
+    addr = _get_proc_addr(lib, sym)
+    FN = ctypes.CFUNCTYPE(
+        ctypes.c_int,
+        ctypes.POINTER(arg_t),
+        scalar_t,
+        ctypes.POINTER(arg_t),
+        ctypes.c_int,
+    )
+    fn = FN(addr)
+
+    st = int(
+        fn(
+            ctypes.cast(ctypes.c_void_p(int(a_dev)), ctypes.POINTER(arg_t)),
+            scalar_t(alpha),
+            ctypes.cast(ctypes.c_void_p(int(y_dev)), ctypes.POINTER(arg_t)),
+            ctypes.c_int(int(numel)),
+        )
+    )
+    if st != 0:
+        raise RuntimeError(f"{sym} failed with status={st}")

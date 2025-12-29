@@ -204,6 +204,16 @@ class TensorMixinArithmetic(ABC):
         other_t = self._as_tensor_like(other, self)
         return other_t.__sub__(self)
 
+    def __isub__(self: ITensor, other: ITensor) -> ITensor:
+        # out-of-place compute
+        out = self.__sub__(other)
+
+        # IMPORTANT: write back into existing storage so model params mutate
+        # This must be device-aware (CPU->CPU, CUDA->CUDA)
+        self.copy_from(out)
+
+        return self
+
     # ----------------------------
     # Multiplication
     # ----------------------------

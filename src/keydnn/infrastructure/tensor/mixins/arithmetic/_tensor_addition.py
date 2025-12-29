@@ -36,46 +36,53 @@ def tensor_add_gpu(self: ITensor, other: Union["ITensor", Number]) -> "ITensor":
     CUDA control path for elementwise tensor addition.
 
     This implementation performs elementwise addition on CUDA tensors using
-    a native CUDA extension wrapper. It validates shape compatibility and
-    dtype equality (required by the current CUDA kernels), then delegates the
-    actual computation to the CUDA backend.
+    native CUDA extension wrappers.
 
-    Parameters
-    ----------
-    self : ITensor
-        Left-hand operand tensor. Must reside on a CUDA device.
-    other : Union[ITensor, Number]
-        Right-hand operand. If a scalar, it is promoted to a tensor compatible
-        with `self` (same shape/device) via `_as_tensor_like`.
+    Fast-path:
+    - If `other` is a Python scalar, dispatch to `add_scalar(self, alpha)` to
+      avoid scalar-lifting into a full device tensor.
 
-    Returns
-    -------
-    ITensor
-        A CUDA tensor containing the elementwise sum.
+    Tensor-path:
+    - If `other` is a CUDA tensor, dispatch to `add(self, other)`.
 
-    Raises
-    ------
-    TypeError
-        If `self` and `other` have mismatched dtypes (CUDA kernels require
-        identical dtypes).
-    NotImplementedError
-        If the device combination is not supported by this control path.
-
-    Notes
-    -----
-    - Broadcasting is not supported; shapes must match.
-    - Autograd backward for addition is:
-        d(a + b)/da = 1, d(a + b)/db = 1
-      so the upstream gradient is returned for both parents.
-    - The output device index is taken from `self.device.index` when available.
+    See original docstring for full semantics/notes.
     """
     import numpy as np
 
-    other_t = self._as_tensor_like(other, self)
+    # Prefer the tensor's device index if available; otherwise default 0
+    device_index = int(getattr(self.device, "index", 0) or 0)
 
     # -----------------------------
-    # CUDA path (device-pointer elementwise)
+    # CUDA scalar fast-path
     # -----------------------------
+    if isinstance(other, (int, float)):
+        # dtype gate (matches CUDA kernels / ext wrapper constraints)
+        dt = np.dtype(self.dtype)
+        if dt not in (np.float32, np.float64):
+            raise TypeError(f"add scalar requires float32/float64, got dtype={dt}")
+
+        req = bool(getattr(self, "requires_grad", False))
+
+        from ....ops.tensor_arithmetic_cuda_ext import add_scalar as _cuda_add_scalar
+
+        out = _cuda_add_scalar(self, float(other), device=device_index)
+        out.requires_grad = bool(req)
+
+        if req:
+            # y = x + alpha => dy/dx = 1, scalar has no grad
+            ctx = Context(
+                parents=(self,),
+                backward_fn=lambda grad_out: (grad_out,),
+            )
+            out._set_ctx(ctx)
+
+        return out
+
+    # -----------------------------
+    # CUDA tensor path (existing behavior)
+    # -----------------------------
+    other_t = self._as_tensor_like(other, self)
+
     if other_t.device.is_cuda():
         self._binary_op_shape_check(self, other_t)
 
@@ -87,11 +94,7 @@ def tensor_add_gpu(self: ITensor, other: Union["ITensor", Number]) -> "ITensor":
 
         req = self._result_requires_grad(self, other_t)
 
-        # Use your CUDA ext wrapper (allocates output and returns CUDA Tensor)
         from ....ops.tensor_arithmetic_cuda_ext import add as _cuda_add
-
-        # Prefer the tensor's device index if available; otherwise default 0
-        device_index = int(getattr(self.device, "index", 0) or 0)
 
         out = _cuda_add(self, other_t, device=device_index)
         out.requires_grad = bool(req)  # ensure flag matches CPU behavior

@@ -40,6 +40,27 @@ extern "C" {
 	KEYDNN_CUDA_API int keydnn_cuda_gt_f32(const float* a, const float* b, float* y, int64_t n);
 	KEYDNN_CUDA_API int keydnn_cuda_gt_f64(const double* a, const double* b, float* y, int64_t n);
 
+	// ----------------------------
+	// Add scalar
+	// ----------------------------
+	KEYDNN_CUDA_API int keydnn_cuda_add_scalar_f32(const float* a, float alpha, float* y, int64_t n);
+
+	KEYDNN_CUDA_API int keydnn_cuda_add_scalar_f64(const double* a, double alpha, double* y, int64_t n);
+
+	// ----------------------------
+	// Sub scalar
+	// ----------------------------
+	KEYDNN_CUDA_API int keydnn_cuda_sub_scalar_f32(const float* a, float alpha, float* y, int64_t n);
+
+	KEYDNN_CUDA_API int keydnn_cuda_sub_scalar_f64(const double* a, double alpha, double* y, int64_t n);
+
+	// ----------------------------
+	// Div scalar
+	// ----------------------------
+	KEYDNN_CUDA_API int keydnn_cuda_div_scalar_f32(const float* a, float alpha, float* y, int64_t n);
+
+	KEYDNN_CUDA_API int keydnn_cuda_div_scalar_f64(const double* a, double alpha, double* y, int64_t n);
+
 
 } // extern "C"
 

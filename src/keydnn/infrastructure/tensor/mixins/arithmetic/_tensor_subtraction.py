@@ -35,48 +35,47 @@ def tensor_sub_gpu(self: ITensor, other: Union["ITensor", Number]) -> "ITensor":
     """
     CUDA control path for elementwise tensor subtraction.
 
-    This implementation performs elementwise subtraction on CUDA tensors using
-    a native CUDA extension wrapper. It validates shape compatibility (no
-    broadcasting) and enforces dtype equality, consistent with the current CUDA
-    arithmetic kernels.
-
-    Parameters
-    ----------
-    self : ITensor
-        Left-hand operand tensor. Must reside on a CUDA device.
-    other : Union[ITensor, Number]
-        Right-hand operand. If a scalar, it is promoted to a tensor compatible
-        with `self` (same shape/device) via `_as_tensor_like`.
-
-    Returns
-    -------
-    ITensor
-        A CUDA tensor containing the elementwise result of ``self - other``.
-
-    Raises
-    ------
-    TypeError
-        If operand dtypes do not match.
-    NotImplementedError
-        If the device combination is not supported by this control path.
-
-    Notes
-    -----
-    - Broadcasting is not supported; shapes must match.
-    - Backward propagation for subtraction follows:
-
-        * grad_a = grad_out
-        * grad_b = -grad_out
-
-      The returned gradients correspond to (dL/da, dL/db).
+    (Docstring unchanged; implementation includes a scalar fast-path to avoid
+    scalar-lifting into a full CUDA tensor.)
     """
     import numpy as np
 
-    other_t = self._as_tensor_like(other, self)
+    # Prefer the tensor's device index if available; otherwise default 0
+    device_index = int(getattr(self.device, "index", 0) or 0)
 
     # -----------------------------
-    # CUDA path (device-pointer elementwise)
+    # CUDA scalar fast-path: y = self - alpha
     # -----------------------------
+    if isinstance(other, (int, float)):
+        dt = np.dtype(self.dtype)
+        if dt not in (np.float32, np.float64):
+            raise TypeError(
+                f"CUDA sub scalar supports float32/float64 only; got dtype={dt}"
+            )
+
+        alpha = float(other)
+        req = bool(getattr(self, "requires_grad", False))
+
+        from ....ops.tensor_arithmetic_cuda_ext import sub_scalar as _cuda_sub_scalar
+
+        out = _cuda_sub_scalar(self, alpha, device=device_index)
+        out.requires_grad = bool(req)
+
+        if req:
+            # y = a - c  => dy/da = 1 ; scalar has no grad
+            ctx = Context(
+                parents=(self,),
+                backward_fn=lambda grad_out: (grad_out,),
+            )
+            out._set_ctx(ctx)
+
+        return out
+
+    # -----------------------------
+    # CUDA tensor path (device-pointer elementwise)
+    # -----------------------------
+    other_t = self._as_tensor_like(other, self)
+
     if other_t.device.is_cuda():
         self._binary_op_shape_check(self, other_t)
 
@@ -88,8 +87,6 @@ def tensor_sub_gpu(self: ITensor, other: Union["ITensor", Number]) -> "ITensor":
         req = self._result_requires_grad(self, other_t)
 
         from ....ops.tensor_arithmetic_cuda_ext import sub as _cuda_sub
-
-        device_index = int(getattr(self.device, "index", 0) or 0)
 
         out = _cuda_sub(self, other_t, device=device_index)
         out.requires_grad = bool(req)

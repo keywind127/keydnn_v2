@@ -57,6 +57,10 @@ from ..native_cuda.python.ops.tensor_arithmetic_ctypes import (
     sub_cuda as _sub_cuda,
     div_cuda as _div_cuda,
     gt_cuda as _gt_cuda,
+    # NEW: scalar variants
+    add_scalar_cuda as _add_scalar_cuda,
+    sub_scalar_cuda as _sub_scalar_cuda,
+    div_scalar_cuda as _div_scalar_cuda,
 )
 
 # Reuse your existing DLL loader + CUDA utils (malloc/free/set_device).
@@ -509,3 +513,143 @@ def gt(a: Tensor, b: Tensor, *, device: int = 0) -> Tensor:
     except Exception:
         cuda_free(lib, y_dev)
         raise
+
+
+def add_scalar(a: Tensor, alpha: float, *, device: int = 0) -> Tensor:
+    """
+    Elementwise scalar add on CUDA: `y = a + alpha`.
+
+    Notes
+    -----
+    - No broadcasting: scalar is a true scalar value (not a Tensor).
+    - This avoids materializing a full scalar-filled Tensor on device.
+    """
+    _require_cuda(a, "a")
+    dt = _require_f32_f64(a, "a")
+
+    lib = _get_lib()
+    cuda_set_device(lib, int(device))
+
+    n = _numel(tuple(a.shape))
+    nbytes = int(n * np.dtype(dt).itemsize)
+    y_dev = cuda_malloc(lib, nbytes)
+
+    try:
+        _add_scalar_cuda(
+            lib,
+            a_dev=int(a.data),
+            alpha=float(alpha),
+            y_dev=int(y_dev),
+            n=int(n),
+            dtype=dt,
+        )
+        return Tensor._from_devptr(
+            int(y_dev),
+            shape=tuple(a.shape),
+            dtype=dt,
+            device=a.device,
+            requires_grad=False,
+        )
+    except Exception:
+        cuda_free(lib, y_dev)
+        raise
+
+
+def sub_scalar(a: Tensor, alpha: float, *, device: int = 0) -> Tensor:
+    """
+    Elementwise scalar sub on CUDA: `y = a - alpha`.
+
+    Notes
+    -----
+    - No broadcasting: scalar is a true scalar value (not a Tensor).
+    - This avoids materializing a full scalar-filled Tensor on device.
+    """
+    _require_cuda(a, "a")
+    dt = _require_f32_f64(a, "a")
+
+    lib = _get_lib()
+    cuda_set_device(lib, int(device))
+
+    n = _numel(tuple(a.shape))
+    nbytes = int(n * np.dtype(dt).itemsize)
+    y_dev = cuda_malloc(lib, nbytes)
+
+    try:
+        _sub_scalar_cuda(
+            lib,
+            a_dev=int(a.data),
+            alpha=float(alpha),
+            y_dev=int(y_dev),
+            n=int(n),
+            dtype=dt,
+        )
+        return Tensor._from_devptr(
+            int(y_dev),
+            shape=tuple(a.shape),
+            dtype=dt,
+            device=a.device,
+            requires_grad=False,
+        )
+    except Exception:
+        cuda_free(lib, y_dev)
+        raise
+
+
+def div_scalar(a: Tensor, alpha: float, *, device: int = 0) -> Tensor:
+    """
+    Elementwise scalar div on CUDA: `y = a / alpha`.
+
+    Notes
+    -----
+    - No broadcasting: scalar is a true scalar value (not a Tensor).
+    - This avoids materializing a full scalar-filled Tensor on device.
+    """
+    _require_cuda(a, "a")
+    dt = _require_f32_f64(a, "a")
+
+    lib = _get_lib()
+    cuda_set_device(lib, int(device))
+
+    n = _numel(tuple(a.shape))
+    nbytes = int(n * np.dtype(dt).itemsize)
+    y_dev = cuda_malloc(lib, nbytes)
+
+    try:
+        _div_scalar_cuda(
+            lib,
+            a_dev=int(a.data),
+            alpha=float(alpha),
+            y_dev=int(y_dev),
+            n=int(n),
+            dtype=dt,
+        )
+        return Tensor._from_devptr(
+            int(y_dev),
+            shape=tuple(a.shape),
+            dtype=dt,
+            device=a.device,
+            requires_grad=False,
+        )
+    except Exception:
+        cuda_free(lib, y_dev)
+        raise
+
+
+# ---- convenience aliases (match the tensor-tensor style) ----
+cuda_add_scalar = add_scalar
+cuda_sub_scalar = sub_scalar
+cuda_div_scalar = div_scalar
+
+__all__ = [
+    "neg",
+    "add",
+    "sub",
+    "div",
+    "gt",
+    "add_scalar",
+    "sub_scalar",
+    "div_scalar",
+    "cuda_add_scalar",
+    "cuda_sub_scalar",
+    "cuda_div_scalar",
+]

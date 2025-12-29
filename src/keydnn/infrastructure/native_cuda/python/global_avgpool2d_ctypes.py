@@ -55,7 +55,9 @@ from .maxpool2d_ctypes import (
 # Device pointer handle type: uintptr_t stored as Python int
 DevPtr = int
 
+from functools import lru_cache
 
+@lru_cache(maxsize = 1)
 def load_keydnn_cuda_native():
     import os
     import ctypes

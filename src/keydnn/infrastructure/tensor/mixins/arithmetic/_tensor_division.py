@@ -33,61 +33,54 @@ def tensor_truediv_gpu(self: ITensor, other: Union["ITensor", Number]) -> "ITens
     """
     CUDA control path for elementwise true division.
 
-    This implementation performs elementwise division on CUDA tensors using
-    a native CUDA extension wrapper. It validates shape compatibility, enforces
-    dtype constraints required by the CUDA kernels (float32/float64 only, and
-    matching dtypes), and requires both operands to reside on the same CUDA
-    device.
-
-    Parameters
-    ----------
-    self : ITensor
-        Left-hand operand tensor. Must reside on a CUDA device.
-    other : Union[ITensor, Number]
-        Right-hand operand. If a scalar, it is promoted to a tensor compatible
-        with `self` (same shape/device) via `_as_tensor_like`.
-
-    Returns
-    -------
-    ITensor
-        A CUDA tensor containing the elementwise result of ``self / other``.
-
-    Raises
-    ------
-    TypeError
-        If operand dtypes are not float32/float64, or if dtypes do not match.
-    ValueError
-        If the operands reside on different CUDA devices.
-    NotImplementedError
-        If the device combination is not supported by this control path.
-
-    Notes
-    -----
-    - Broadcasting is not supported; shapes must match.
-    - Backward propagation follows elementwise division rules:
-
-        * grad_a = grad_out / b
-        * grad_b = -(grad_out * a) / (b * b)
-
-      The backward implementation uses existing Tensor operators; for CUDA
-      tensors these operators are expected to route to CUDA-compatible paths.
+    (Docstring unchanged; implementation includes a scalar fast-path to avoid
+    scalar-lifting into a full CUDA tensor.)
     """
+    import numpy as np
+
+    # Prefer the tensor's device index if available; otherwise default 0
+    device_index = int(getattr(self.device, "index", 0) or 0)
+
+    # -----------------------------
+    # CUDA scalar fast-path: y = self / alpha
+    # -----------------------------
+    if isinstance(other, (int, float)):
+        dt = np.dtype(self.dtype)
+        if dt not in (np.float32, np.float64):
+            raise TypeError(
+                f"CUDA truediv scalar supports float32/float64 only; got dtype={dt}"
+            )
+
+        alpha = float(other)
+        req = bool(getattr(self, "requires_grad", False))
+
+        from ....ops.tensor_arithmetic_cuda_ext import div_scalar as _cuda_div_scalar
+
+        out = _cuda_div_scalar(self, alpha, device=device_index)
+        out.requires_grad = bool(req)
+
+        if req:
+            # y = a / c  => dy/da = 1/c ; scalar has no grad
+            ctx = Context(
+                parents=(self,),
+                backward_fn=lambda grad_out: (grad_out / alpha,),
+            )
+            out._set_ctx(ctx)
+
+        return out
+
+    # ----------------------------
+    # CUDA tensor path (device-pointer, no to_numpy)
+    # ----------------------------
     other_t = self._as_tensor_like(other, self)
-    # ----------------------------
-    # CUDA path (device-pointer, no to_numpy)
-    # ----------------------------
+
     if other_t.device.is_cuda():
         self._binary_op_shape_check(self, other_t)
 
         # Enforce dtype policy consistent with CUDA kernels (f32/f64 only, same dtype)
-        import numpy as np
-
         dt_a = np.dtype(self.dtype)
         dt_b = np.dtype(other_t.dtype)
-        if dt_a not in (np.float32, np.float64) or dt_b not in (
-            np.float32,
-            np.float64,
-        ):
+        if dt_a not in (np.float32, np.float64) or dt_b not in (np.float32, np.float64):
             raise TypeError(
                 f"CUDA truediv supports float32/float64 only; got self.dtype={dt_a}, other.dtype={dt_b}"
             )
@@ -104,7 +97,6 @@ def tensor_truediv_gpu(self: ITensor, other: Union["ITensor", Number]) -> "ITens
 
         from ....ops.tensor_arithmetic_cuda_ext import div as _cuda_div
 
-        device_index = int(self.device.index or 0)
         req = self._result_requires_grad(self, other_t)
 
         out = _cuda_div(self, other_t, device=device_index)
@@ -113,7 +105,6 @@ def tensor_truediv_gpu(self: ITensor, other: Union["ITensor", Number]) -> "ITens
         if req:
             # grad_a = grad_out / b
             # grad_b = -(grad_out * a) / (b*b)
-            # Use existing Tensor ops; for CUDA these should route to CUDA-friendly paths.
             ctx = Context(
                 parents=(self, other_t),
                 backward_fn=lambda grad_out: (

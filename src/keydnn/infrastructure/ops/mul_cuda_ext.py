@@ -45,7 +45,10 @@ from typing import Tuple
 import numpy as np
 
 from ..tensor._tensor import Tensor
-from ..native_cuda.python.ops.unary_ctypes import mul_cuda as _mul_ctypes
+from ..native_cuda.python.ops.unary_ctypes import (
+    mul_cuda as _mul_ctypes,
+    mul_scalar_cuda as _mul_scalar_ctypes,
+)
 
 # Reuse existing DLL loader + CUDA utils
 from .pool2d_cuda import _load_cuda_lib, cuda_set_device, cuda_malloc, cuda_free
@@ -250,8 +253,95 @@ def mul_forward(a: Tensor, b: Tensor, *, device: int = 0, sync: bool = True) -> 
         raise
 
 
+def mul_scalar_forward(
+    a: Tensor,
+    alpha: float,
+    *,
+    device: int = 0,
+    sync: bool = True,
+) -> Tensor:
+    """
+    Elementwise scalar multiply on CUDA: `y = a * alpha`.
+
+    This is a fast path that avoids allocating a full tensor for the scalar.
+    It dispatches directly to a CUDA scalar-multiply kernel.
+
+    Parameters
+    ----------
+    a : Tensor
+        CUDA tensor of any shape, dtype float32/float64.
+    alpha : float
+        Scalar multiplier.
+    device : int, optional
+        CUDA device ordinal to set before allocation and kernel launch.
+        Defaults to 0.
+    sync : bool, optional
+        Accepted for API symmetry. Synchronization behavior depends on the
+        native implementation. Defaults to True.
+
+    Returns
+    -------
+    Tensor
+        CUDA tensor with the same shape and dtype as `a`.
+
+    Raises
+    ------
+    TypeError
+        If `a` is not CUDA or dtype is not float32/float64.
+    ValueError
+        If the computed number of elements is <= 0.
+    RuntimeError
+        If the underlying CUDA kernel reports failure.
+    """
+    _require_cuda(a, "a")
+    dt = _require_f32_f64(a, "a")
+
+    numel = _numel(tuple(int(d) for d in a.shape))
+    if numel <= 0:
+        raise ValueError(f"mul_scalar_forward requires numel > 0, got {numel}")
+
+    lib = _load_cuda_lib()
+    cuda_set_device(lib, int(device))
+
+    nbytes_y = int(numel * np.dtype(dt).itemsize)
+    y_dev = cuda_malloc(lib, nbytes_y)
+
+    try:
+        _mul_scalar_ctypes(
+            lib,
+            a_dev=int(a.data),
+            alpha=float(alpha),
+            y_dev=int(y_dev),
+            numel=int(numel),
+            dtype=np.dtype(dt),
+        )
+
+        _ = bool(sync)
+
+        return Tensor._from_devptr(
+            int(y_dev),
+            shape=tuple(int(d) for d in a.shape),
+            dtype=dt,
+            device=a.device,
+            requires_grad=False,
+        )
+    except Exception:
+        cuda_free(lib, y_dev)
+        raise
+
+
+# Convenience aliases
 # Convenience aliases
 mul = mul_forward
 cuda_mul = mul_forward
+mul_scalar = mul_scalar_forward
+cuda_mul_scalar = mul_scalar_forward
 
-__all__ = ["mul_forward", "mul", "cuda_mul"]
+__all__ = [
+    "mul_forward",
+    "mul",
+    "cuda_mul",
+    "mul_scalar_forward",
+    "mul_scalar",
+    "cuda_mul_scalar",
+]

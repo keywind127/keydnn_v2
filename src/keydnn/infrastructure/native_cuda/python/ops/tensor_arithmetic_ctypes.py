@@ -151,6 +151,22 @@ def _select_sym_and_ctype(sym_base: str, dtype: np.dtype) -> tuple[str, type]:
     raise TypeError(f"{sym_base} supports float32/float64 only, got {dtype}")
 
 
+def _select_scalar_sym_and_ctype(sym_base: str, dtype: np.dtype) -> tuple[str, type]:
+    """
+    Map a base scalar symbol name and dtype to a concrete symbol and element ctype.
+
+    Example:
+        ("keydnn_cuda_add_scalar", float32)
+        -> ("keydnn_cuda_add_scalar_f32", ctypes.c_float)
+    """
+    dtype = np.dtype(dtype)
+    if dtype == np.float32:
+        return f"{sym_base}_f32", ctypes.c_float
+    if dtype == np.float64:
+        return f"{sym_base}_f64", ctypes.c_double
+    raise TypeError(f"{sym_base} supports float32/float64 only, got {dtype}")
+
+
 # ----------------------------
 # Unary: neg
 # ----------------------------
@@ -480,6 +496,114 @@ def gt_cuda(
             ctypes.cast(ctypes.c_void_p(int(a_dev)), ctypes.POINTER(a_t)),
             ctypes.cast(ctypes.c_void_p(int(b_dev)), ctypes.POINTER(a_t)),
             ctypes.cast(ctypes.c_void_p(int(y_dev)), ctypes.POINTER(ctypes.c_float)),
+            ctypes.c_int64(int(n)),
+        )
+    )
+    if st != 0:
+        raise RuntimeError(f"{sym} failed with status={st}")
+
+
+def add_scalar_cuda(
+    lib,
+    *,
+    a_dev: int,
+    alpha: float,
+    y_dev: int,
+    n: int,
+    dtype: np.dtype,
+) -> None:
+    """
+    Compute elementwise scalar addition on CUDA: `y[i] = a[i] + alpha`.
+    """
+    lib = lib or load_keydnn_cuda_native()
+    sym, arg_t = _select_scalar_sym_and_ctype("keydnn_cuda_add_scalar", dtype)
+
+    FN = ctypes.CFUNCTYPE(
+        ctypes.c_int,
+        ctypes.POINTER(arg_t),  # a
+        arg_t,  # alpha
+        ctypes.POINTER(arg_t),  # y
+        ctypes.c_int64,  # n
+    )
+    fn = _get_fn(lib, sym, FN)
+
+    st = int(
+        fn(
+            ctypes.cast(ctypes.c_void_p(int(a_dev)), ctypes.POINTER(arg_t)),
+            arg_t(alpha),
+            ctypes.cast(ctypes.c_void_p(int(y_dev)), ctypes.POINTER(arg_t)),
+            ctypes.c_int64(int(n)),
+        )
+    )
+    if st != 0:
+        raise RuntimeError(f"{sym} failed with status={st}")
+
+
+def sub_scalar_cuda(
+    lib,
+    *,
+    a_dev: int,
+    alpha: float,
+    y_dev: int,
+    n: int,
+    dtype: np.dtype,
+) -> None:
+    """
+    Compute elementwise scalar subtraction on CUDA: `y[i] = a[i] - alpha`.
+    """
+    lib = lib or load_keydnn_cuda_native()
+    sym, arg_t = _select_scalar_sym_and_ctype("keydnn_cuda_sub_scalar", dtype)
+
+    FN = ctypes.CFUNCTYPE(
+        ctypes.c_int,
+        ctypes.POINTER(arg_t),
+        arg_t,
+        ctypes.POINTER(arg_t),
+        ctypes.c_int64,
+    )
+    fn = _get_fn(lib, sym, FN)
+
+    st = int(
+        fn(
+            ctypes.cast(ctypes.c_void_p(int(a_dev)), ctypes.POINTER(arg_t)),
+            arg_t(alpha),
+            ctypes.cast(ctypes.c_void_p(int(y_dev)), ctypes.POINTER(arg_t)),
+            ctypes.c_int64(int(n)),
+        )
+    )
+    if st != 0:
+        raise RuntimeError(f"{sym} failed with status={st}")
+
+
+def div_scalar_cuda(
+    lib,
+    *,
+    a_dev: int,
+    alpha: float,
+    y_dev: int,
+    n: int,
+    dtype: np.dtype,
+) -> None:
+    """
+    Compute elementwise scalar division on CUDA: `y[i] = a[i] / alpha`.
+    """
+    lib = lib or load_keydnn_cuda_native()
+    sym, arg_t = _select_scalar_sym_and_ctype("keydnn_cuda_div_scalar", dtype)
+
+    FN = ctypes.CFUNCTYPE(
+        ctypes.c_int,
+        ctypes.POINTER(arg_t),
+        arg_t,
+        ctypes.POINTER(arg_t),
+        ctypes.c_int64,
+    )
+    fn = _get_fn(lib, sym, FN)
+
+    st = int(
+        fn(
+            ctypes.cast(ctypes.c_void_p(int(a_dev)), ctypes.POINTER(arg_t)),
+            arg_t(alpha),
+            ctypes.cast(ctypes.c_void_p(int(y_dev)), ctypes.POINTER(arg_t)),
             ctypes.c_int64(int(n)),
         )
     )

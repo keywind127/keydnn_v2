@@ -76,6 +76,31 @@ namespace {
         return status_from_cuda(cudaGetLastError());
     }
 
+    template <typename T>
+    __global__ void add_scalar_kernel(const T* a, T alpha, T* y, int64_t n) {
+        int64_t i = int64_t(blockIdx.x) * blockDim.x + threadIdx.x;
+        if (i < n) y[i] = a[i] + alpha;
+    }
+
+    template <typename T>
+    __global__ void sub_scalar_kernel(const T* a, T alpha, T* y, int64_t n) {
+        int64_t i = int64_t(blockIdx.x) * blockDim.x + threadIdx.x;
+        if (i < n) y[i] = a[i] - alpha;
+    }
+
+    template <typename T>
+    __global__ void mul_scalar_kernel(const T* a, T alpha, T* y, int64_t n) {
+        int64_t i = int64_t(blockIdx.x) * blockDim.x + threadIdx.x;
+        if (i < n) y[i] = a[i] * alpha;
+    }
+
+    template <typename T>
+    __global__ void div_scalar_kernel(const T* a, T alpha, T* y, int64_t n) {
+        int64_t i = int64_t(blockIdx.x) * blockDim.x + threadIdx.x;
+        if (i < n) y[i] = a[i] / alpha;
+    }
+
+
 } // namespace
 
 extern "C" {
@@ -144,5 +169,45 @@ extern "C" {
         if (!a || !b || !y) return int(cudaErrorInvalidDevicePointer);
         return launch_1d(n, gt_kernel_f64_out_f32, a, b, y);
     }
+
+    // ----------------------------
+    // Add scalar
+    // ----------------------------
+    int keydnn_cuda_add_scalar_f32(const float* a, float alpha, float* y, int64_t n) {
+        if (!a || !y) return int(cudaErrorInvalidDevicePointer);
+        return launch_1d(n, add_scalar_kernel<float>, a, alpha, y);
+    }
+
+    int keydnn_cuda_add_scalar_f64(const double* a, double alpha, double* y, int64_t n) {
+        if (!a || !y) return int(cudaErrorInvalidDevicePointer);
+        return launch_1d(n, add_scalar_kernel<double>, a, alpha, y);
+    }
+
+    // ----------------------------
+    // Sub scalar
+    // ----------------------------
+    int keydnn_cuda_sub_scalar_f32(const float* a, float alpha, float* y, int64_t n) {
+        if (!a || !y) return int(cudaErrorInvalidDevicePointer);
+        return launch_1d(n, sub_scalar_kernel<float>, a, alpha, y);
+    }
+
+    int keydnn_cuda_sub_scalar_f64(const double* a, double alpha, double* y, int64_t n) {
+        if (!a || !y) return int(cudaErrorInvalidDevicePointer);
+        return launch_1d(n, sub_scalar_kernel<double>, a, alpha, y);
+    }
+
+    // ----------------------------
+    // Div scalar
+    // ----------------------------
+    int keydnn_cuda_div_scalar_f32(const float* a, float alpha, float* y, int64_t n) {
+        if (!a || !y) return int(cudaErrorInvalidDevicePointer);
+        return launch_1d(n, div_scalar_kernel<float>, a, alpha, y);
+    }
+
+    int keydnn_cuda_div_scalar_f64(const double* a, double alpha, double* y, int64_t n) {
+        if (!a || !y) return int(cudaErrorInvalidDevicePointer);
+        return launch_1d(n, div_scalar_kernel<double>, a, alpha, y);
+    }
+
 
 } // extern "C"
