@@ -222,21 +222,14 @@ def create_path_builder(STATE_PNAME: str = "_state") -> Callable[
         smk: MethodKey = MethodKey(cls.__name__, method.__name__, state)
         """Static key for the control path being registered by this templator."""
 
-        def _get_cur_smk(self: StatefulObject) -> MethodKey:
-            """
-            Compute the dispatch key for the receiver's current runtime state.
+        # Prebind constants for the installed wrapper to reduce per-call overhead.
+        _CLS_NAME = cls.__name__
+        _METHOD_NAME = method.__name__
+        _STATE_PNAME = STATE_PNAME
 
-            Parameters
-            ----------
-            self : StatefulObject
-                Receiver object providing the `STATE_PNAME` attribute/property.
-
-            Returns
-            -------
-            MethodKey
-                The dispatch key (ClassName, MethodName, current_state).
-            """
-            return MethodKey(cls.__name__, method.__name__, getattr(self, STATE_PNAME))
+        # Fast-path: per-wrapper state->implementation map.
+        # This avoids constructing MethodKey on every call (hot path).
+        state_map: Dict[Hashable, Callable[P, R]] = {}
 
         def decorator(sub_method: Callable[P, R]) -> Callable[P, R]:
             """
@@ -265,6 +258,7 @@ def create_path_builder(STATE_PNAME: str = "_state") -> Callable[
                 straightforward introspection.
             """
             methods_map[smk] = sub_method
+            state_map[state] = sub_method
 
             @wraps(method)
             def wrapper(self: Any, *args: P.args, **kwargs: P.kwargs) -> Any:
@@ -296,23 +290,34 @@ def create_path_builder(STATE_PNAME: str = "_state") -> Callable[
                 if __debug__ and not isinstance(self, StatefulObject):
                     raise NotImplementedError(
                         "{} is missing attribute {} (@property)".format(
-                            type(self), repr(STATE_PNAME)
+                            type(self), repr(_STATE_PNAME)
                         )
                     )
 
-                cur_key = _get_cur_smk(self)
-                if sm := methods_map.get(cur_key):
+                # Hot-path: dispatch via per-wrapper state_map (no MethodKey alloc).
+                cur_state = getattr(self, _STATE_PNAME)
+                sm = state_map.get(cur_state)
+                if sm is not None:
                     return sm(self, *args, **kwargs)
+
+                # Backward-compatible fallback: consult the global registry using MethodKey.
+                # This should be redundant in normal usage but keeps behavior robust.
+                cur_key = MethodKey(_CLS_NAME, _METHOD_NAME, cur_state)
+                sm2 = methods_map.get(cur_key)
+                if sm2 is not None:
+                    # Populate state_map to avoid future misses for this state.
+                    state_map[cur_state] = sm2  # type: ignore[assignment]
+                    return sm2(self, *args, **kwargs)
 
                 if not trap_exception:
                     raise NotImplementedError(
                         "Missing control path (state={}) for {}".format(
-                            repr(getattr(self, STATE_PNAME)), repr(method)
+                            repr(cur_state), repr(method)
                         )
                     )
 
                 if callable(trap_exception):
-                    trap_exception(method, getattr(self, STATE_PNAME))
+                    trap_exception(method, cur_state)
                 raise trap_exception()
 
             setattr(cls, method.__name__, wrapper)
