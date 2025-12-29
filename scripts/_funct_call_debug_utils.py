@@ -45,6 +45,7 @@ def _format_ns(ns: int) -> str:
     return f"{ns/1_000_000_000:.3f} s"
 
 
+@contextmanager
 def trace_calls_timed(
     *,
     include_stdlib: bool = False,

@@ -1223,7 +1223,9 @@ class Tensor(
                 if grad_out.device != self.device:
                     raise ValueError("grad_out must be on the same device as self")
 
-            # Build reverse topological order of nodes reachable from `self`
+            # -----------------------------
+            # CPU path (fix nodes placement)
+            # -----------------------------
             topo: list[Tensor] = []
             visited: set[int] = set()
 
@@ -1242,7 +1244,9 @@ class Tensor(
 
             dfs(self)
 
-            # Map from tensor id -> accumulated gradient tensor
+            # ✅ build nodes AFTER topo is populated
+            nodes = {id(t): t for t in topo}
+
             grads: dict[int, Tensor] = {id(self): grad_out}
 
             # Traverse in reverse topo order (from outputs back to leaves)
@@ -1285,16 +1289,12 @@ class Tensor(
                         # Ensure stored grads do not track grad
                         grads[pid] = self._detach_no_grad(g)
 
-            # Write accumulated grads into leaf tensors that require grad
+            # ✅ CPU writeback: O(N)
             for tid, g in grads.items():
-                # Find the actual Tensor object by scanning visited/topo
-                for t in topo:
-                    if id(t) == tid:
-                        if t.requires_grad:
-                            t._accumulate_grad_(g)
-                        break
-
-            # ---- END original implementation (CPU-only) ----
+                t = nodes.get(tid)
+                if t is None or not t.requires_grad:
+                    continue
+                t._accumulate_grad_(g)
             return
 
         # ---------------------------------------------------------------------
@@ -1377,10 +1377,11 @@ class Tensor(
 
         dfs_cuda(self)
 
+        # ✅ build nodes AFTER topo is populated
+        nodes = {id(t): t for t in topo}
+
         grads: dict[int, Tensor] = {id(self): grad_out}
 
-        # CUDA: no generic accumulation yet (requires add kernel),
-        # so we only support single-contribution gradients per tensor id.
         for t in reversed(topo):
             ctx = t._get_ctx()
             if ctx is None:
@@ -1411,43 +1412,22 @@ class Tensor(
                         f"Gradient shape mismatch for parent: expected {parent.shape}, got {g.shape}"
                     )
 
-                # Enforce "non-tracking" grads on CUDA to avoid needing detach helpers.
-                if getattr(g, "requires_grad", False):
-                    raise RuntimeError(
-                        "CUDA backward_fn must return requires_grad=False gradient tensors."
-                    )
-                if g._get_ctx() is not None:
-                    raise RuntimeError(
-                        "CUDA backward_fn must return gradient tensors with ctx=None."
-                    )
-
                 pid = id(parent)
+                # ✅ use your class helper (define once in class)
+                if g.requires_grad or (g._get_ctx() is not None):
+                    g = Tensor._cuda_detach_view_no_grad(g)
+
                 if pid in grads:
-                    raise RuntimeError(
-                        "CUDA backward currently does not support accumulating multiple "
-                        "gradient contributions into the same tensor."
-                    )
-                grads[pid] = g
-
-        # Write accumulated grads into leaf tensors that require grad
-        # NOTE: _accumulate_grad_ is CPU-only, so set _grad directly for CUDA.
-        for tid, g in grads.items():
-            for t in topo:
-                if id(t) != tid:
-                    continue
-                if not t.requires_grad:
-                    break
-
-                # Best-effort "leaf grad set" semantics:
-                # - if no existing grad: set
-                # - else: would require CUDA add kernel
-                if getattr(t, "_grad", None) is None:
-                    t._grad = g
+                    grads[pid] = Tensor._add_no_grad_cuda(grads[pid], g)
                 else:
-                    raise RuntimeError(
-                        "CUDA backward currently does not support accumulating into an existing .grad."
-                    )
-                break
+                    grads[pid] = Tensor._cuda_detach_view_no_grad(g)
+
+        # ✅ CUDA writeback: O(N), and accumulate via CUDA add
+        for tid, g in grads.items():
+            t = nodes.get(tid)
+            if t is None or not t.requires_grad:
+                continue
+            t._accumulate_grad_cuda_(g)
 
     def _numel_from_shape(self) -> int:
         """
@@ -1980,3 +1960,68 @@ class Tensor(
 
         self._raise_device_not_supported("getitem")
         raise RuntimeError("Unreachable")
+
+    @staticmethod
+    def _cuda_detach_view_no_grad(t: "Tensor") -> "Tensor":
+        """
+        CUDA-only: return a view Tensor sharing the same devptr, with no autograd tracking.
+        """
+        if not t.device.is_cuda():
+            t._raise_device_not_supported("cuda_detach_view_no_grad")
+        return Tensor._from_devptr(
+            dev_ptr=int(t.data),
+            shape=tuple(t.shape),
+            device=t.device,
+            requires_grad=False,
+            ctx=None,
+            dtype=np.dtype(t.dtype),
+        )
+
+    @staticmethod
+    def _add_no_grad_cuda(a: "Tensor", b: "Tensor") -> "Tensor":
+        """
+        CUDA-only: add without autograd edges using tensor_arithmetic_cuda_ext.add.
+        """
+        if not (a.device.is_cuda() and b.device.is_cuda()):
+            raise RuntimeError("_add_no_grad_cuda expects CUDA tensors")
+        if str(a.device) != str(b.device):
+            raise ValueError("Device mismatch in _add_no_grad_cuda")
+        if tuple(a.shape) != tuple(b.shape):
+            raise ValueError("Shape mismatch in _add_no_grad_cuda")
+        if np.dtype(a.dtype) != np.dtype(b.dtype):
+            raise TypeError("Dtype mismatch in _add_no_grad_cuda")
+
+        from ..ops.tensor_arithmetic_cuda_ext import add as cuda_add
+
+        # NOTE: device index: prefer Device.index; fallback parse "cuda:N"
+        idx = getattr(a.device, "index", None)
+        if idx is None:
+            s = str(a.device)
+            idx = int(s.split(":")[1]) if ":" in s else 0
+
+        out = cuda_add(a, b, device=int(idx))
+        # out is already requires_grad=False by wrapper; keep it explicit
+        out.requires_grad = False
+        out._set_ctx(None)
+        return out
+
+    def _accumulate_grad_cuda_(self, g: "Tensor") -> None:
+        """
+        CUDA-only: accumulate gradient into self._grad (no CPU fallback).
+        Mirrors CPU _accumulate_grad_ semantics.
+        """
+        if not self.device.is_cuda():
+            self._raise_device_not_supported("accumulate_grad_cuda")
+
+        # Make sure gradient tensor does not carry autograd metadata
+        g0 = (
+            self._cuda_detach_view_no_grad(g)
+            if (g.requires_grad or g._get_ctx() is not None)
+            else g
+        )
+        if self._grad is None:
+            self._grad = self._cuda_detach_view_no_grad(g0)
+            return
+
+        # In-place would be better, but out-of-place is fine if add_inplace isn't available yet.
+        self._grad = Tensor._add_no_grad_cuda(self._grad, g0)

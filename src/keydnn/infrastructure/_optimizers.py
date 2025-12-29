@@ -133,18 +133,44 @@ class SGD:
             if g is None:
                 continue
 
-            if not p.device.is_cpu() or not g.device.is_cpu():
-                p._raise_device_not_supported("sgd_step")
+            # if not p.device.is_cpu() or not g.device.is_cpu():
+            #     p._raise_device_not_supported("sgd_step")
 
             # Optional L2 weight decay (decoupled is AdamW; this is classical)
             if self.weight_decay != 0.0:
                 g = g + (self.weight_decay * p)
 
-            # p <- p - lr * g
-            updated = p - (self.lr * g)
+            # # p <- p - lr * g
+            # updated = p - (self.lr * g)
 
-            # Write back to parameter storage (CPU-only)
-            p.copy_from(updated)
+            # # Write back to parameter storage (CPU-only)
+            # p.copy_from(updated)
+
+            p -= self.lr * g
+
+        # import time
+
+        # t_math = 0.0
+        # t_copy = 0.0
+
+        # for p in self.params:
+        #     g = p.grad
+        #     if g is None:
+        #         continue
+
+        #     t0 = time.perf_counter()
+        #     out = p - (self.lr * g)
+        #     t1 = time.perf_counter()
+
+        #     p.copy_from(out)
+        #     t2 = time.perf_counter()
+
+        #     t_math += t1 - t0
+        #     t_copy += t2 - t1
+
+        # print(
+        #     f"[sgd cuda] math={t_math*1e3:.3f}ms copy={t_copy*1e3:.3f}ms total={(t_math+t_copy)*1e3:.3f}ms"
+        # )
 
 
 @dataclass

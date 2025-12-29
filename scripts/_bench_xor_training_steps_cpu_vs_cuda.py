@@ -56,7 +56,7 @@ if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
 # tracer utils (your local helper module)
-from scripts._funct_call_debug_utils import trace_calls, timed_trace
+from _funct_call_debug_utils import trace_calls, timed_trace
 
 
 def _cuda_available() -> bool:
