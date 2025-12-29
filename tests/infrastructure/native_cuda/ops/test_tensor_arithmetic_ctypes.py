@@ -271,6 +271,43 @@ class _CudaArithmeticCtypesBase(unittest.TestCase):
             )
         )
 
+        cls.add_scalar_cuda = staticmethod(
+            _import_first(
+                (
+                    "src.keydnn.infrastructure.native_cuda.python.ops.tensor_arithmetic_ctypes",
+                    "add_scalar_cuda",
+                ),
+                (
+                    "keydnn.infrastructure.native_cuda.python.ops.tensor_arithmetic_ctypes",
+                    "add_scalar_cuda",
+                ),
+            )
+        )
+        cls.sub_scalar_cuda = staticmethod(
+            _import_first(
+                (
+                    "src.keydnn.infrastructure.native_cuda.python.ops.tensor_arithmetic_ctypes",
+                    "sub_scalar_cuda",
+                ),
+                (
+                    "keydnn.infrastructure.native_cuda.python.ops.tensor_arithmetic_ctypes",
+                    "sub_scalar_cuda",
+                ),
+            )
+        )
+        cls.div_scalar_cuda = staticmethod(
+            _import_first(
+                (
+                    "src.keydnn.infrastructure.native_cuda.python.ops.tensor_arithmetic_ctypes",
+                    "div_scalar_cuda",
+                ),
+                (
+                    "keydnn.infrastructure.native_cuda.python.ops.tensor_arithmetic_ctypes",
+                    "div_scalar_cuda",
+                ),
+            )
+        )
+
         # Set device once for the process (safe even if device=0 already)
         cls.cuda_set_device(cls.lib, 0)
 
@@ -409,6 +446,81 @@ class TestTensorArithmeticCtypesF32(_CudaArithmeticCtypesBase):
         np.testing.assert_allclose(y, ref, rtol=0, atol=0)
         self.assertEqual(y.dtype, np.float32)
 
+    def test_add_scalar_f32_matches_numpy(self):
+        a = np.array([1.0, -2.0, 3.5, 0.0], dtype=np.float32)
+        alpha = 1.25
+        y = np.empty_like(a)
+
+        a_dev = self._alloc(a.nbytes)
+        y_dev = self._alloc(y.nbytes)
+        try:
+            self._htod(a_dev, a)
+            type(self).add_scalar_cuda(
+                self.lib,
+                a_dev=a_dev,
+                alpha=alpha,
+                y_dev=y_dev,
+                n=a.size,
+                dtype=a.dtype,
+            )
+            self._sync()
+            self._dtoh(y, y_dev)
+        finally:
+            self._free(a_dev)
+            self._free(y_dev)
+
+        np.testing.assert_allclose(y, a + alpha, rtol=0, atol=0)
+
+    def test_sub_scalar_f32_matches_numpy(self):
+        a = np.array([1.0, -2.0, 3.5, 0.0], dtype=np.float32)
+        alpha = 0.75
+        y = np.empty_like(a)
+
+        a_dev = self._alloc(a.nbytes)
+        y_dev = self._alloc(y.nbytes)
+        try:
+            self._htod(a_dev, a)
+            type(self).sub_scalar_cuda(
+                self.lib,
+                a_dev=a_dev,
+                alpha=alpha,
+                y_dev=y_dev,
+                n=a.size,
+                dtype=a.dtype,
+            )
+            self._sync()
+            self._dtoh(y, y_dev)
+        finally:
+            self._free(a_dev)
+            self._free(y_dev)
+
+        np.testing.assert_allclose(y, a - alpha, rtol=0, atol=0)
+
+    def test_div_scalar_f32_matches_numpy(self):
+        a = np.array([1.0, -2.0, 3.5, 4.0], dtype=np.float32)
+        alpha = 1.6  # avoid zero
+        y = np.empty_like(a)
+
+        a_dev = self._alloc(a.nbytes)
+        y_dev = self._alloc(y.nbytes)
+        try:
+            self._htod(a_dev, a)
+            type(self).div_scalar_cuda(
+                self.lib,
+                a_dev=a_dev,
+                alpha=alpha,
+                y_dev=y_dev,
+                n=a.size,
+                dtype=a.dtype,
+            )
+            self._sync()
+            self._dtoh(y, y_dev)
+        finally:
+            self._free(a_dev)
+            self._free(y_dev)
+
+        np.testing.assert_allclose(y, a / alpha, rtol=1e-6, atol=1e-6)
+
 
 class TestTensorArithmeticCtypesF64(_CudaArithmeticCtypesBase):
     def test_neg_f64_matches_numpy(self):
@@ -523,6 +635,81 @@ class TestTensorArithmeticCtypesF64(_CudaArithmeticCtypesBase):
         ref = (a > b).astype(np.float32)
         np.testing.assert_allclose(y, ref, rtol=0, atol=0)
         self.assertEqual(y.dtype, np.float32)
+
+    def test_add_scalar_f64_matches_numpy(self):
+        a = np.array([1.0, -2.0, 3.5, 0.0], dtype=np.float64)
+        alpha = 1.25
+        y = np.empty_like(a)
+
+        a_dev = self._alloc(a.nbytes)
+        y_dev = self._alloc(y.nbytes)
+        try:
+            self._htod(a_dev, a)
+            type(self).add_scalar_cuda(
+                self.lib,
+                a_dev=a_dev,
+                alpha=alpha,
+                y_dev=y_dev,
+                n=a.size,
+                dtype=a.dtype,
+            )
+            self._sync()
+            self._dtoh(y, y_dev)
+        finally:
+            self._free(a_dev)
+            self._free(y_dev)
+
+        np.testing.assert_allclose(y, a + alpha, rtol=0, atol=0)
+
+    def test_sub_scalar_f64_matches_numpy(self):
+        a = np.array([1.0, -2.0, 3.5, 0.0], dtype=np.float64)
+        alpha = 0.75
+        y = np.empty_like(a)
+
+        a_dev = self._alloc(a.nbytes)
+        y_dev = self._alloc(y.nbytes)
+        try:
+            self._htod(a_dev, a)
+            type(self).sub_scalar_cuda(
+                self.lib,
+                a_dev=a_dev,
+                alpha=alpha,
+                y_dev=y_dev,
+                n=a.size,
+                dtype=a.dtype,
+            )
+            self._sync()
+            self._dtoh(y, y_dev)
+        finally:
+            self._free(a_dev)
+            self._free(y_dev)
+
+        np.testing.assert_allclose(y, a - alpha, rtol=0, atol=0)
+
+    def test_div_scalar_f64_matches_numpy(self):
+        a = np.array([1.0, -2.0, 3.5, 4.0], dtype=np.float64)
+        alpha = 1.6
+        y = np.empty_like(a)
+
+        a_dev = self._alloc(a.nbytes)
+        y_dev = self._alloc(y.nbytes)
+        try:
+            self._htod(a_dev, a)
+            type(self).div_scalar_cuda(
+                self.lib,
+                a_dev=a_dev,
+                alpha=alpha,
+                y_dev=y_dev,
+                n=a.size,
+                dtype=a.dtype,
+            )
+            self._sync()
+            self._dtoh(y, y_dev)
+        finally:
+            self._free(a_dev)
+            self._free(y_dev)
+
+        np.testing.assert_allclose(y, a / alpha, rtol=1e-12, atol=1e-12)
 
 
 if __name__ == "__main__":

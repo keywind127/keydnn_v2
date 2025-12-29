@@ -27,7 +27,10 @@ from src.keydnn.infrastructure.ops.pool2d_cuda import (
     cuda_malloc,
     cuda_free,
 )
-from src.keydnn.infrastructure.ops.mul_cuda_ext import mul_forward
+from src.keydnn.infrastructure.ops.mul_cuda_ext import (
+    mul_forward,
+    mul_scalar_forward,
+)
 
 
 def _get_cuda_device(index: int = 0) -> Device:
@@ -264,6 +267,77 @@ class TestMulCudaExt(unittest.TestCase):
 
         with self.assertRaises(TypeError):
             _ = mul_forward(a_cpu, b_cpu, device=self.device_index, sync=True)
+
+    def test_mul_scalar_forward_f32_matches_numpy(self) -> None:
+        """float32 scalar mul matches NumPy reference."""
+        rng = np.random.default_rng(10)
+        a = rng.standard_normal((256,), dtype=np.float32)
+        alpha = 0.37
+
+        a_t = self._make_cuda_tensor_from_host(a)
+        y_t = mul_scalar_forward(a_t, alpha, device=self.device_index, sync=True)
+
+        self.assertTrue(y_t.device.is_cuda())
+        self.assertEqual(tuple(y_t.shape), tuple(a.shape))
+        self.assertEqual(np.dtype(y_t.dtype), np.float32)
+
+        y = self._read_cuda_tensor_to_host(y_t)
+        ref = a * alpha
+        np.testing.assert_allclose(y, ref, rtol=1e-5, atol=1e-6)
+
+    def test_mul_scalar_forward_f64_matches_numpy(self) -> None:
+        """float64 scalar mul matches NumPy reference."""
+        rng = np.random.default_rng(11)
+        a = rng.standard_normal((13, 9)).astype(np.float64)
+        alpha = -1.25
+
+        a_t = self._make_cuda_tensor_from_host(a)
+        y_t = mul_scalar_forward(a_t, alpha, device=self.device_index, sync=True)
+
+        self.assertTrue(y_t.device.is_cuda())
+        self.assertEqual(tuple(y_t.shape), tuple(a.shape))
+        self.assertEqual(np.dtype(y_t.dtype), np.float64)
+
+        y = self._read_cuda_tensor_to_host(y_t)
+        ref = a * alpha
+        np.testing.assert_allclose(y, ref, rtol=1e-12, atol=1e-12)
+
+    def test_mul_scalar_preserves_multi_dim_shape(self) -> None:
+        """Scalar mul preserves arbitrary tensor shapes."""
+        rng = np.random.default_rng(12)
+        a = rng.standard_normal((2, 3, 4), dtype=np.float32)
+        alpha = 2.0
+
+        a_t = self._make_cuda_tensor_from_host(a)
+        y_t = mul_scalar_forward(a_t, alpha, device=self.device_index, sync=True)
+
+        self.assertEqual(tuple(y_t.shape), (2, 3, 4))
+        y = self._read_cuda_tensor_to_host(y_t)
+        np.testing.assert_allclose(y, a * alpha, rtol=1e-5, atol=1e-6)
+
+    def test_mul_scalar_raises_on_cpu_tensor(self) -> None:
+        """CPU tensor input should raise TypeError for scalar mul."""
+        a_np = np.ones((8,), dtype=np.float32)
+
+        try:
+            a_cpu = Tensor(a_np.shape, device=Device("cpu"), requires_grad=False)
+            a_cpu._data = a_np  # type: ignore[attr-defined]
+        except Exception as e:
+            raise unittest.SkipTest(
+                f"Unable to construct CPU tensor for scalar test: {e}"
+            ) from e
+
+        with self.assertRaises(TypeError):
+            _ = mul_scalar_forward(a_cpu, 2.0, device=self.device_index, sync=True)
+
+    def test_mul_scalar_raises_on_unsupported_dtype(self) -> None:
+        """int32 dtype should be rejected for scalar mul."""
+        a = np.arange(16, dtype=np.int32)
+
+        a_t = self._make_cuda_tensor_from_host(a)
+
+        with self.assertRaises(TypeError):
+            _ = mul_scalar_forward(a_t, 3.0, device=self.device_index, sync=True)
 
 
 if __name__ == "__main__":

@@ -16,6 +16,7 @@ from src.keydnn.infrastructure.native_cuda.python.avgpool2d_ctypes import (
 from src.keydnn.infrastructure.native_cuda.python.ops.unary_ctypes import (
     exp_cuda,
     mul_cuda,
+    mul_scalar_cuda,
 )
 
 
@@ -143,6 +144,80 @@ class TestUnaryCtypes(_CudaTestCase):
             cuda_free(lib, y_dev)
             cuda_free(lib, a_dev)
             cuda_free(lib, b_dev)
+
+    def _run_mul_scalar(self, dtype: np.dtype) -> None:
+        lib = self.lib
+        dtype = np.dtype(dtype)
+
+        a = (np.random.rand(256) - 0.5).astype(dtype, copy=False)
+        alpha = dtype.type(0.37)
+        y_ref = (a * alpha).astype(dtype, copy=False)
+
+        nbytes = int(a.nbytes)
+
+        a_dev = int(cuda_malloc(lib, nbytes))
+        y_dev = int(cuda_malloc(lib, nbytes))
+        try:
+            cudaMemcpyHtoD(lib, a_dev, a, nbytes)
+
+            mul_scalar_cuda(
+                lib,
+                a_dev=a_dev,
+                alpha=float(alpha),
+                y_dev=y_dev,
+                numel=int(a.size),
+                dtype=dtype,
+            )
+            cuda_synchronize(lib)
+
+            y = np.empty_like(a)
+            cudaMemcpyDtoH(lib, y, y_dev, nbytes)
+
+            if dtype == np.float32:
+                np.testing.assert_allclose(y, y_ref, rtol=2e-6, atol=3e-7)
+            else:
+                np.testing.assert_allclose(y, y_ref, rtol=1e-14, atol=1e-14)
+
+        finally:
+            cuda_free(lib, a_dev)
+            cuda_free(lib, y_dev)
+
+    def test_mul_scalar_float32(self) -> None:
+        self._run_mul_scalar(np.float32)
+
+    def test_mul_scalar_float64(self) -> None:
+        self._run_mul_scalar(np.float64)
+
+    def test_mul_scalar_unsupported_dtype_raises(self) -> None:
+        lib = self.lib
+        with self.assertRaises(TypeError):
+            mul_scalar_cuda(
+                lib,
+                a_dev=1,
+                alpha=1.0,
+                y_dev=2,
+                numel=3,
+                dtype=np.int32,
+            )
+
+    def test_mul_scalar_numel_zero_is_ok(self) -> None:
+        lib = self.lib
+        dtype = np.float32
+        a_dev = int(cuda_malloc(lib, 1))
+        y_dev = int(cuda_malloc(lib, 1))
+        try:
+            mul_scalar_cuda(
+                lib,
+                a_dev=a_dev,
+                alpha=2.0,
+                y_dev=y_dev,
+                numel=0,
+                dtype=dtype,
+            )
+            cuda_synchronize(lib)
+        finally:
+            cuda_free(lib, a_dev)
+            cuda_free(lib, y_dev)
 
 
 if __name__ == "__main__":

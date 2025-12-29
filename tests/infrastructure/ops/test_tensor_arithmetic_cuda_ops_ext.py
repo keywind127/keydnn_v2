@@ -37,6 +37,10 @@ from src.keydnn.infrastructure.ops.tensor_arithmetic_cuda_ext import (
     sub,
     div,
     gt,
+    # NEW: scalar ops
+    add_scalar,
+    sub_scalar,
+    div_scalar,
 )
 
 
@@ -215,7 +219,7 @@ class TestTensorArithmeticCudaExt(unittest.TestCase):
         np.testing.assert_allclose(y, -x, rtol=1e-10, atol=1e-10)
 
     # ----------------------------
-    # Correctness: binary
+    # Correctness: binary (tensor-tensor)
     # ----------------------------
 
     def test_add_f32_matches_numpy(self) -> None:
@@ -265,6 +269,66 @@ class TestTensorArithmeticCudaExt(unittest.TestCase):
 
         y = self._read_cuda_tensor_to_host(y_t)
         np.testing.assert_allclose(y, a / b, rtol=1e-3, atol=1e-3)
+
+    # ----------------------------
+    # Correctness: scalar (tensor-scalar)
+    # ----------------------------
+
+    def test_add_scalar_f32_matches_numpy(self) -> None:
+        rng = np.random.default_rng(10)
+        a = rng.standard_normal((33,), dtype=np.float32)
+        alpha = np.float32(1.25)
+
+        a_t = self._make_cuda_tensor_from_host(a)
+        y_t = add_scalar(a_t, float(alpha), device=self.device_index)
+
+        self.assertTrue(y_t.device.is_cuda())
+        self.assertEqual(tuple(y_t.shape), a.shape)
+        self.assertEqual(np.dtype(y_t.dtype), np.float32)
+
+        y = self._read_cuda_tensor_to_host(y_t)
+        np.testing.assert_allclose(y, a + alpha, rtol=1e-4, atol=1e-4)
+
+    def test_sub_scalar_f64_matches_numpy(self) -> None:
+        rng = np.random.default_rng(11)
+        a = rng.standard_normal((6, 7)).astype(np.float64)
+        alpha = 0.75  # python float OK
+
+        a_t = self._make_cuda_tensor_from_host(a)
+        y_t = sub_scalar(a_t, float(alpha), device=self.device_index)
+
+        self.assertTrue(y_t.device.is_cuda())
+        self.assertEqual(tuple(y_t.shape), a.shape)
+        self.assertEqual(np.dtype(y_t.dtype), np.float64)
+
+        y = self._read_cuda_tensor_to_host(y_t)
+        np.testing.assert_allclose(y, a - alpha, rtol=1e-10, atol=1e-10)
+
+    def test_div_scalar_f32_matches_numpy(self) -> None:
+        rng = np.random.default_rng(12)
+        a = rng.standard_normal((4, 5), dtype=np.float32)
+        alpha = np.float32(0.5)  # avoid tiny/zero
+
+        a_t = self._make_cuda_tensor_from_host(a)
+        y_t = div_scalar(a_t, float(alpha), device=self.device_index)
+
+        self.assertTrue(y_t.device.is_cuda())
+        self.assertEqual(tuple(y_t.shape), a.shape)
+        self.assertEqual(np.dtype(y_t.dtype), np.float32)
+
+        y = self._read_cuda_tensor_to_host(y_t)
+        np.testing.assert_allclose(y, a / alpha, rtol=1e-3, atol=1e-3)
+
+    def test_scalar_ops_reject_int_dtype(self) -> None:
+        a = np.arange(16, dtype=np.int32).reshape(4, 4)
+        a_t = self._make_cuda_tensor_from_host(a)
+
+        with self.assertRaises(TypeError):
+            _ = add_scalar(a_t, 1.0, device=self.device_index)
+        with self.assertRaises(TypeError):
+            _ = sub_scalar(a_t, 1.0, device=self.device_index)
+        with self.assertRaises(TypeError):
+            _ = div_scalar(a_t, 2.0, device=self.device_index)
 
     # ----------------------------
     # Correctness: compare
@@ -337,6 +401,27 @@ class TestTensorArithmeticCudaExt(unittest.TestCase):
 
         with self.assertRaises(TypeError):
             _ = neg(x_t, device=self.device_index)
+
+    def test_scalar_ops_raise_on_cpu_tensor(self) -> None:
+        a_np = np.ones((2, 3), dtype=np.float32)
+
+        if hasattr(Tensor, "from_numpy") and callable(getattr(Tensor, "from_numpy")):
+            a_cpu = Tensor.from_numpy(a_np, device=Device("cpu"))  # type: ignore[call-arg]
+        else:
+            try:
+                a_cpu = Tensor(a_np.shape, device=Device("cpu"), requires_grad=False)  # type: ignore[call-arg]
+                a_cpu._data = a_np  # type: ignore[attr-defined]
+            except Exception as e:
+                raise unittest.SkipTest(
+                    f"Unable to construct CPU tensors in this repo; update test_scalar_ops_raise_on_cpu_tensor: {e}"
+                ) from e
+
+        with self.assertRaises(TypeError):
+            _ = add_scalar(a_cpu, 1.0, device=self.device_index)
+        with self.assertRaises(TypeError):
+            _ = sub_scalar(a_cpu, 1.0, device=self.device_index)
+        with self.assertRaises(TypeError):
+            _ = div_scalar(a_cpu, 2.0, device=self.device_index)
 
     def test_raises_on_cpu_tensor(self) -> None:
         # Construct CPU tensors in a best-effort way.
