@@ -116,11 +116,14 @@ class SSEFn(Function):
         via explicit scaling to avoid tensor broadcasting.
         """
         (diff,) = ctx.saved_tensors
-
         g = _scalar_to_float(grad_out)
 
+        # grad_pred = 2 * g * diff
         grad_pred = diff * (2.0 * g)
-        grad_target = diff * (-2.0 * g)
+
+        # grad_target = -grad_pred  (reuse allocation)
+        grad_target = grad_pred * -1.0
+
         return grad_pred, grad_target
 
 
@@ -203,12 +206,13 @@ class MSEFn(Function):
         """
         (diff,) = ctx.saved_tensors
         n = int(ctx.saved_meta["n"])
-
         g = _scalar_to_float(grad_out)
+
         scale = (2.0 / n) * g
 
         grad_pred = diff * scale
-        grad_target = diff * (-scale)
+        grad_target = grad_pred * -1.0
+
         return grad_pred, grad_target
 
 
@@ -296,16 +300,21 @@ class BinaryCrossEntropyFn(Function):
         """
         pred, target = ctx.saved_tensors
         n = int(ctx.saved_meta["n"])
-
         g = _scalar_to_float(grad_out)
 
-        # d/dp for mean BCE
-        grad_pred = (pred - target) / (pred * (1.0 - pred))
-        grad_pred = grad_pred * (g / n)
+        # numerator = pred - target
+        grad_pred = pred - target
 
-        # Typically treat targets as constants
-        grad_target = None
-        return grad_pred, grad_target
+        # denom = pred * (1 - pred)
+        denom = pred * (1.0 - pred)
+
+        # grad_pred /= denom   (in-place div)
+        grad_pred /= denom
+
+        # grad_pred *= g / n   (in-place scalar)
+        grad_pred *= g / n
+
+        return grad_pred, None
 
 
 class CategoricalCrossEntropyFn(Function):
@@ -389,12 +398,11 @@ class CategoricalCrossEntropyFn(Function):
         where N is the batch size. The upstream gradient `grad_out` is applied
         as a scalar multiplier.
         """
-        (pred, target) = ctx.saved_tensors
+        pred, target = ctx.saved_tensors
         g = _scalar_to_float(grad_out)
+        n = pred.shape[0]
 
-        # dL/dpred = -target / pred
-        grad_pred = -(target / pred)
-        grad_pred = grad_pred * (g / pred.shape[0])
+        grad_pred = target / pred  # alloc
+        grad_pred *= -(g / n)  # in-place negate + scale
 
-        grad_target = None
-        return grad_pred, grad_target
+        return grad_pred, None
