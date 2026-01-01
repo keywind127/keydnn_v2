@@ -609,3 +609,225 @@ def div_scalar_cuda(
     )
     if st != 0:
         raise RuntimeError(f"{sym} failed with status={st}")
+
+
+# ----------------------------
+# In-place binary: add/sub/div
+# ----------------------------
+def add_inplace_cuda(
+    lib,
+    *,
+    a_dev: int,
+    b_dev: int,
+    n: int,
+    dtype: np.dtype,
+) -> None:
+    """
+    In-place elementwise addition on CUDA: a[i] += b[i].
+    Calls:
+      - keydnn_cuda_add_inplace_f32(float* a, const float* b, int64 n)
+      - keydnn_cuda_add_inplace_f64(double* a, const double* b, int64 n)
+    """
+    lib = lib or load_keydnn_cuda_native()
+    sym, arg_t = _select_sym_and_ctype("keydnn_cuda_add_inplace", dtype)
+
+    FN = ctypes.CFUNCTYPE(
+        ctypes.c_int,
+        ctypes.POINTER(arg_t),  # a (in/out)
+        ctypes.POINTER(arg_t),  # b (in)
+        ctypes.c_int64,  # n
+    )
+    fn = _get_fn(lib, sym, FN)
+
+    st = int(
+        fn(
+            ctypes.cast(ctypes.c_void_p(int(a_dev)), ctypes.POINTER(arg_t)),
+            ctypes.cast(ctypes.c_void_p(int(b_dev)), ctypes.POINTER(arg_t)),
+            ctypes.c_int64(int(n)),
+        )
+    )
+    if st != 0:
+        raise RuntimeError(f"{sym} failed with status={st}")
+
+
+def sub_inplace_cuda(
+    lib,
+    *,
+    a_dev: int,
+    b_dev: int,
+    n: int,
+    dtype: np.dtype,
+) -> None:
+    """
+    In-place elementwise subtraction on CUDA: a[i] -= b[i].
+    Calls:
+      - keydnn_cuda_sub_inplace_f32(float* a, const float* b, int64 n)
+      - keydnn_cuda_sub_inplace_f64(double* a, const double* b, int64 n)
+    """
+    lib = lib or load_keydnn_cuda_native()
+    sym, arg_t = _select_sym_and_ctype("keydnn_cuda_sub_inplace", dtype)
+
+    FN = ctypes.CFUNCTYPE(
+        ctypes.c_int,
+        ctypes.POINTER(arg_t),  # a (in/out)
+        ctypes.POINTER(arg_t),  # b (in)
+        ctypes.c_int64,  # n
+    )
+    fn = _get_fn(lib, sym, FN)
+
+    st = int(
+        fn(
+            ctypes.cast(ctypes.c_void_p(int(a_dev)), ctypes.POINTER(arg_t)),
+            ctypes.cast(ctypes.c_void_p(int(b_dev)), ctypes.POINTER(arg_t)),
+            ctypes.c_int64(int(n)),
+        )
+    )
+    if st != 0:
+        raise RuntimeError(f"{sym} failed with status={st}")
+
+
+def div_inplace_cuda(
+    lib,
+    *,
+    a_dev: int,
+    b_dev: int,
+    n: int,
+    dtype: np.dtype,
+) -> None:
+    """
+    In-place elementwise division on CUDA: a[i] /= b[i].
+    Calls:
+      - keydnn_cuda_div_inplace_f32(float* a, const float* b, int64 n)
+      - keydnn_cuda_div_inplace_f64(double* a, const double* b, int64 n)
+    """
+    lib = lib or load_keydnn_cuda_native()
+    sym, arg_t = _select_sym_and_ctype("keydnn_cuda_div_inplace", dtype)
+
+    FN = ctypes.CFUNCTYPE(
+        ctypes.c_int,
+        ctypes.POINTER(arg_t),  # a (in/out)
+        ctypes.POINTER(arg_t),  # b (in)
+        ctypes.c_int64,  # n
+    )
+    fn = _get_fn(lib, sym, FN)
+
+    st = int(
+        fn(
+            ctypes.cast(ctypes.c_void_p(int(a_dev)), ctypes.POINTER(arg_t)),
+            ctypes.cast(ctypes.c_void_p(int(b_dev)), ctypes.POINTER(arg_t)),
+            ctypes.c_int64(int(n)),
+        )
+    )
+    if st != 0:
+        raise RuntimeError(f"{sym} failed with status={st}")
+
+
+# ----------------------------
+# In-place scalar: add/sub/div
+# ----------------------------
+def add_scalar_inplace_cuda(
+    lib,
+    *,
+    a_dev: int,
+    alpha: float,
+    n: int,
+    dtype: np.dtype,
+) -> None:
+    """
+    In-place scalar add on CUDA: a[i] += alpha.
+    Calls:
+      - keydnn_cuda_add_scalar_inplace_f32(float* a, float alpha, int64 n)
+      - keydnn_cuda_add_scalar_inplace_f64(double* a, double alpha, int64 n)
+    """
+    lib = lib or load_keydnn_cuda_native()
+    sym, arg_t = _select_scalar_sym_and_ctype("keydnn_cuda_add_scalar_inplace", dtype)
+
+    FN = ctypes.CFUNCTYPE(
+        ctypes.c_int,
+        ctypes.POINTER(arg_t),  # a (in/out)
+        arg_t,  # alpha
+        ctypes.c_int64,  # n
+    )
+    fn = _get_fn(lib, sym, FN)
+
+    st = int(
+        fn(
+            ctypes.cast(ctypes.c_void_p(int(a_dev)), ctypes.POINTER(arg_t)),
+            arg_t(alpha),
+            ctypes.c_int64(int(n)),
+        )
+    )
+    if st != 0:
+        raise RuntimeError(f"{sym} failed with status={st}")
+
+
+def sub_scalar_inplace_cuda(
+    lib,
+    *,
+    a_dev: int,
+    alpha: float,
+    n: int,
+    dtype: np.dtype,
+) -> None:
+    """
+    In-place scalar sub on CUDA: a[i] -= alpha.
+    Calls:
+      - keydnn_cuda_sub_scalar_inplace_f32(float* a, float alpha, int64 n)
+      - keydnn_cuda_sub_scalar_inplace_f64(double* a, double alpha, int64 n)
+    """
+    lib = lib or load_keydnn_cuda_native()
+    sym, arg_t = _select_scalar_sym_and_ctype("keydnn_cuda_sub_scalar_inplace", dtype)
+
+    FN = ctypes.CFUNCTYPE(
+        ctypes.c_int,
+        ctypes.POINTER(arg_t),  # a (in/out)
+        arg_t,  # alpha
+        ctypes.c_int64,  # n
+    )
+    fn = _get_fn(lib, sym, FN)
+
+    st = int(
+        fn(
+            ctypes.cast(ctypes.c_void_p(int(a_dev)), ctypes.POINTER(arg_t)),
+            arg_t(alpha),
+            ctypes.c_int64(int(n)),
+        )
+    )
+    if st != 0:
+        raise RuntimeError(f"{sym} failed with status={st}")
+
+
+def div_scalar_inplace_cuda(
+    lib,
+    *,
+    a_dev: int,
+    alpha: float,
+    n: int,
+    dtype: np.dtype,
+) -> None:
+    """
+    In-place scalar div on CUDA: a[i] /= alpha.
+    Calls:
+      - keydnn_cuda_div_scalar_inplace_f32(float* a, float alpha, int64 n)
+      - keydnn_cuda_div_scalar_inplace_f64(double* a, double alpha, int64 n)
+    """
+    lib = lib or load_keydnn_cuda_native()
+    sym, arg_t = _select_scalar_sym_and_ctype("keydnn_cuda_div_scalar_inplace", dtype)
+
+    FN = ctypes.CFUNCTYPE(
+        ctypes.c_int,
+        ctypes.POINTER(arg_t),  # a (in/out)
+        arg_t,  # alpha
+        ctypes.c_int64,  # n
+    )
+    fn = _get_fn(lib, sym, FN)
+
+    st = int(
+        fn(
+            ctypes.cast(ctypes.c_void_p(int(a_dev)), ctypes.POINTER(arg_t)),
+            arg_t(alpha),
+            ctypes.c_int64(int(n)),
+        )
+    )
+    if st != 0:
+        raise RuntimeError(f"{sym} failed with status={st}")

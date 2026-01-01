@@ -3,14 +3,16 @@ Unit tests for CUDA Tensor-boundary arithmetic wrapper (tensor_arithmetic_cuda_e
 
 These tests validate that the Tensor-facing wrapper:
 - Accepts CUDA Tensors (device-pointer backed)
-- Allocates output device memory
+- Allocates output device memory for out-of-place ops
 - Calls the underlying ctypes elementwise kernels
 - Returns CUDA Tensors with correct shape/dtype
 - Produces numerically correct results vs NumPy reference
 - Raises appropriate errors for invalid inputs (dtype/shape/device)
 
-The tests are written with unittest and are designed to skip on CPU-only
-environments where the KeyDNN CUDA native DLL cannot be loaded.
+Additionally, these tests validate newly added in-place ops:
+- add_inplace / sub_inplace / div_inplace mutate the LHS buffer (device pointer unchanged)
+- scalar in-place variants mutate the LHS buffer
+- numel==0 is a no-op and must not crash
 """
 
 from __future__ import annotations
@@ -37,20 +39,22 @@ from src.keydnn.infrastructure.ops.tensor_arithmetic_cuda_ext import (
     sub,
     div,
     gt,
-    # NEW: scalar ops
+    # scalar ops
     add_scalar,
     sub_scalar,
     div_scalar,
+    # NEW: in-place ops
+    add_inplace,
+    sub_inplace,
+    div_inplace,
+    add_scalar_inplace,
+    sub_scalar_inplace,
+    div_scalar_inplace,
 )
 
 
 def _get_cuda_device(index: int = 0) -> Device:
-    """
-    Best-effort helper to obtain a CUDA Device instance across possible Device APIs.
-
-    This project may expose Device construction in different ways (e.g. Device("cuda", 0),
-    Device.cuda(0), Device.from_str("cuda:0"), etc.). This helper tries common patterns.
-    """
+    """Best-effort helper to obtain a CUDA Device instance across possible Device APIs."""
     if hasattr(Device, "cuda") and callable(getattr(Device, "cuda")):
         return Device.cuda(index)  # type: ignore[attr-defined]
 
@@ -79,10 +83,6 @@ def _bind_memcpy_symbols(lib: ctypes.CDLL) -> Tuple[ctypes._CFuncPtr, ctypes._CF
     Expected native signatures:
         int keydnn_cuda_memcpy_h2d(uint64_t dst_dev, void* src_host, size_t nbytes)
         int keydnn_cuda_memcpy_d2h(void* dst_host, uint64_t src_dev, size_t nbytes)
-
-    Returns
-    -------
-    (h2d, d2h) : ctypes functions
     """
     if not hasattr(lib, "keydnn_cuda_memcpy_h2d"):
         raise AttributeError("CUDA DLL missing symbol: keydnn_cuda_memcpy_h2d")
@@ -107,8 +107,8 @@ def _h2d(lib: ctypes.CDLL, dst_dev: int, src: np.ndarray) -> None:
     st = int(
         h2d(
             ctypes.c_uint64(int(dst_dev)),
-            ctypes.c_void_p(src_c.ctypes.data),
-            ctypes.c_size_t(src_c.nbytes),
+            ctypes.c_void_p(int(src_c.ctypes.data)),
+            ctypes.c_size_t(int(src_c.nbytes)),
         )
     )
     if st != 0:
@@ -121,9 +121,9 @@ def _d2h(lib: ctypes.CDLL, src_dev: int, dst: np.ndarray) -> None:
     _, d2h = _bind_memcpy_symbols(lib)
     st = int(
         d2h(
-            ctypes.c_void_p(dst_c.ctypes.data),
+            ctypes.c_void_p(int(dst_c.ctypes.data)),
             ctypes.c_uint64(int(src_dev)),
-            ctypes.c_size_t(dst_c.nbytes),
+            ctypes.c_size_t(int(dst_c.nbytes)),
         )
     )
     if st != 0:
@@ -131,16 +131,10 @@ def _d2h(lib: ctypes.CDLL, src_dev: int, dst: np.ndarray) -> None:
 
 
 class TestTensorArithmeticCudaExt(unittest.TestCase):
-    """
-    Tests for Tensor-boundary CUDA arithmetic wrapper.
-
-    The wrapper under test:
-        keydnn.infrastructure.ops.tensor_arithmetic_cuda_ext
-    """
+    """Tests for Tensor-boundary CUDA arithmetic wrapper."""
 
     @classmethod
     def setUpClass(cls) -> None:
-        # Try to load CUDA DLL; skip all tests if unavailable.
         try:
             cls.lib = _load_cuda_lib()
         except Exception as e:
@@ -152,18 +146,19 @@ class TestTensorArithmeticCudaExt(unittest.TestCase):
         except Exception as e:
             raise unittest.SkipTest(f"Failed to set CUDA device: {e}") from e
 
-        # Ensure memcpy symbols exist; if not, skip (cannot validate numerics).
         try:
             _bind_memcpy_symbols(cls.lib)
         except Exception as e:
             raise unittest.SkipTest(f"CUDA memcpy symbols unavailable: {e}") from e
 
-        # Construct a CUDA Device object for Tensor wrapping.
         try:
             cls.cuda_device = _get_cuda_device(cls.device_index)
         except Exception as e:
             raise unittest.SkipTest(f"Unable to construct CUDA Device: {e}") from e
 
+    # ----------------------------
+    # Helpers
+    # ----------------------------
     def _make_cuda_tensor_from_host(self, x: np.ndarray) -> Tensor:
         """Allocate device memory, copy host -> device, and wrap as CUDA Tensor."""
         x_c = np.ascontiguousarray(x)
@@ -175,7 +170,7 @@ class TestTensorArithmeticCudaExt(unittest.TestCase):
             raise
 
         return Tensor._from_devptr(
-            dev_ptr,
+            int(dev_ptr),
             shape=tuple(int(d) for d in x_c.shape),
             dtype=x_c.dtype,
             device=self.cuda_device,
@@ -188,10 +183,24 @@ class TestTensorArithmeticCudaExt(unittest.TestCase):
         _d2h(self.lib, int(t.data), host)
         return host
 
+    def _make_empty_cuda_tensor(
+        self, shape: Tuple[int, ...], dtype: np.dtype
+    ) -> Tensor:
+        """
+        Create a CUDA tensor with numel==0 without calling cuda_malloc(0).
+        Uses dev_ptr=0 (null) which should be safe because kernels early-return on n<=0.
+        """
+        return Tensor._from_devptr(
+            0,
+            shape=tuple(int(d) for d in shape),
+            dtype=np.dtype(dtype),
+            device=self.cuda_device,
+            requires_grad=False,
+        )
+
     # ----------------------------
     # Correctness: unary
     # ----------------------------
-
     def test_neg_f32_matches_numpy(self) -> None:
         rng = np.random.default_rng(0)
         x = rng.standard_normal((64,), dtype=np.float32)
@@ -221,7 +230,6 @@ class TestTensorArithmeticCudaExt(unittest.TestCase):
     # ----------------------------
     # Correctness: binary (tensor-tensor)
     # ----------------------------
-
     def test_add_f32_matches_numpy(self) -> None:
         rng = np.random.default_rng(2)
         a = rng.standard_normal((8, 9), dtype=np.float32)
@@ -255,7 +263,6 @@ class TestTensorArithmeticCudaExt(unittest.TestCase):
     def test_div_f32_matches_numpy(self) -> None:
         rng = np.random.default_rng(4)
         a = rng.standard_normal((5, 7), dtype=np.float32)
-        # avoid zeros to keep relative error stable
         b = rng.standard_normal((5, 7), dtype=np.float32)
         b = np.where(np.abs(b) < 1e-2, np.float32(0.5), b)
 
@@ -273,11 +280,10 @@ class TestTensorArithmeticCudaExt(unittest.TestCase):
     # ----------------------------
     # Correctness: scalar (tensor-scalar)
     # ----------------------------
-
     def test_add_scalar_f32_matches_numpy(self) -> None:
         rng = np.random.default_rng(10)
         a = rng.standard_normal((33,), dtype=np.float32)
-        alpha = np.float32(1.25)
+        alpha = 1.25
 
         a_t = self._make_cuda_tensor_from_host(a)
         y_t = add_scalar(a_t, float(alpha), device=self.device_index)
@@ -292,7 +298,7 @@ class TestTensorArithmeticCudaExt(unittest.TestCase):
     def test_sub_scalar_f64_matches_numpy(self) -> None:
         rng = np.random.default_rng(11)
         a = rng.standard_normal((6, 7)).astype(np.float64)
-        alpha = 0.75  # python float OK
+        alpha = 0.75
 
         a_t = self._make_cuda_tensor_from_host(a)
         y_t = sub_scalar(a_t, float(alpha), device=self.device_index)
@@ -307,7 +313,7 @@ class TestTensorArithmeticCudaExt(unittest.TestCase):
     def test_div_scalar_f32_matches_numpy(self) -> None:
         rng = np.random.default_rng(12)
         a = rng.standard_normal((4, 5), dtype=np.float32)
-        alpha = np.float32(0.5)  # avoid tiny/zero
+        alpha = 0.5
 
         a_t = self._make_cuda_tensor_from_host(a)
         y_t = div_scalar(a_t, float(alpha), device=self.device_index)
@@ -333,7 +339,6 @@ class TestTensorArithmeticCudaExt(unittest.TestCase):
     # ----------------------------
     # Correctness: compare
     # ----------------------------
-
     def test_gt_f32_outputs_float32_and_matches_numpy(self) -> None:
         rng = np.random.default_rng(5)
         a = rng.standard_normal((32,), dtype=np.float32)
@@ -369,9 +374,164 @@ class TestTensorArithmeticCudaExt(unittest.TestCase):
         np.testing.assert_allclose(y, ref, rtol=0.0, atol=0.0)
 
     # ----------------------------
-    # Error handling
+    # NEW: In-place ops correctness
     # ----------------------------
+    def test_add_inplace_f32_mutates_lhs_and_matches_numpy(self) -> None:
+        rng = np.random.default_rng(20)
+        a = rng.standard_normal((16,), dtype=np.float32)
+        b = rng.standard_normal((16,), dtype=np.float32)
 
+        a_t = self._make_cuda_tensor_from_host(a)
+        b_t = self._make_cuda_tensor_from_host(b)
+
+        a_ptr_before = int(a_t.data)
+        add_inplace(a_t, b_t, device=self.device_index)
+        a_ptr_after = int(a_t.data)
+
+        self.assertEqual(a_ptr_after, a_ptr_before, "add_inplace must not reallocate a")
+        out = self._read_cuda_tensor_to_host(a_t)
+        np.testing.assert_allclose(out, a + b, rtol=1e-4, atol=1e-4)
+
+    def test_sub_inplace_f64_mutates_lhs_and_matches_numpy(self) -> None:
+        rng = np.random.default_rng(21)
+        a = rng.standard_normal((7, 5)).astype(np.float64)
+        b = rng.standard_normal((7, 5)).astype(np.float64)
+
+        a_t = self._make_cuda_tensor_from_host(a)
+        b_t = self._make_cuda_tensor_from_host(b)
+
+        a_ptr_before = int(a_t.data)
+        sub_inplace(a_t, b_t, device=self.device_index)
+        a_ptr_after = int(a_t.data)
+
+        self.assertEqual(a_ptr_after, a_ptr_before, "sub_inplace must not reallocate a")
+        out = self._read_cuda_tensor_to_host(a_t)
+        np.testing.assert_allclose(out, a - b, rtol=1e-10, atol=1e-10)
+
+    def test_div_inplace_f32_mutates_lhs_and_matches_numpy(self) -> None:
+        rng = np.random.default_rng(22)
+        a = rng.standard_normal((3, 9), dtype=np.float32)
+        b = rng.standard_normal((3, 9), dtype=np.float32)
+        b = np.where(np.abs(b) < 1e-2, np.float32(0.5), b)
+
+        a_t = self._make_cuda_tensor_from_host(a)
+        b_t = self._make_cuda_tensor_from_host(b)
+
+        a_ptr_before = int(a_t.data)
+        div_inplace(a_t, b_t, device=self.device_index)
+        a_ptr_after = int(a_t.data)
+
+        self.assertEqual(a_ptr_after, a_ptr_before, "div_inplace must not reallocate a")
+        out = self._read_cuda_tensor_to_host(a_t)
+        np.testing.assert_allclose(out, a / b, rtol=1e-3, atol=1e-3)
+
+    def test_add_scalar_inplace_f32_mutates_and_matches_numpy(self) -> None:
+        rng = np.random.default_rng(23)
+        a = rng.standard_normal((32,), dtype=np.float32)
+        alpha = 2.0
+
+        a_t = self._make_cuda_tensor_from_host(a)
+        ptr_before = int(a_t.data)
+        add_scalar_inplace(a_t, alpha, device=self.device_index)
+        ptr_after = int(a_t.data)
+
+        self.assertEqual(ptr_after, ptr_before)
+        out = self._read_cuda_tensor_to_host(a_t)
+        np.testing.assert_allclose(out, a + alpha, rtol=1e-4, atol=1e-4)
+
+    def test_sub_scalar_inplace_f64_mutates_and_matches_numpy(self) -> None:
+        rng = np.random.default_rng(24)
+        a = rng.standard_normal((5, 6)).astype(np.float64)
+        alpha = 0.125
+
+        a_t = self._make_cuda_tensor_from_host(a)
+        ptr_before = int(a_t.data)
+        sub_scalar_inplace(a_t, alpha, device=self.device_index)
+        ptr_after = int(a_t.data)
+
+        self.assertEqual(ptr_after, ptr_before)
+        out = self._read_cuda_tensor_to_host(a_t)
+        np.testing.assert_allclose(out, a - alpha, rtol=1e-10, atol=1e-10)
+
+    def test_div_scalar_inplace_f32_mutates_and_matches_numpy(self) -> None:
+        rng = np.random.default_rng(25)
+        a = rng.standard_normal((4, 5), dtype=np.float32)
+        alpha = 0.5
+
+        a_t = self._make_cuda_tensor_from_host(a)
+        ptr_before = int(a_t.data)
+        div_scalar_inplace(a_t, alpha, device=self.device_index)
+        ptr_after = int(a_t.data)
+
+        self.assertEqual(ptr_after, ptr_before)
+        out = self._read_cuda_tensor_to_host(a_t)
+        np.testing.assert_allclose(out, a / alpha, rtol=1e-3, atol=1e-3)
+
+    def test_inplace_raises_on_dtype_mismatch(self) -> None:
+        rng = np.random.default_rng(26)
+        a = rng.standard_normal((8,), dtype=np.float32)
+        b = rng.standard_normal((8,)).astype(np.float64)
+        a_t = self._make_cuda_tensor_from_host(a)
+        b_t = self._make_cuda_tensor_from_host(b)
+
+        with self.assertRaises(TypeError):
+            add_inplace(a_t, b_t, device=self.device_index)
+
+    def test_inplace_raises_on_shape_mismatch(self) -> None:
+        rng = np.random.default_rng(27)
+        a = rng.standard_normal((8,), dtype=np.float32)
+        b = rng.standard_normal((9,), dtype=np.float32)
+        a_t = self._make_cuda_tensor_from_host(a)
+        b_t = self._make_cuda_tensor_from_host(b)
+
+        with self.assertRaises(ValueError):
+            add_inplace(a_t, b_t, device=self.device_index)
+
+    def test_inplace_raises_on_cpu_tensor(self) -> None:
+        a_np = np.ones((2, 3), dtype=np.float32)
+        b_np = np.ones((2, 3), dtype=np.float32)
+
+        if hasattr(Tensor, "from_numpy") and callable(getattr(Tensor, "from_numpy")):
+            a_cpu = Tensor.from_numpy(a_np, device=Device("cpu"))  # type: ignore[call-arg]
+            b_cpu = Tensor.from_numpy(b_np, device=Device("cpu"))  # type: ignore[call-arg]
+        else:
+            try:
+                a_cpu = Tensor(a_np.shape, device=Device("cpu"), requires_grad=False)  # type: ignore[call-arg]
+                a_cpu._data = a_np  # type: ignore[attr-defined]
+                b_cpu = Tensor(b_np.shape, device=Device("cpu"), requires_grad=False)  # type: ignore[call-arg]
+                b_cpu._data = b_np  # type: ignore[attr-defined]
+            except Exception as e:
+                raise unittest.SkipTest(
+                    f"Unable to construct CPU tensors; update test_inplace_raises_on_cpu_tensor: {e}"
+                ) from e
+
+        with self.assertRaises(TypeError):
+            add_inplace(a_cpu, b_cpu, device=self.device_index)
+
+    def test_inplace_numel_zero_is_ok_tensor_tensor(self) -> None:
+        # Avoid cuda_malloc(0) by using dev_ptr=0; kernels must early-return on n<=0.
+        a_t = self._make_empty_cuda_tensor((0,), np.float32)
+        b_t = self._make_empty_cuda_tensor((0,), np.float32)
+
+        # Should be a no-op and should not raise.
+        add_inplace(a_t, b_t, device=self.device_index)
+        sub_inplace(a_t, b_t, device=self.device_index)
+        div_inplace(a_t, b_t, device=self.device_index)
+
+        self.assertEqual(int(a_t.data), 0)
+
+    def test_inplace_numel_zero_is_ok_scalar(self) -> None:
+        a_t = self._make_empty_cuda_tensor((0,), np.float64)
+
+        add_scalar_inplace(a_t, 1.0, device=self.device_index)
+        sub_scalar_inplace(a_t, 1.0, device=self.device_index)
+        div_scalar_inplace(a_t, 2.0, device=self.device_index)
+
+        self.assertEqual(int(a_t.data), 0)
+
+    # ----------------------------
+    # Error handling (existing)
+    # ----------------------------
     def test_add_raises_on_dtype_mismatch(self) -> None:
         rng = np.random.default_rng(7)
         a = rng.standard_normal((4, 4), dtype=np.float32)
@@ -395,7 +555,6 @@ class TestTensorArithmeticCudaExt(unittest.TestCase):
             _ = add(a_t, b_t, device=self.device_index)
 
     def test_neg_raises_on_non_float_dtype(self) -> None:
-        # Create an int32 CUDA buffer (still copyable), but wrapper should reject dtype.
         x = np.arange(16, dtype=np.int32)
         x_t = self._make_cuda_tensor_from_host(x)
 
@@ -413,7 +572,7 @@ class TestTensorArithmeticCudaExt(unittest.TestCase):
                 a_cpu._data = a_np  # type: ignore[attr-defined]
             except Exception as e:
                 raise unittest.SkipTest(
-                    f"Unable to construct CPU tensors in this repo; update test_scalar_ops_raise_on_cpu_tensor: {e}"
+                    f"Unable to construct CPU tensors; update test_scalar_ops_raise_on_cpu_tensor: {e}"
                 ) from e
 
         with self.assertRaises(TypeError):
@@ -424,7 +583,6 @@ class TestTensorArithmeticCudaExt(unittest.TestCase):
             _ = div_scalar(a_cpu, 2.0, device=self.device_index)
 
     def test_raises_on_cpu_tensor(self) -> None:
-        # Construct CPU tensors in a best-effort way.
         a_np = np.ones((2, 3), dtype=np.float32)
         b_np = np.ones((2, 3), dtype=np.float32)
 
@@ -439,7 +597,7 @@ class TestTensorArithmeticCudaExt(unittest.TestCase):
                 b_cpu._data = b_np  # type: ignore[attr-defined]
             except Exception as e:
                 raise unittest.SkipTest(
-                    f"Unable to construct CPU tensors in this repo; update test_raises_on_cpu_tensor: {e}"
+                    f"Unable to construct CPU tensors; update test_raises_on_cpu_tensor: {e}"
                 ) from e
 
         with self.assertRaises(TypeError):

@@ -1244,8 +1244,6 @@ class ITensor(Protocol):
         """
         ...
 
-    def __isub__(self: ITensor, other: ITensor) -> ITensor: ...
-
     def __imul__(self: ITensor, other: Union["ITensor", Number]) -> ITensor:
         """
         In-place elementwise multiplication: self *= other.
@@ -1263,3 +1261,35 @@ class ITensor(Protocol):
         relying on internal numpy storage layout).
         """
         ...
+
+    def __iadd__(self: ITensor, other: Union["ITensor", Number]) -> ITensor:
+        """
+        In-place elementwise addition: self += other.
+
+        CUDA fast-path:
+        - If safe to mutate (no autograd tracking), dispatch to native CUDA in-place
+          kernels to avoid intermediate allocations.
+
+        Fallback:
+        - out-of-place add + copy_from.
+        """
+        ...
+
+    def __isub__(self: ITensor, other: Union["ITensor", Number]) -> ITensor:
+        """
+        In-place elementwise subtraction: self -= other.
+
+        Same in-place safety rules as __iadd__/__imul__.
+        """
+        ...
+
+    def __itruediv__(self: ITensor, other: Union["ITensor", Number]) -> ITensor:
+        """
+        In-place elementwise true division: self /= other.
+
+        Same in-place safety rules as __iadd__/__imul__.
+        """
+        ...
+
+    # Python 2 legacy alias (optional, but nice to keep symmetry with __div__)
+    def __idiv__(self: ITensor, other: Union["ITensor", Number]) -> ITensor: ...
