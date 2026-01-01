@@ -25,7 +25,10 @@ Design notes
 
 from __future__ import annotations
 
-from typing import Any, Union, Optional, Sequence
+from typing import Any, Union, Optional, Sequence, List, Tuple, Dict
+from functools import lru_cache
+from dataclasses import dataclass, field
+
 
 import numpy as np
 
@@ -35,6 +38,110 @@ from ...domain._errors import DeviceNotSupportedError
 from ._tensor_context import Context
 
 Number = Union[int, float]
+
+
+@dataclass
+class _BWSectionStats:
+    cpu_ms: float = 0.0
+    gpu_ms: float = 0.0
+    count: int = 0
+
+
+@dataclass
+class BackwardProfile:
+    sections: Dict[str, _BWSectionStats] = field(default_factory=dict)
+    per_op: Dict[str, _BWSectionStats] = field(default_factory=dict)
+    per_node: List[Tuple[str, float, float]] = field(
+        default_factory=list
+    )  # (op_name, cpu_ms, gpu_ms)
+
+    def add(self, name: str, cpu_ms: float, gpu_ms: float) -> None:
+        s = self.sections.get(name)
+        if s is None:
+            s = _BWSectionStats()
+            self.sections[name] = s
+        s.cpu_ms += cpu_ms
+        s.gpu_ms += gpu_ms
+        s.count += 1
+
+    def add_op(self, op: str, cpu_ms: float, gpu_ms: float) -> None:
+        s = self.per_op.get(op)
+        if s is None:
+            s = _BWSectionStats()
+            self.per_op[op] = s
+        s.cpu_ms += cpu_ms
+        s.gpu_ms += gpu_ms
+        s.count += 1
+
+    def report(self, topk: int = 20) -> str:
+        lines: List[str] = []
+        total_cpu = sum(s.cpu_ms for s in self.sections.values())
+        total_gpu = sum(s.gpu_ms for s in self.sections.values())
+
+        lines.append("==== Tensor.backward() CUDA profile ====")
+        lines.append(
+            f"Total CPU wall: {total_cpu:.3f} ms | Total GPU (events): {total_gpu:.3f} ms"
+        )
+        lines.append("")
+        lines.append("[Sections]")
+        for k, s in sorted(
+            self.sections.items(), key=lambda kv: kv[1].gpu_ms, reverse=True
+        ):
+            cpu_pct = (s.cpu_ms / total_cpu * 100.0) if total_cpu > 0 else 0.0
+            gpu_pct = (s.gpu_ms / total_gpu * 100.0) if total_gpu > 0 else 0.0
+            lines.append(
+                f"- {k:24s} cpu={s.cpu_ms:9.3f} ms ({cpu_pct:5.1f}%) "
+                f"gpu={s.gpu_ms:9.3f} ms ({gpu_pct:5.1f}%) "
+                f"n={s.count}"
+            )
+
+        if self.per_op:
+            lines.append("")
+            lines.append(f"[Per-op top {topk} by GPU]")
+            for op, s in sorted(
+                self.per_op.items(), key=lambda kv: kv[1].gpu_ms, reverse=True
+            )[:topk]:
+                lines.append(
+                    f"- {op:24s} cpu={s.cpu_ms:9.3f} ms  gpu={s.gpu_ms:9.3f} ms  n={s.count}"
+                )
+
+        return "\n".join(lines)
+
+
+class _CudaEventTimer:
+    """
+    Minimal CUDA event timing helper using your existing ctypes wrappers.
+
+    Requires maxpool2d_ctypes to expose:
+      - cuda_event_create, cuda_event_record, cuda_event_elapsed_ms, cuda_event_destroy
+      - cuda_synchronize or cudaDeviceSynchronize equivalent
+    If you don't have these yet, see the fallback note below.
+    """
+
+    def __init__(self, lib, m):
+        self.lib = lib
+        self.m = m
+
+    def time_block(self, fn) -> float:
+        # returns gpu_ms
+        start = self.m.cuda_event_create(self.lib)
+        end = self.m.cuda_event_create(self.lib)
+        try:
+            self.m.cuda_event_record(self.lib, start)
+            fn()
+            self.m.cuda_event_record(self.lib, end)
+            self.m.cuda_event_synchronize(self.lib, end)
+            ms = float(self.m.cuda_event_elapsed_ms(self.lib, start, end))
+            return ms
+        finally:
+            try:
+                self.m.cuda_event_destroy(self.lib, start)
+            except Exception:
+                pass
+            try:
+                self.m.cuda_event_destroy(self.lib, end)
+            except Exception:
+                pass
 
 
 from .mixins.unary import TensorMixinUnary
@@ -1172,7 +1279,13 @@ class Tensor(
             return out
         a._raise_device_not_supported("add_no_grad")
 
-    def backward(self, grad_out: Optional["Tensor"] = None) -> None:
+    def backward(
+        self,
+        grad_out: Optional["Tensor"] = None,
+        *,
+        profile: bool = False,
+        profile_topk: int = 20,
+    ) -> None:
         """
         Backpropagate gradients from this tensor through the autograd graph.
 
@@ -1182,35 +1295,266 @@ class Tensor(
             Gradient w.r.t. this tensor. If omitted, this tensor must be a scalar
             (shape == ()) and the gradient is assumed to be 1.0.
 
-        Raises
-        ------
-        ValueError
-            If grad_out is None and this tensor is not a scalar.
-        RuntimeError
-            If backward is invoked on an unsupported device.
-
         Notes
         -----
         - Gradients are accumulated into `.grad` of leaf tensors that have
         `requires_grad=True`.
         - This implementation performs a reverse topological traversal.
-        - CPU behavior is unchanged.
+        - CPU behavior is unchanged (same logic; only extra timing when profile=True).
         """
+        import time
+        import numpy as np
+
+        prof = BackwardProfile() if profile else None
+
         # ---------------------------------------------------------------------
-        # CPU path: KEEP EXACTLY the original semantics (backward compatible).
+        # CPU path (profile-able)
         # ---------------------------------------------------------------------
         if self.device.is_cpu():
-            # ---- BEGIN original implementation (CPU-only) ----
+
+            def _time_section_cpu(name: str, fn):
+                if prof is None:
+                    fn()
+                    return
+                t0 = time.perf_counter()
+                fn()
+                t1 = time.perf_counter()
+                cpu_ms = (t1 - t0) * 1000.0
+                gpu_ms = cpu_ms  # CPU: keep same field for report compatibility
+                prof.add(name, cpu_ms=cpu_ms, gpu_ms=gpu_ms)
 
             # Seed gradient
+            def _seed_grad_cpu():
+                nonlocal grad_out
+                if grad_out is None:
+                    if self.shape != ():
+                        raise ValueError(
+                            "grad_out must be provided for non-scalar tensors. "
+                            f"Got shape={self.shape}."
+                        )
+                    grad_out = Tensor(shape=(), device=self.device, requires_grad=False)
+                    grad_out.copy_from_numpy(np.array(1.0, dtype=np.float32))
+                else:
+                    if not isinstance(grad_out, Tensor):
+                        raise TypeError(
+                            f"grad_out must be a Tensor, got {type(grad_out)!r}"
+                        )
+                    if grad_out.shape != self.shape:
+                        raise ValueError(
+                            f"grad_out shape mismatch: expected {self.shape}, got {grad_out.shape}"
+                        )
+                    if grad_out.device != self.device:
+                        raise ValueError("grad_out must be on the same device as self")
+
+            _time_section_cpu("seed_grad", _seed_grad_cpu)
+
+            # Build topo
+            topo: list[Tensor] = []
+            visited: set[int] = set()
+
+            def _build_topo_cpu():
+                def dfs(t: "Tensor") -> None:
+                    tid = id(t)
+                    if tid in visited:
+                        return
+                    visited.add(tid)
+
+                    ctx = t._get_ctx()
+                    if ctx is not None:
+                        for p in ctx.parents:
+                            dfs(p)
+
+                    topo.append(t)
+
+                dfs(self)
+
+            _time_section_cpu("build_topo_dfs", _build_topo_cpu)
+
+            nodes: dict[int, Tensor] = {}
+            _time_section_cpu(
+                "build_nodes_dict", lambda: nodes.update({id(t): t for t in topo})
+            )
+
+            grads: dict[int, Tensor] = {id(self): grad_out}  # type: ignore[arg-type]
+
+            # Reverse traversal
+            def _reverse_traverse_cpu():
+                for t in reversed(topo):
+                    ctx = t._get_ctx()
+                    if ctx is None:
+                        continue
+
+                    grad_t = grads.get(id(t))
+                    if grad_t is None:
+                        continue
+
+                    op_name = (
+                        getattr(ctx, "op_name", None)
+                        or getattr(ctx, "name", None)
+                        or type(ctx).__name__
+                    )
+
+                    # time backward_fn
+                    if prof is None:
+                        parent_grads = ctx.backward_fn(grad_t)
+                    else:
+                        t0 = time.perf_counter()
+                        parent_grads = ctx.backward_fn(grad_t)
+                        t1 = time.perf_counter()
+                        cpu_ms = (t1 - t0) * 1000.0
+                        prof.add("backward_fn_total", cpu_ms, cpu_ms)
+                        prof.add_op(op_name, cpu_ms, cpu_ms)
+
+                    if len(parent_grads) != len(ctx.parents):
+                        raise RuntimeError(
+                            "backward_fn must return one grad per parent. "
+                            f"Got {len(parent_grads)} grads for {len(ctx.parents)} parents."
+                        )
+
+                    for parent, g in zip(ctx.parents, parent_grads):
+                        if g is None:
+                            continue
+                        if not isinstance(g, Tensor):
+                            raise TypeError(
+                                f"backward_fn must return Tensor or None, got {type(g)!r}"
+                            )
+                        if g.device != parent.device:
+                            raise ValueError("Gradient device must match parent device")
+                        if g.shape != parent.shape:
+                            raise ValueError(
+                                f"Gradient shape mismatch for parent: expected {parent.shape}, got {g.shape}"
+                            )
+
+                        pid = id(parent)
+                        if pid in grads:
+                            _time_section_cpu(
+                                "grad_accum_add",
+                                lambda pid=pid, g=g: grads.__setitem__(
+                                    pid, self._add_no_grad(grads[pid], g)
+                                ),
+                            )
+                        else:
+                            _time_section_cpu(
+                                "grad_accum_set",
+                                lambda pid=pid, g=g: grads.__setitem__(
+                                    pid, self._detach_no_grad(g)
+                                ),
+                            )
+
+            _time_section_cpu("reverse_traverse_total", _reverse_traverse_cpu)
+
+            # Writeback
+            def _writeback_cpu():
+                for tid, g in grads.items():
+                    t = nodes.get(tid)
+                    if t is None or not t.requires_grad:
+                        continue
+                    t._accumulate_grad_(g)
+
+            _time_section_cpu("writeback_leaf_accum", _writeback_cpu)
+
+            if prof is not None:
+                print(prof.report(topk=profile_topk))
+            return
+
+        # ---------------------------------------------------------------------
+        # CUDA path (your existing profiler)
+        # ---------------------------------------------------------------------
+        if not self.device.is_cuda():
+            self._raise_device_not_supported("backward")
+
+        # share single lib handle
+        def _get_cuda_lib():
+            lib = getattr(Tensor, "_CUDA_LIB", None)
+            if lib is None:
+                from ...infrastructure.native_cuda.python import maxpool2d_ctypes as m
+
+                lib = m.load_keydnn_cuda_native()
+                setattr(Tensor, "_CUDA_LIB", lib)
+            return lib
+
+        from ...infrastructure.native_cuda.python import maxpool2d_ctypes as m
+
+        lib = _get_cuda_lib()
+
+        # ---- choose timing backend ----
+        have_events = all(
+            hasattr(m, name)
+            for name in (
+                "cuda_event_create",
+                "cuda_event_record",
+                "cuda_event_synchronize",
+                "cuda_event_elapsed_ms",
+                "cuda_event_destroy",
+            )
+        )
+        event_timer = _CudaEventTimer(lib, m) if have_events else None
+
+        def _sync():
+            if hasattr(m, "cuda_synchronize"):
+                m.cuda_synchronize(lib)
+            elif hasattr(m, "cudaDeviceSynchronize"):
+                m.cudaDeviceSynchronize(lib)
+            else:
+                try:
+                    from ...infrastructure.native_cuda.python.global_avgpool2d_ctypes import (
+                        cuda_synchronize,
+                    )
+
+                    cuda_synchronize(lib)
+                except Exception:
+                    pass
+
+        def _time_section(name: str, fn):
+            if prof is None:
+                fn()
+                return
+
+            t0 = time.perf_counter()
+            if event_timer is not None:
+                gpu_ms = event_timer.time_block(fn)
+                t1 = time.perf_counter()
+                cpu_ms = (t1 - t0) * 1000.0
+            else:
+                _sync()
+                t0b = time.perf_counter()
+                fn()
+                _sync()
+                t1b = time.perf_counter()
+                cpu_ms = (t1b - t0b) * 1000.0
+                gpu_ms = cpu_ms
+
+            prof.add(name, cpu_ms=cpu_ms, gpu_ms=gpu_ms)
+
+        # -----------------------------
+        # Seed gradient (CUDA)
+        # -----------------------------
+        def _seed_grad():
+            nonlocal grad_out
             if grad_out is None:
                 if self.shape != ():
                     raise ValueError(
                         "grad_out must be provided for non-scalar tensors. "
                         f"Got shape={self.shape}."
                     )
-                grad_out = Tensor(shape=(), device=self.device, requires_grad=False)
-                grad_out.copy_from_numpy(np.array(1.0, dtype=np.float32))
+                host = np.array(1.0, dtype=np.float32)
+                dev_ptr = int(m.cuda_malloc(lib, int(host.nbytes)))
+                try:
+                    m.cudaMemcpyHtoD(lib, int(dev_ptr), host, int(host.nbytes))
+                    grad_out = Tensor._from_devptr(
+                        dev_ptr=int(dev_ptr),
+                        shape=(),
+                        device=self.device,
+                        requires_grad=False,
+                        ctx=None,
+                        dtype=np.float32,
+                    )
+                except Exception:
+                    try:
+                        m.cuda_free(lib, int(dev_ptr))
+                    except Exception:
+                        pass
+                    raise
             else:
                 if not isinstance(grad_out, Tensor):
                     raise TypeError(
@@ -1223,33 +1567,41 @@ class Tensor(
                 if grad_out.device != self.device:
                     raise ValueError("grad_out must be on the same device as self")
 
-            # -----------------------------
-            # CPU path (fix nodes placement)
-            # -----------------------------
-            topo: list[Tensor] = []
-            visited: set[int] = set()
+        _time_section("seed_grad", _seed_grad)
 
-            def dfs(t: "Tensor") -> None:
+        # -----------------------------
+        # Build topo (DFS) + nodes dict
+        # -----------------------------
+        topo: list[Tensor] = []
+        visited: set[int] = set()
+
+        def _build_topo():
+            def dfs_cuda(t: "Tensor") -> None:
                 tid = id(t)
                 if tid in visited:
                     return
                 visited.add(tid)
-
                 ctx = t._get_ctx()
                 if ctx is not None:
                     for p in ctx.parents:
-                        dfs(p)
-
+                        dfs_cuda(p)
                 topo.append(t)
 
-            dfs(self)
+            dfs_cuda(self)
 
-            # ✅ build nodes AFTER topo is populated
-            nodes = {id(t): t for t in topo}
+        _time_section("build_topo_dfs", _build_topo)
 
-            grads: dict[int, Tensor] = {id(self): grad_out}
+        nodes: dict[int, Tensor] = {}
+        _time_section(
+            "build_nodes_dict", lambda: nodes.update({id(t): t for t in topo})
+        )
 
-            # Traverse in reverse topo order (from outputs back to leaves)
+        grads: dict[int, Tensor] = {id(self): grad_out}  # type: ignore[arg-type]
+
+        # -----------------------------
+        # Reverse traversal
+        # -----------------------------
+        def _reverse_traverse():
             for t in reversed(topo):
                 ctx = t._get_ctx()
                 if ctx is None:
@@ -1257,10 +1609,37 @@ class Tensor(
 
                 grad_t = grads.get(id(t))
                 if grad_t is None:
-                    # No gradient flowing to this node; skip
                     continue
 
-                parent_grads = ctx.backward_fn(grad_t)
+                op_name = (
+                    getattr(ctx, "op_name", None)
+                    or getattr(ctx, "name", None)
+                    or type(ctx).__name__
+                )
+
+                t0 = time.perf_counter()
+                if event_timer is not None:
+
+                    def _call():
+                        nonlocal parent_grads
+                        parent_grads = ctx.backward_fn(grad_t)
+
+                    parent_grads: list[Optional[Tensor]]
+                    gpu_ms = event_timer.time_block(_call)
+                    cpu_ms = (time.perf_counter() - t0) * 1000.0
+                else:
+                    _sync()
+                    t0b = time.perf_counter()
+                    parent_grads = ctx.backward_fn(grad_t)
+                    _sync()
+                    cpu_ms = (time.perf_counter() - t0b) * 1000.0
+                    gpu_ms = cpu_ms
+
+                if prof is not None:
+                    prof.add("backward_fn_total", cpu_ms, gpu_ms)
+                    prof.add_op(op_name, cpu_ms, gpu_ms)
+                    prof.per_node.append((op_name, cpu_ms, gpu_ms))
+
                 if len(parent_grads) != len(ctx.parents):
                     raise RuntimeError(
                         "backward_fn must return one grad per parent. "
@@ -1281,153 +1660,39 @@ class Tensor(
                             f"Gradient shape mismatch for parent: expected {parent.shape}, got {g.shape}"
                         )
 
-                    # Accumulate gradient in the grads dict
                     pid = id(parent)
-                    if pid in grads:
-                        grads[pid] = self._add_no_grad(grads[pid], g)
-                    else:
-                        # Ensure stored grads do not track grad
-                        grads[pid] = self._detach_no_grad(g)
+                    if g.requires_grad or (g._get_ctx() is not None):
+                        g = Tensor._cuda_detach_view_no_grad(g)
 
-            # ✅ CPU writeback: O(N)
+                    if pid in grads:
+
+                        def _acc():
+                            grads[pid] = Tensor._add_no_grad_cuda(grads[pid], g)
+
+                        _time_section("grad_accum_add", _acc)
+                    else:
+
+                        def _set():
+                            grads[pid] = Tensor._cuda_detach_view_no_grad(g)
+
+                        _time_section("grad_accum_set", _set)
+
+        _time_section("reverse_traverse_total", _reverse_traverse)
+
+        # -----------------------------
+        # Writeback into leaf .grad
+        # -----------------------------
+        def _writeback():
             for tid, g in grads.items():
                 t = nodes.get(tid)
                 if t is None or not t.requires_grad:
                     continue
-                t._accumulate_grad_(g)
-            return
+                t._accumulate_grad_cuda_(g)
 
-        # ---------------------------------------------------------------------
-        # CUDA path: additive support (minimal, does NOT change CPU behavior).
-        # ---------------------------------------------------------------------
-        if not self.device.is_cuda():
-            self._raise_device_not_supported("backward")
+        _time_section("writeback_leaf_accum", _writeback)
 
-        # Helper: share a single CUDA DLL handle to avoid multi-handle issues.
-        def _get_cuda_lib():
-            lib = getattr(Tensor, "_CUDA_LIB", None)
-            if lib is None:
-                from ...infrastructure.native_cuda.python import (
-                    maxpool2d_ctypes as m,
-                )
-
-                lib = m.load_keydnn_cuda_native()
-                setattr(Tensor, "_CUDA_LIB", lib)
-            return lib
-
-        # Seed gradient (CUDA)
-        if grad_out is None:
-            if self.shape != ():
-                raise ValueError(
-                    "grad_out must be provided for non-scalar tensors. "
-                    f"Got shape={self.shape}."
-                )
-
-            from ...infrastructure.native_cuda.python import (
-                maxpool2d_ctypes as m,
-            )
-
-            lib = _get_cuda_lib()
-            host = np.array(1.0, dtype=np.float32)
-            dev_ptr = int(m.cuda_malloc(lib, int(host.nbytes)))
-
-            try:
-                m.cudaMemcpyHtoD(lib, int(dev_ptr), host, int(host.nbytes))
-
-                grad_out = Tensor._from_devptr(
-                    dev_ptr=int(dev_ptr),
-                    shape=(),  # scalar
-                    device=self.device,
-                    requires_grad=False,
-                    ctx=None,
-                    dtype=np.float32,
-                )
-            except Exception:
-                try:
-                    m.cuda_free(lib, int(dev_ptr))
-                except Exception:
-                    pass
-                raise
-        else:
-            if not isinstance(grad_out, Tensor):
-                raise TypeError(f"grad_out must be a Tensor, got {type(grad_out)!r}")
-            if grad_out.shape != self.shape:
-                raise ValueError(
-                    f"grad_out shape mismatch: expected {self.shape}, got {grad_out.shape}"
-                )
-            if grad_out.device != self.device:
-                raise ValueError("grad_out must be on the same device as self")
-
-        # Build reverse topo on CUDA graph (same structure as CPU)
-        topo: list[Tensor] = []
-        visited: set[int] = set()
-
-        def dfs_cuda(t: "Tensor") -> None:
-            tid = id(t)
-            if tid in visited:
-                return
-            visited.add(tid)
-
-            ctx = t._get_ctx()
-            if ctx is not None:
-                for p in ctx.parents:
-                    dfs_cuda(p)
-
-            topo.append(t)
-
-        dfs_cuda(self)
-
-        # ✅ build nodes AFTER topo is populated
-        nodes = {id(t): t for t in topo}
-
-        grads: dict[int, Tensor] = {id(self): grad_out}
-
-        for t in reversed(topo):
-            ctx = t._get_ctx()
-            if ctx is None:
-                continue
-
-            grad_t = grads.get(id(t))
-            if grad_t is None:
-                continue
-
-            parent_grads = ctx.backward_fn(grad_t)
-            if len(parent_grads) != len(ctx.parents):
-                raise RuntimeError(
-                    "backward_fn must return one grad per parent. "
-                    f"Got {len(parent_grads)} grads for {len(ctx.parents)} parents."
-                )
-
-            for parent, g in zip(ctx.parents, parent_grads):
-                if g is None:
-                    continue
-                if not isinstance(g, Tensor):
-                    raise TypeError(
-                        f"backward_fn must return Tensor or None, got {type(g)!r}"
-                    )
-                if g.device != parent.device:
-                    raise ValueError("Gradient device must match parent device")
-                if g.shape != parent.shape:
-                    raise ValueError(
-                        f"Gradient shape mismatch for parent: expected {parent.shape}, got {g.shape}"
-                    )
-
-                pid = id(parent)
-                # ✅ use your class helper (define once in class)
-                if g.requires_grad or (g._get_ctx() is not None):
-                    g = Tensor._cuda_detach_view_no_grad(g)
-
-                if pid in grads:
-                    grads[pid] = Tensor._add_no_grad_cuda(grads[pid], g)
-                else:
-                    grads[pid] = Tensor._cuda_detach_view_no_grad(g)
-
-        # ✅ CUDA writeback: O(N), and accumulate via CUDA add
-        for tid, g in grads.items():
-            t = nodes.get(tid)
-            if t is None or not t.requires_grad:
-                continue
-            t._accumulate_grad_cuda_(g)
+        if prof is not None:
+            print(prof.report(topk=profile_topk))
 
     def _numel_from_shape(self) -> int:
         """
@@ -1453,6 +1718,7 @@ class Tensor(
         return int(n)
 
     @staticmethod
+    @lru_cache(maxsize=1)
     def _get_cuda_lib():
         """
         Lazily load and cache the KeyDNN native CUDA shared library.
