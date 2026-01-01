@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import unittest
-from typing import Any, Callable, Tuple
+from typing import Any, Tuple
 
 import numpy as np
 
@@ -188,11 +188,8 @@ class _CudaArithmeticCtypesBase(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.lib = _try_load_cuda_lib()
         if cls.lib is None:
-            raise unittest.SkipTest(
-                "CUDA native library not available / failed to load."
-            )
+            raise unittest.SkipTest("CUDA native library not available / failed to load.")
 
-        # IMPORTANT: wrap as staticmethod to avoid unittest binding them as methods
         (
             cuda_set_device,
             cuda_malloc,
@@ -202,6 +199,7 @@ class _CudaArithmeticCtypesBase(unittest.TestCase):
             cuda_synchronize,
         ) = _get_cuda_utils_wrappers()
 
+        # IMPORTANT: wrap as staticmethod to avoid unittest binding them as methods
         cls.cuda_set_device = staticmethod(cuda_set_device)
         cls.cuda_malloc = staticmethod(cuda_malloc)
         cls.cuda_free = staticmethod(cuda_free)
@@ -209,110 +207,45 @@ class _CudaArithmeticCtypesBase(unittest.TestCase):
         cls.cudaMemcpyDtoH = staticmethod(cudaMemcpyDtoH)
         cls.cuda_synchronize = staticmethod(cuda_synchronize)
 
-        # ops under test (ctypes dispatchers)
-        cls.neg_cuda = staticmethod(
-            _import_first(
-                (
-                    "src.keydnn.infrastructure.native_cuda.python.ops.tensor_arithmetic_ctypes",
-                    "neg_cuda",
-                ),
-                (
-                    "keydnn.infrastructure.native_cuda.python.ops.tensor_arithmetic_ctypes",
-                    "neg_cuda",
-                ),
-            )
-        )
-        cls.add_cuda = staticmethod(
-            _import_first(
-                (
-                    "src.keydnn.infrastructure.native_cuda.python.ops.tensor_arithmetic_ctypes",
-                    "add_cuda",
-                ),
-                (
-                    "keydnn.infrastructure.native_cuda.python.ops.tensor_arithmetic_ctypes",
-                    "add_cuda",
-                ),
-            )
-        )
-        cls.sub_cuda = staticmethod(
-            _import_first(
-                (
-                    "src.keydnn.infrastructure.native_cuda.python.ops.tensor_arithmetic_ctypes",
-                    "sub_cuda",
-                ),
-                (
-                    "keydnn.infrastructure.native_cuda.python.ops.tensor_arithmetic_ctypes",
-                    "sub_cuda",
-                ),
-            )
-        )
-        cls.div_cuda = staticmethod(
-            _import_first(
-                (
-                    "src.keydnn.infrastructure.native_cuda.python.ops.tensor_arithmetic_ctypes",
-                    "div_cuda",
-                ),
-                (
-                    "keydnn.infrastructure.native_cuda.python.ops.tensor_arithmetic_ctypes",
-                    "div_cuda",
-                ),
-            )
-        )
-        cls.gt_cuda = staticmethod(
-            _import_first(
-                (
-                    "src.keydnn.infrastructure.native_cuda.python.ops.tensor_arithmetic_ctypes",
-                    "gt_cuda",
-                ),
-                (
-                    "keydnn.infrastructure.native_cuda.python.ops.tensor_arithmetic_ctypes",
-                    "gt_cuda",
-                ),
-            )
+        # out-of-place ops under test
+        mod_candidates = (
+            ("src.keydnn.infrastructure.native_cuda.python.ops.tensor_arithmetic_ctypes",),
+            ("keydnn.infrastructure.native_cuda.python.ops.tensor_arithmetic_ctypes",),
         )
 
-        cls.add_scalar_cuda = staticmethod(
-            _import_first(
-                (
-                    "src.keydnn.infrastructure.native_cuda.python.ops.tensor_arithmetic_ctypes",
-                    "add_scalar_cuda",
-                ),
-                (
-                    "keydnn.infrastructure.native_cuda.python.ops.tensor_arithmetic_ctypes",
-                    "add_scalar_cuda",
-                ),
+        def _op(name: str):
+            return staticmethod(
+                _import_first(
+                    (mod_candidates[0][0], name),
+                    (mod_candidates[1][0], name),
+                )
             )
-        )
-        cls.sub_scalar_cuda = staticmethod(
-            _import_first(
-                (
-                    "src.keydnn.infrastructure.native_cuda.python.ops.tensor_arithmetic_ctypes",
-                    "sub_scalar_cuda",
-                ),
-                (
-                    "keydnn.infrastructure.native_cuda.python.ops.tensor_arithmetic_ctypes",
-                    "sub_scalar_cuda",
-                ),
-            )
-        )
-        cls.div_scalar_cuda = staticmethod(
-            _import_first(
-                (
-                    "src.keydnn.infrastructure.native_cuda.python.ops.tensor_arithmetic_ctypes",
-                    "div_scalar_cuda",
-                ),
-                (
-                    "keydnn.infrastructure.native_cuda.python.ops.tensor_arithmetic_ctypes",
-                    "div_scalar_cuda",
-                ),
-            )
-        )
 
-        # Set device once for the process (safe even if device=0 already)
+        cls.neg_cuda = _op("neg_cuda")
+        cls.add_cuda = _op("add_cuda")
+        cls.sub_cuda = _op("sub_cuda")
+        cls.div_cuda = _op("div_cuda")
+        cls.gt_cuda = _op("gt_cuda")
+        cls.add_scalar_cuda = _op("add_scalar_cuda")
+        cls.sub_scalar_cuda = _op("sub_scalar_cuda")
+        cls.div_scalar_cuda = _op("div_scalar_cuda")
+
+        # in-place ops under test (new)
+        cls.add_inplace_cuda = _op("add_inplace_cuda")
+        cls.sub_inplace_cuda = _op("sub_inplace_cuda")
+        cls.div_inplace_cuda = _op("div_inplace_cuda")
+        cls.add_scalar_inplace_cuda = _op("add_scalar_inplace_cuda")
+        cls.sub_scalar_inplace_cuda = _op("sub_scalar_inplace_cuda")
+        cls.div_scalar_inplace_cuda = _op("div_scalar_inplace_cuda")
+
         cls.cuda_set_device(cls.lib, 0)
 
     # ---- tiny helpers ----
     def _alloc(self, nbytes: int) -> int:
+        # IMPORTANT: some allocators reject nbytes==0; allocate 1 byte for "empty" tests.
+        nbytes = int(nbytes)
+        if nbytes <= 0:
+            nbytes = 1
         return int(type(self).cuda_malloc(self.lib, int(nbytes)))
 
     def _free(self, ptr: int) -> None:
@@ -321,6 +254,7 @@ class _CudaArithmeticCtypesBase(unittest.TestCase):
     def _htod(self, dst: int, src: np.ndarray) -> None:
         if not src.flags["C_CONTIGUOUS"]:
             src = np.ascontiguousarray(src)
+        # If src.nbytes==0, still call with 0 bytes is fine; dst must be valid.
         type(self).cudaMemcpyHtoD(self.lib, int(dst), src, int(src.nbytes))
 
     def _dtoh(self, dst: np.ndarray, src: int) -> None:
@@ -333,6 +267,9 @@ class _CudaArithmeticCtypesBase(unittest.TestCase):
 
 
 class TestTensorArithmeticCtypesF32(_CudaArithmeticCtypesBase):
+    # ----------------------------
+    # Out-of-place tests (y = op(a,b))
+    # ----------------------------
     def test_neg_f32_matches_numpy(self):
         x = np.array([1.0, -2.5, 3.25, 0.0], dtype=np.float32)
         y = np.empty_like(x)
@@ -341,9 +278,7 @@ class TestTensorArithmeticCtypesF32(_CudaArithmeticCtypesBase):
         y_dev = self._alloc(y.nbytes)
         try:
             self._htod(x_dev, x)
-            type(self).neg_cuda(
-                self.lib, x_dev=x_dev, y_dev=y_dev, n=x.size, dtype=x.dtype
-            )
+            type(self).neg_cuda(self.lib, x_dev=x_dev, y_dev=y_dev, n=x.size, dtype=x.dtype)
             self._sync()
             self._dtoh(y, y_dev)
         finally:
@@ -363,9 +298,7 @@ class TestTensorArithmeticCtypesF32(_CudaArithmeticCtypesBase):
         try:
             self._htod(a_dev, a)
             self._htod(b_dev, b)
-            type(self).add_cuda(
-                self.lib, a_dev=a_dev, b_dev=b_dev, y_dev=y_dev, n=a.size, dtype=a.dtype
-            )
+            type(self).add_cuda(self.lib, a_dev=a_dev, b_dev=b_dev, y_dev=y_dev, n=a.size, dtype=a.dtype)
             self._sync()
             self._dtoh(y, y_dev)
         finally:
@@ -386,9 +319,7 @@ class TestTensorArithmeticCtypesF32(_CudaArithmeticCtypesBase):
         try:
             self._htod(a_dev, a)
             self._htod(b_dev, b)
-            type(self).sub_cuda(
-                self.lib, a_dev=a_dev, b_dev=b_dev, y_dev=y_dev, n=a.size, dtype=a.dtype
-            )
+            type(self).sub_cuda(self.lib, a_dev=a_dev, b_dev=b_dev, y_dev=y_dev, n=a.size, dtype=a.dtype)
             self._sync()
             self._dtoh(y, y_dev)
         finally:
@@ -409,9 +340,7 @@ class TestTensorArithmeticCtypesF32(_CudaArithmeticCtypesBase):
         try:
             self._htod(a_dev, a)
             self._htod(b_dev, b)
-            type(self).div_cuda(
-                self.lib, a_dev=a_dev, b_dev=b_dev, y_dev=y_dev, n=a.size, dtype=a.dtype
-            )
+            type(self).div_cuda(self.lib, a_dev=a_dev, b_dev=b_dev, y_dev=y_dev, n=a.size, dtype=a.dtype)
             self._sync()
             self._dtoh(y, y_dev)
         finally:
@@ -432,9 +361,7 @@ class TestTensorArithmeticCtypesF32(_CudaArithmeticCtypesBase):
         try:
             self._htod(a_dev, a)
             self._htod(b_dev, b)
-            type(self).gt_cuda(
-                self.lib, a_dev=a_dev, b_dev=b_dev, y_dev=y_dev, n=a.size, dtype=a.dtype
-            )
+            type(self).gt_cuda(self.lib, a_dev=a_dev, b_dev=b_dev, y_dev=y_dev, n=a.size, dtype=a.dtype)
             self._sync()
             self._dtoh(y, y_dev)
         finally:
@@ -455,14 +382,7 @@ class TestTensorArithmeticCtypesF32(_CudaArithmeticCtypesBase):
         y_dev = self._alloc(y.nbytes)
         try:
             self._htod(a_dev, a)
-            type(self).add_scalar_cuda(
-                self.lib,
-                a_dev=a_dev,
-                alpha=alpha,
-                y_dev=y_dev,
-                n=a.size,
-                dtype=a.dtype,
-            )
+            type(self).add_scalar_cuda(self.lib, a_dev=a_dev, alpha=alpha, y_dev=y_dev, n=a.size, dtype=a.dtype)
             self._sync()
             self._dtoh(y, y_dev)
         finally:
@@ -480,14 +400,7 @@ class TestTensorArithmeticCtypesF32(_CudaArithmeticCtypesBase):
         y_dev = self._alloc(y.nbytes)
         try:
             self._htod(a_dev, a)
-            type(self).sub_scalar_cuda(
-                self.lib,
-                a_dev=a_dev,
-                alpha=alpha,
-                y_dev=y_dev,
-                n=a.size,
-                dtype=a.dtype,
-            )
+            type(self).sub_scalar_cuda(self.lib, a_dev=a_dev, alpha=alpha, y_dev=y_dev, n=a.size, dtype=a.dtype)
             self._sync()
             self._dtoh(y, y_dev)
         finally:
@@ -498,21 +411,14 @@ class TestTensorArithmeticCtypesF32(_CudaArithmeticCtypesBase):
 
     def test_div_scalar_f32_matches_numpy(self):
         a = np.array([1.0, -2.0, 3.5, 4.0], dtype=np.float32)
-        alpha = 1.6  # avoid zero
+        alpha = 1.6
         y = np.empty_like(a)
 
         a_dev = self._alloc(a.nbytes)
         y_dev = self._alloc(y.nbytes)
         try:
             self._htod(a_dev, a)
-            type(self).div_scalar_cuda(
-                self.lib,
-                a_dev=a_dev,
-                alpha=alpha,
-                y_dev=y_dev,
-                n=a.size,
-                dtype=a.dtype,
-            )
+            type(self).div_scalar_cuda(self.lib, a_dev=a_dev, alpha=alpha, y_dev=y_dev, n=a.size, dtype=a.dtype)
             self._sync()
             self._dtoh(y, y_dev)
         finally:
@@ -521,8 +427,168 @@ class TestTensorArithmeticCtypesF32(_CudaArithmeticCtypesBase):
 
         np.testing.assert_allclose(y, a / alpha, rtol=1e-6, atol=1e-6)
 
+    # ----------------------------
+    # In-place tests (mutate a)
+    # ----------------------------
+    def test_add_inplace_f32_mutates_a(self):
+        a = np.array([1.0, 2.0, -3.0, 4.0], dtype=np.float32)
+        b = np.array([0.5, -2.0, 10.0, -1.5], dtype=np.float32)
+
+        a_ref = a + b
+        b_ref = b.copy()
+
+        a_dev = self._alloc(a.nbytes)
+        b_dev = self._alloc(b.nbytes)
+        try:
+            self._htod(a_dev, a)
+            self._htod(b_dev, b)
+            type(self).add_inplace_cuda(self.lib, a_dev=a_dev, b_dev=b_dev, n=a.size, dtype=a.dtype)
+            self._sync()
+
+            a_out = np.empty_like(a)
+            b_out = np.empty_like(b)
+            self._dtoh(a_out, a_dev)
+            self._dtoh(b_out, b_dev)
+        finally:
+            self._free(a_dev)
+            self._free(b_dev)
+
+        np.testing.assert_allclose(a_out, a_ref, rtol=0, atol=0)
+        np.testing.assert_allclose(b_out, b_ref, rtol=0, atol=0)
+
+    def test_sub_inplace_f32_mutates_a(self):
+        a = np.array([1.0, 2.0, -3.0, 4.0], dtype=np.float32)
+        b = np.array([0.5, -2.0, 10.0, -1.5], dtype=np.float32)
+
+        a_ref = a - b
+        b_ref = b.copy()
+
+        a_dev = self._alloc(a.nbytes)
+        b_dev = self._alloc(b.nbytes)
+        try:
+            self._htod(a_dev, a)
+            self._htod(b_dev, b)
+            type(self).sub_inplace_cuda(self.lib, a_dev=a_dev, b_dev=b_dev, n=a.size, dtype=a.dtype)
+            self._sync()
+
+            a_out = np.empty_like(a)
+            b_out = np.empty_like(b)
+            self._dtoh(a_out, a_dev)
+            self._dtoh(b_out, b_dev)
+        finally:
+            self._free(a_dev)
+            self._free(b_dev)
+
+        np.testing.assert_allclose(a_out, a_ref, rtol=0, atol=0)
+        np.testing.assert_allclose(b_out, b_ref, rtol=0, atol=0)
+
+    def test_div_inplace_f32_mutates_a(self):
+        a = np.array([1.0, 2.0, -3.0, 4.0], dtype=np.float32)
+        b = np.array([0.5, -2.0, 10.0, -1.6], dtype=np.float32)
+
+        a_ref = a / b
+        b_ref = b.copy()
+
+        a_dev = self._alloc(a.nbytes)
+        b_dev = self._alloc(b.nbytes)
+        try:
+            self._htod(a_dev, a)
+            self._htod(b_dev, b)
+            type(self).div_inplace_cuda(self.lib, a_dev=a_dev, b_dev=b_dev, n=a.size, dtype=a.dtype)
+            self._sync()
+
+            a_out = np.empty_like(a)
+            b_out = np.empty_like(b)
+            self._dtoh(a_out, a_dev)
+            self._dtoh(b_out, b_dev)
+        finally:
+            self._free(a_dev)
+            self._free(b_dev)
+
+        np.testing.assert_allclose(a_out, a_ref, rtol=1e-6, atol=1e-6)
+        np.testing.assert_allclose(b_out, b_ref, rtol=0, atol=0)
+
+    def test_add_scalar_inplace_f32_mutates_a(self):
+        a = np.array([1.0, -2.0, 3.5, 0.0], dtype=np.float32)
+        alpha = 1.25
+        ref = a + alpha
+
+        a_dev = self._alloc(a.nbytes)
+        try:
+            self._htod(a_dev, a)
+            type(self).add_scalar_inplace_cuda(self.lib, a_dev=a_dev, alpha=alpha, n=a.size, dtype=a.dtype)
+            self._sync()
+
+            out = np.empty_like(a)
+            self._dtoh(out, a_dev)
+        finally:
+            self._free(a_dev)
+
+        np.testing.assert_allclose(out, ref, rtol=0, atol=0)
+
+    def test_sub_scalar_inplace_f32_mutates_a(self):
+        a = np.array([1.0, -2.0, 3.5, 0.0], dtype=np.float32)
+        alpha = 0.75
+        ref = a - alpha
+
+        a_dev = self._alloc(a.nbytes)
+        try:
+            self._htod(a_dev, a)
+            type(self).sub_scalar_inplace_cuda(self.lib, a_dev=a_dev, alpha=alpha, n=a.size, dtype=a.dtype)
+            self._sync()
+
+            out = np.empty_like(a)
+            self._dtoh(out, a_dev)
+        finally:
+            self._free(a_dev)
+
+        np.testing.assert_allclose(out, ref, rtol=0, atol=0)
+
+    def test_div_scalar_inplace_f32_mutates_a(self):
+        a = np.array([1.0, -2.0, 3.5, 4.0], dtype=np.float32)
+        alpha = 1.6
+        ref = a / alpha
+
+        a_dev = self._alloc(a.nbytes)
+        try:
+            self._htod(a_dev, a)
+            type(self).div_scalar_inplace_cuda(self.lib, a_dev=a_dev, alpha=alpha, n=a.size, dtype=a.dtype)
+            self._sync()
+
+            out = np.empty_like(a)
+            self._dtoh(out, a_dev)
+        finally:
+            self._free(a_dev)
+
+        np.testing.assert_allclose(out, ref, rtol=1e-6, atol=1e-6)
+
+    def test_inplace_numel_zero_is_ok(self):
+        # allocate 1 byte but pass n=0 => should be a no-op and not crash.
+        a0 = np.empty((0,), dtype=np.float32)
+        b0 = np.empty((0,), dtype=np.float32)
+
+        a_dev = self._alloc(0)
+        b_dev = self._alloc(0)
+        try:
+            type(self).add_inplace_cuda(self.lib, a_dev=a_dev, b_dev=b_dev, n=0, dtype=np.float32)
+            type(self).sub_inplace_cuda(self.lib, a_dev=a_dev, b_dev=b_dev, n=0, dtype=np.float32)
+            type(self).div_inplace_cuda(self.lib, a_dev=a_dev, b_dev=b_dev, n=0, dtype=np.float32)
+            type(self).add_scalar_inplace_cuda(self.lib, a_dev=a_dev, alpha=1.0, n=0, dtype=np.float32)
+            type(self).sub_scalar_inplace_cuda(self.lib, a_dev=a_dev, alpha=1.0, n=0, dtype=np.float32)
+            type(self).div_scalar_inplace_cuda(self.lib, a_dev=a_dev, alpha=1.0, n=0, dtype=np.float32)
+            self._sync()
+        finally:
+            self._free(a_dev)
+            self._free(b_dev)
+
+        self.assertEqual(a0.size, 0)
+        self.assertEqual(b0.size, 0)
+
 
 class TestTensorArithmeticCtypesF64(_CudaArithmeticCtypesBase):
+    # ----------------------------
+    # Out-of-place tests
+    # ----------------------------
     def test_neg_f64_matches_numpy(self):
         x = np.array([1.0, -2.5, 3.25, 0.0], dtype=np.float64)
         y = np.empty_like(x)
@@ -531,9 +597,7 @@ class TestTensorArithmeticCtypesF64(_CudaArithmeticCtypesBase):
         y_dev = self._alloc(y.nbytes)
         try:
             self._htod(x_dev, x)
-            type(self).neg_cuda(
-                self.lib, x_dev=x_dev, y_dev=y_dev, n=x.size, dtype=x.dtype
-            )
+            type(self).neg_cuda(self.lib, x_dev=x_dev, y_dev=y_dev, n=x.size, dtype=x.dtype)
             self._sync()
             self._dtoh(y, y_dev)
         finally:
@@ -553,9 +617,7 @@ class TestTensorArithmeticCtypesF64(_CudaArithmeticCtypesBase):
         try:
             self._htod(a_dev, a)
             self._htod(b_dev, b)
-            type(self).add_cuda(
-                self.lib, a_dev=a_dev, b_dev=b_dev, y_dev=y_dev, n=a.size, dtype=a.dtype
-            )
+            type(self).add_cuda(self.lib, a_dev=a_dev, b_dev=b_dev, y_dev=y_dev, n=a.size, dtype=a.dtype)
             self._sync()
             self._dtoh(y, y_dev)
         finally:
@@ -576,9 +638,7 @@ class TestTensorArithmeticCtypesF64(_CudaArithmeticCtypesBase):
         try:
             self._htod(a_dev, a)
             self._htod(b_dev, b)
-            type(self).sub_cuda(
-                self.lib, a_dev=a_dev, b_dev=b_dev, y_dev=y_dev, n=a.size, dtype=a.dtype
-            )
+            type(self).sub_cuda(self.lib, a_dev=a_dev, b_dev=b_dev, y_dev=y_dev, n=a.size, dtype=a.dtype)
             self._sync()
             self._dtoh(y, y_dev)
         finally:
@@ -590,7 +650,7 @@ class TestTensorArithmeticCtypesF64(_CudaArithmeticCtypesBase):
 
     def test_div_f64_matches_numpy(self):
         a = np.array([1.0, 2.0, -3.0, 4.0], dtype=np.float64)
-        b = np.array([0.5, -2.0, 10.0, -1.6], dtype=np.float64)  # avoid 0
+        b = np.array([0.5, -2.0, 10.0, -1.6], dtype=np.float64)
         y = np.empty_like(a)
 
         a_dev = self._alloc(a.nbytes)
@@ -599,9 +659,7 @@ class TestTensorArithmeticCtypesF64(_CudaArithmeticCtypesBase):
         try:
             self._htod(a_dev, a)
             self._htod(b_dev, b)
-            type(self).div_cuda(
-                self.lib, a_dev=a_dev, b_dev=b_dev, y_dev=y_dev, n=a.size, dtype=a.dtype
-            )
+            type(self).div_cuda(self.lib, a_dev=a_dev, b_dev=b_dev, y_dev=y_dev, n=a.size, dtype=a.dtype)
             self._sync()
             self._dtoh(y, y_dev)
         finally:
@@ -622,9 +680,7 @@ class TestTensorArithmeticCtypesF64(_CudaArithmeticCtypesBase):
         try:
             self._htod(a_dev, a)
             self._htod(b_dev, b)
-            type(self).gt_cuda(
-                self.lib, a_dev=a_dev, b_dev=b_dev, y_dev=y_dev, n=a.size, dtype=a.dtype
-            )
+            type(self).gt_cuda(self.lib, a_dev=a_dev, b_dev=b_dev, y_dev=y_dev, n=a.size, dtype=a.dtype)
             self._sync()
             self._dtoh(y, y_dev)
         finally:
@@ -645,14 +701,7 @@ class TestTensorArithmeticCtypesF64(_CudaArithmeticCtypesBase):
         y_dev = self._alloc(y.nbytes)
         try:
             self._htod(a_dev, a)
-            type(self).add_scalar_cuda(
-                self.lib,
-                a_dev=a_dev,
-                alpha=alpha,
-                y_dev=y_dev,
-                n=a.size,
-                dtype=a.dtype,
-            )
+            type(self).add_scalar_cuda(self.lib, a_dev=a_dev, alpha=alpha, y_dev=y_dev, n=a.size, dtype=a.dtype)
             self._sync()
             self._dtoh(y, y_dev)
         finally:
@@ -670,14 +719,7 @@ class TestTensorArithmeticCtypesF64(_CudaArithmeticCtypesBase):
         y_dev = self._alloc(y.nbytes)
         try:
             self._htod(a_dev, a)
-            type(self).sub_scalar_cuda(
-                self.lib,
-                a_dev=a_dev,
-                alpha=alpha,
-                y_dev=y_dev,
-                n=a.size,
-                dtype=a.dtype,
-            )
+            type(self).sub_scalar_cuda(self.lib, a_dev=a_dev, alpha=alpha, y_dev=y_dev, n=a.size, dtype=a.dtype)
             self._sync()
             self._dtoh(y, y_dev)
         finally:
@@ -695,14 +737,7 @@ class TestTensorArithmeticCtypesF64(_CudaArithmeticCtypesBase):
         y_dev = self._alloc(y.nbytes)
         try:
             self._htod(a_dev, a)
-            type(self).div_scalar_cuda(
-                self.lib,
-                a_dev=a_dev,
-                alpha=alpha,
-                y_dev=y_dev,
-                n=a.size,
-                dtype=a.dtype,
-            )
+            type(self).div_scalar_cuda(self.lib, a_dev=a_dev, alpha=alpha, y_dev=y_dev, n=a.size, dtype=a.dtype)
             self._sync()
             self._dtoh(y, y_dev)
         finally:
@@ -710,6 +745,156 @@ class TestTensorArithmeticCtypesF64(_CudaArithmeticCtypesBase):
             self._free(y_dev)
 
         np.testing.assert_allclose(y, a / alpha, rtol=1e-12, atol=1e-12)
+
+    # ----------------------------
+    # In-place tests
+    # ----------------------------
+    def test_add_inplace_f64_mutates_a(self):
+        a = np.array([1.0, 2.0, -3.0, 4.0], dtype=np.float64)
+        b = np.array([0.5, -2.0, 10.0, -1.5], dtype=np.float64)
+
+        a_ref = a + b
+        b_ref = b.copy()
+
+        a_dev = self._alloc(a.nbytes)
+        b_dev = self._alloc(b.nbytes)
+        try:
+            self._htod(a_dev, a)
+            self._htod(b_dev, b)
+            type(self).add_inplace_cuda(self.lib, a_dev=a_dev, b_dev=b_dev, n=a.size, dtype=a.dtype)
+            self._sync()
+
+            a_out = np.empty_like(a)
+            b_out = np.empty_like(b)
+            self._dtoh(a_out, a_dev)
+            self._dtoh(b_out, b_dev)
+        finally:
+            self._free(a_dev)
+            self._free(b_dev)
+
+        np.testing.assert_allclose(a_out, a_ref, rtol=0, atol=0)
+        np.testing.assert_allclose(b_out, b_ref, rtol=0, atol=0)
+
+    def test_sub_inplace_f64_mutates_a(self):
+        a = np.array([1.0, 2.0, -3.0, 4.0], dtype=np.float64)
+        b = np.array([0.5, -2.0, 10.0, -1.5], dtype=np.float64)
+
+        a_ref = a - b
+        b_ref = b.copy()
+
+        a_dev = self._alloc(a.nbytes)
+        b_dev = self._alloc(b.nbytes)
+        try:
+            self._htod(a_dev, a)
+            self._htod(b_dev, b)
+            type(self).sub_inplace_cuda(self.lib, a_dev=a_dev, b_dev=b_dev, n=a.size, dtype=a.dtype)
+            self._sync()
+
+            a_out = np.empty_like(a)
+            b_out = np.empty_like(b)
+            self._dtoh(a_out, a_dev)
+            self._dtoh(b_out, b_dev)
+        finally:
+            self._free(a_dev)
+            self._free(b_dev)
+
+        np.testing.assert_allclose(a_out, a_ref, rtol=0, atol=0)
+        np.testing.assert_allclose(b_out, b_ref, rtol=0, atol=0)
+
+    def test_div_inplace_f64_mutates_a(self):
+        a = np.array([1.0, 2.0, -3.0, 4.0], dtype=np.float64)
+        b = np.array([0.5, -2.0, 10.0, -1.6], dtype=np.float64)
+
+        a_ref = a / b
+        b_ref = b.copy()
+
+        a_dev = self._alloc(a.nbytes)
+        b_dev = self._alloc(b.nbytes)
+        try:
+            self._htod(a_dev, a)
+            self._htod(b_dev, b)
+            type(self).div_inplace_cuda(self.lib, a_dev=a_dev, b_dev=b_dev, n=a.size, dtype=a.dtype)
+            self._sync()
+
+            a_out = np.empty_like(a)
+            b_out = np.empty_like(b)
+            self._dtoh(a_out, a_dev)
+            self._dtoh(b_out, b_dev)
+        finally:
+            self._free(a_dev)
+            self._free(b_dev)
+
+        np.testing.assert_allclose(a_out, a_ref, rtol=1e-12, atol=1e-12)
+        np.testing.assert_allclose(b_out, b_ref, rtol=0, atol=0)
+
+    def test_add_scalar_inplace_f64_mutates_a(self):
+        a = np.array([1.0, -2.0, 3.5, 0.0], dtype=np.float64)
+        alpha = 1.25
+        ref = a + alpha
+
+        a_dev = self._alloc(a.nbytes)
+        try:
+            self._htod(a_dev, a)
+            type(self).add_scalar_inplace_cuda(self.lib, a_dev=a_dev, alpha=alpha, n=a.size, dtype=a.dtype)
+            self._sync()
+
+            out = np.empty_like(a)
+            self._dtoh(out, a_dev)
+        finally:
+            self._free(a_dev)
+
+        np.testing.assert_allclose(out, ref, rtol=0, atol=0)
+
+    def test_sub_scalar_inplace_f64_mutates_a(self):
+        a = np.array([1.0, -2.0, 3.5, 0.0], dtype=np.float64)
+        alpha = 0.75
+        ref = a - alpha
+
+        a_dev = self._alloc(a.nbytes)
+        try:
+            self._htod(a_dev, a)
+            type(self).sub_scalar_inplace_cuda(self.lib, a_dev=a_dev, alpha=alpha, n=a.size, dtype=a.dtype)
+            self._sync()
+
+            out = np.empty_like(a)
+            self._dtoh(out, a_dev)
+        finally:
+            self._free(a_dev)
+
+        np.testing.assert_allclose(out, ref, rtol=0, atol=0)
+
+    def test_div_scalar_inplace_f64_mutates_a(self):
+        a = np.array([1.0, -2.0, 3.5, 4.0], dtype=np.float64)
+        alpha = 1.6
+        ref = a / alpha
+
+        a_dev = self._alloc(a.nbytes)
+        try:
+            self._htod(a_dev, a)
+            type(self).div_scalar_inplace_cuda(self.lib, a_dev=a_dev, alpha=alpha, n=a.size, dtype=a.dtype)
+            self._sync()
+
+            out = np.empty_like(a)
+            self._dtoh(out, a_dev)
+        finally:
+            self._free(a_dev)
+
+        np.testing.assert_allclose(out, ref, rtol=1e-12, atol=1e-12)
+
+    def test_inplace_numel_zero_is_ok(self):
+        a_dev = self._alloc(0)
+        b_dev = self._alloc(0)
+        try:
+            type(self).add_inplace_cuda(self.lib, a_dev=a_dev, b_dev=b_dev, n=0, dtype=np.float64)
+            type(self).sub_inplace_cuda(self.lib, a_dev=a_dev, b_dev=b_dev, n=0, dtype=np.float64)
+            type(self).div_inplace_cuda(self.lib, a_dev=a_dev, b_dev=b_dev, n=0, dtype=np.float64)
+            type(self).add_scalar_inplace_cuda(self.lib, a_dev=a_dev, alpha=1.0, n=0, dtype=np.float64)
+            type(self).sub_scalar_inplace_cuda(self.lib, a_dev=a_dev, alpha=1.0, n=0, dtype=np.float64)
+            type(self).div_scalar_inplace_cuda(self.lib, a_dev=a_dev, alpha=1.0, n=0, dtype=np.float64)
+            self._sync()
+        finally:
+            self._free(a_dev)
+            self._free(b_dev)
 
 
 if __name__ == "__main__":

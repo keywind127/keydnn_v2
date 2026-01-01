@@ -3,18 +3,24 @@
 CUDA elementwise multiply with Tensor boundaries (device-pointer based).
 
 This module exposes a Tensor-first API for elementwise multiplication on CUDA.
-It wraps the low-level ctypes kernel wrapper `native_cuda.python.ops.unary_ctypes.mul_cuda`
-(despite the file name, `mul_cuda` is a binary op) and handles device allocation
-and Tensor construction.
+It wraps the low-level ctypes kernel wrappers in
+`native_cuda.python.ops.unary_ctypes` and handles device allocation and Tensor
+construction.
 
 Key design
 ----------
 - Accepts CUDA `Tensor` inputs and never converts CUDA tensors to NumPy.
 - Treats `Tensor.data` as a raw device pointer (uintptr_t stored as Python int).
-- Allocates the output buffer on device using shared CUDA utilities.
+- Allocates output buffers on device using shared CUDA utilities.
 - Invokes the underlying ctypes wrapper to run the CUDA kernel.
-- Returns a CUDA `Tensor` via `Tensor._from_devptr`, transferring ownership of
-  the output device pointer to the returned Tensor.
+- Returns CUDA `Tensor` via `Tensor._from_devptr`, transferring ownership of the
+  output device pointer to the returned Tensor.
+
+In-place variants
+-----------------
+This module also exposes in-place multiply:
+- `mul_inplace(a, b)` mutates `a` as `a *= b` (no broadcasting).
+- `mul_scalar_inplace(a, alpha)` mutates `a` as `a *= alpha`.
 
 Scope and assumptions
 ---------------------
@@ -26,14 +32,15 @@ Scope and assumptions
 
 Ownership and failure behavior
 ------------------------------
-The returned Tensor owns its output device allocation. If an exception occurs
-after allocating the output buffer but before constructing the Tensor, this
-module frees the allocation to avoid leaks.
+- Out-of-place ops: returned Tensor owns its output device allocation. If an
+  exception occurs after allocating the output buffer but before constructing
+  the Tensor, this module frees the allocation to avoid leaks.
+- In-place ops: no new allocations are performed.
 
 Notes
 -----
 The `sync` parameter is accepted for API symmetry with other CUDA ops. The
-current ctypes wrapper does not accept a sync flag; synchronization behavior is
+current ctypes wrappers do not accept a sync flag; synchronization behavior is
 therefore determined by the native implementation (or may be added later at
 this boundary).
 """
@@ -48,6 +55,9 @@ from ..tensor._tensor import Tensor
 from ..native_cuda.python.ops.unary_ctypes import (
     mul_cuda as _mul_ctypes,
     mul_scalar_cuda as _mul_scalar_ctypes,
+    # NEW: in-place wrappers
+    mul_inplace_cuda as _mul_inplace_ctypes,
+    mul_scalar_inplace_cuda as _mul_scalar_inplace_ctypes,
 )
 
 # Reuse existing DLL loader + CUDA utils
@@ -158,8 +168,6 @@ def _require_same_device(a: Tensor, b: Tensor) -> None:
     Uses `a.device != b.device` as the primary check and falls back to string
     comparison for compatibility with alternative DeviceLike implementations.
     """
-    # Device is usually a small value object; equality should work if implemented.
-    # Fallback to string compare to be robust across DeviceLike implementations.
     if a.device != b.device and str(a.device) != str(b.device):
         raise ValueError(f"device mismatch: a.device={a.device} vs b.device={b.device}")
 
@@ -237,8 +245,6 @@ def mul_forward(a: Tensor, b: Tensor, *, device: int = 0, sync: bool = True) -> 
             dtype=np.dtype(dt),
         )
 
-        # `sync` is accepted for symmetry with other APIs; if you later add a
-        # cuda_synchronize(lib) here, you can gate it on `sync`.
         _ = bool(sync)
 
         return Tensor._from_devptr(
@@ -330,12 +336,132 @@ def mul_scalar_forward(
         raise
 
 
-# Convenience aliases
+def mul_inplace(
+    a: Tensor,
+    b: Tensor,
+    *,
+    device: int = 0,
+    sync: bool = True,
+) -> Tensor:
+    """
+    In-place elementwise multiply on CUDA: `a *= b` (no broadcasting).
+
+    Parameters
+    ----------
+    a : Tensor
+        CUDA tensor to be mutated in-place.
+    b : Tensor
+        CUDA tensor with the same shape, dtype, and device as `a`.
+    device : int, optional
+        CUDA device ordinal to set before kernel launch. Defaults to 0.
+    sync : bool, optional
+        Accepted for API symmetry. Defaults to True.
+
+    Returns
+    -------
+    Tensor
+        The same tensor object `a` (mutated).
+
+    Raises
+    ------
+    TypeError
+        If inputs are not CUDA or dtype is not float32/float64, or if dtypes mismatch.
+    ValueError
+        If shape/device mismatch.
+    """
+    _require_cuda(a, "a")
+    _require_cuda(b, "b")
+    _require_same_device(a, b)
+    _require_same_shape(a, b)
+
+    dt_a = _require_f32_f64(a, "a")
+    dt_b = _require_f32_f64(b, "b")
+    if dt_a != dt_b:
+        raise TypeError(f"dtype mismatch: a.dtype={dt_a} vs b.dtype={dt_b}")
+    dt = dt_a
+
+    numel = _numel(tuple(int(d) for d in a.shape))
+    if numel < 0:
+        raise ValueError(f"mul_inplace requires numel >= 0, got {numel}")
+
+    lib = _load_cuda_lib()
+    cuda_set_device(lib, int(device))
+
+    _mul_inplace_ctypes(
+        lib,
+        a_dev=int(a.data),
+        b_dev=int(b.data),
+        numel=int(numel),
+        dtype=np.dtype(dt),
+    )
+    _ = bool(sync)
+    return a
+
+
+def mul_scalar_inplace(
+    a: Tensor,
+    alpha: float,
+    *,
+    device: int = 0,
+    sync: bool = True,
+) -> Tensor:
+    """
+    In-place scalar multiply on CUDA: `a *= alpha`.
+
+    Parameters
+    ----------
+    a : Tensor
+        CUDA tensor to be mutated in-place.
+    alpha : float
+        Scalar multiplier.
+    device : int, optional
+        CUDA device ordinal to set before kernel launch. Defaults to 0.
+    sync : bool, optional
+        Accepted for API symmetry. Defaults to True.
+
+    Returns
+    -------
+    Tensor
+        The same tensor object `a` (mutated).
+
+    Raises
+    ------
+    TypeError
+        If `a` is not CUDA or dtype is not float32/float64.
+    ValueError
+        If computed numel < 0.
+    """
+    _require_cuda(a, "a")
+    dt = _require_f32_f64(a, "a")
+
+    numel = _numel(tuple(int(d) for d in a.shape))
+    if numel < 0:
+        raise ValueError(f"mul_scalar_inplace requires numel >= 0, got {numel}")
+
+    lib = _load_cuda_lib()
+    cuda_set_device(lib, int(device))
+
+    _mul_scalar_inplace_ctypes(
+        lib,
+        a_dev=int(a.data),
+        alpha=float(alpha),
+        numel=int(numel),
+        dtype=np.dtype(dt),
+    )
+    _ = bool(sync)
+    return a
+
+
 # Convenience aliases
 mul = mul_forward
 cuda_mul = mul_forward
 mul_scalar = mul_scalar_forward
 cuda_mul_scalar = mul_scalar_forward
+
+cuda_mul_inplace = mul_inplace
+mul_inplace_forward = mul_inplace  # alias for symmetry with naming elsewhere
+cuda_mul_scalar_inplace = mul_scalar_inplace
+mul_scalar_inplace_forward = mul_scalar_inplace
 
 __all__ = [
     "mul_forward",
@@ -344,4 +470,10 @@ __all__ = [
     "mul_scalar_forward",
     "mul_scalar",
     "cuda_mul_scalar",
+    "mul_inplace",
+    "cuda_mul_inplace",
+    "mul_inplace_forward",
+    "mul_scalar_inplace",
+    "cuda_mul_scalar_inplace",
+    "mul_scalar_inplace_forward",
 ]

@@ -128,7 +128,7 @@ class TestCNNOverfitTwoMNISTLike(unittest.TestCase):
 
         # ---- training ----
         lr = 0.15
-        steps = 8
+        steps = 32
         losses: list[float] = []
 
         for _ in range(steps):

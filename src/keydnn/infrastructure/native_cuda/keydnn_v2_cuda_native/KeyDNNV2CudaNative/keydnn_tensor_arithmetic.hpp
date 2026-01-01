@@ -112,4 +112,29 @@ extern "C" {
 		std::int64_t out
 	);
 
+	// ----------------------------
+	// Binary inplace: a op= b
+	// ----------------------------
+		KEYDNN_CUDA_API int keydnn_cuda_add_inplace_f32(float* a, const float* b, int64_t n);
+		KEYDNN_CUDA_API int keydnn_cuda_add_inplace_f64(double* a, const double* b, int64_t n);
+
+		KEYDNN_CUDA_API int keydnn_cuda_sub_inplace_f32(float* a, const float* b, int64_t n);
+		KEYDNN_CUDA_API int keydnn_cuda_sub_inplace_f64(double* a, const double* b, int64_t n);
+
+		KEYDNN_CUDA_API int keydnn_cuda_div_inplace_f32(float* a, const float* b, int64_t n);
+		KEYDNN_CUDA_API int keydnn_cuda_div_inplace_f64(double* a, const double* b, int64_t n);
+
+		// ----------------------------
+		// Scalar inplace: a op= alpha
+		// ----------------------------
+		KEYDNN_CUDA_API int keydnn_cuda_add_scalar_inplace_f32(float* a, float alpha, int64_t n);
+		KEYDNN_CUDA_API int keydnn_cuda_add_scalar_inplace_f64(double* a, double alpha, int64_t n);
+
+		KEYDNN_CUDA_API int keydnn_cuda_sub_scalar_inplace_f32(float* a, float alpha, int64_t n);
+		KEYDNN_CUDA_API int keydnn_cuda_sub_scalar_inplace_f64(double* a, double alpha, int64_t n);
+
+		KEYDNN_CUDA_API int keydnn_cuda_div_scalar_inplace_f32(float* a, float alpha, int64_t n);
+		KEYDNN_CUDA_API int keydnn_cuda_div_scalar_inplace_f64(double* a, double alpha, int64_t n);
+
+
 } // extern "C"

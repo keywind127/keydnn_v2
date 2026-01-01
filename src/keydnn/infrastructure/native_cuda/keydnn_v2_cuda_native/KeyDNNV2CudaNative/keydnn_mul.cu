@@ -31,6 +31,31 @@ __global__ void mul_scalar_kernel(
     }
 }
 
+template <typename T>
+__global__ void mul_inplace_kernel(
+    T* __restrict__ a,
+    const T* __restrict__ b,
+    int numel
+) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < numel) {
+        a[i] = a[i] * b[i];
+    }
+}
+
+template <typename T>
+__global__ void mul_scalar_inplace_kernel(
+    T* __restrict__ a,
+    T alpha,
+    int numel
+) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < numel) {
+        a[i] = a[i] * alpha;
+    }
+}
+
+
 // ============================================================
 // Launch helpers (NO cudaDeviceSynchronize here)
 // ============================================================
@@ -67,6 +92,39 @@ static int mul_scalar_launch(const T* a, T alpha, T* y, int numel) {
     cudaError_t st = cudaGetLastError();
     return (st == cudaSuccess) ? 0 : 3;
 }
+
+template <typename T>
+static int mul_inplace_launch(T* a, const T* b, int numel) {
+    if (numel < 0) return 1;
+    if (numel == 0) return 0;
+    if (!a || !b) return 2;
+
+    (void)cudaGetLastError();
+
+    int block = 256;
+    int grid = (numel + block - 1) / block;
+    mul_inplace_kernel<T> << <grid, block >> > (a, b, numel);
+
+    cudaError_t st = cudaGetLastError();
+    return (st == cudaSuccess) ? 0 : 3;
+}
+
+template <typename T>
+static int mul_scalar_inplace_launch(T* a, T alpha, int numel) {
+    if (numel < 0) return 1;
+    if (numel == 0) return 0;
+    if (!a) return 2;
+
+    (void)cudaGetLastError();
+
+    int block = 256;
+    int grid = (numel + block - 1) / block;
+    mul_scalar_inplace_kernel<T> << <grid, block >> > (a, alpha, numel);
+
+    cudaError_t st = cudaGetLastError();
+    return (st == cudaSuccess) ? 0 : 3;
+}
+
 
 // ============================================================
 // C ABI exports
@@ -106,4 +164,20 @@ extern "C" int keydnn_cuda_mul_scalar_f64(
     int numel
 ) {
     return mul_scalar_launch<double>(a, alpha, y, numel);
+}
+
+extern "C" int keydnn_cuda_mul_inplace_f32(float* a, const float* b, int numel) {
+    return mul_inplace_launch<float>(a, b, numel);
+}
+
+extern "C" int keydnn_cuda_mul_inplace_f64(double* a, const double* b, int numel) {
+    return mul_inplace_launch<double>(a, b, numel);
+}
+
+extern "C" int keydnn_cuda_mul_scalar_inplace_f32(float* a, float alpha, int numel) {
+    return mul_scalar_inplace_launch<float>(a, alpha, numel);
+}
+
+extern "C" int keydnn_cuda_mul_scalar_inplace_f64(double* a, double alpha, int numel) {
+    return mul_scalar_inplace_launch<double>(a, alpha, numel);
 }

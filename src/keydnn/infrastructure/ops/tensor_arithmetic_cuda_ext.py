@@ -3,15 +3,19 @@
 CUDA tensor arithmetic primitives with Tensor boundaries (device-pointer based).
 
 This module provides a Tensor-first CUDA API for a small set of elementwise
-operations by wrapping low-level ctypes bindings:
+arithmetic and comparison operations by wrapping low-level ctypes CUDA bindings.
 
-- inputs are KeyDNN `Tensor` objects placed on CUDA
-- outputs are newly-allocated CUDA tensors created from raw device pointers via
-  `Tensor._from_devptr`
-- no implicit host transfers (i.e., no `to_numpy()` for CUDA tensors)
+Key characteristics
+-------------------
+- Inputs are KeyDNN `Tensor` objects that must already reside on CUDA.
+- Outputs (for out-of-place ops) are newly allocated CUDA tensors constructed
+  directly from raw device pointers via `Tensor._from_devptr`.
+- No implicit host/device transfers are performed.
+- Broadcasting semantics are intentionally *not* supported.
+- Validation is minimal and focused strictly on Tensor boundary correctness.
 
-Supported ops
--------------
+Supported operations
+--------------------
 Unary:
 - neg(x) -> Tensor
 
@@ -20,28 +24,38 @@ Binary (no broadcasting):
 - sub(a, b) -> Tensor
 - div(a, b) -> Tensor
 
-Compare:
+Comparison:
 - gt(a, b) -> Tensor
-  Produces float32 outputs, even if inputs are float64.
+  Produces float32 outputs regardless of input dtype (matches kernel ABI).
 
-Assumptions and constraints
----------------------------
-- Inputs are CUDA tensors backed by contiguous device buffers.
-- Binary ops require identical shapes (broadcasting is intentionally not
-  implemented here).
-- Supported input dtypes: float32 / float64.
-- `gt` returns float32 by design (mirrors the native kernel ABI).
+Scalar (no broadcasting):
+- add_scalar(a, alpha) -> Tensor
+- sub_scalar(a, alpha) -> Tensor
+- div_scalar(a, alpha) -> Tensor
+
+In-place (mutate `a`):
+- add_inplace(a, b) -> None
+- sub_inplace(a, b) -> None
+- div_inplace(a, b) -> None
+- add_scalar_inplace(a, alpha) -> None
+- sub_scalar_inplace(a, alpha) -> None
+- div_scalar_inplace(a, alpha) -> None
+
+Assumptions
+-----------
+- All tensors are CUDA tensors with contiguous device buffers.
+- Binary ops require identical shapes and devices.
+- Supported input dtypes are float32 and float64 only.
 
 Resource management
 -------------------
-Each op allocates an output device buffer using the project's CUDA malloc/free
-utilities. On failure, the allocated output buffer is freed before re-raising.
+Each out-of-place operation allocates a device buffer using KeyDNN's CUDA
+malloc/free utilities. If a kernel invocation fails, the allocated buffer
+is freed before re-raising the exception.
 
-Notes
------
-This module intentionally stays lightweight and "mechanical": it performs only
-the minimal validations needed for correctness at the Tensor boundary, then
-dispatches to the underlying ctypes wrappers.
+This module is intentionally low-level and mechanical; higher-level semantics
+such as autograd integration, broadcasting, or dtype promotion are handled
+elsewhere.
 """
 
 from __future__ import annotations
@@ -57,14 +71,22 @@ from ..native_cuda.python.ops.tensor_arithmetic_ctypes import (
     sub_cuda as _sub_cuda,
     div_cuda as _div_cuda,
     gt_cuda as _gt_cuda,
-    # NEW: scalar variants
+    # scalar out-of-place
     add_scalar_cuda as _add_scalar_cuda,
     sub_scalar_cuda as _sub_scalar_cuda,
     div_scalar_cuda as _div_scalar_cuda,
+    # ----------------------------
+    # NEW: in-place variants
+    # ----------------------------
+    add_inplace_cuda as _add_inplace_cuda,
+    sub_inplace_cuda as _sub_inplace_cuda,
+    div_inplace_cuda as _div_inplace_cuda,
+    add_scalar_inplace_cuda as _add_scalar_inplace_cuda,
+    sub_scalar_inplace_cuda as _sub_scalar_inplace_cuda,
+    div_scalar_inplace_cuda as _div_scalar_inplace_cuda,
 )
 
 # Reuse your existing DLL loader + CUDA utils (malloc/free/set_device).
-from ..native_cuda.python.avgpool2d_ctypes import load_keydnn_cuda_native
 from ..native_cuda.python.maxpool2d_ctypes import (
     cuda_set_device,
     cuda_malloc,
@@ -74,35 +96,28 @@ from ..native_cuda.python.maxpool2d_ctypes import (
 
 def _get_lib():
     """
-    Return the process-wide cached CUDA library handle used by `Tensor`.
+    Return the cached CUDA shared library handle used by `Tensor`.
 
-    Returns
-    -------
-    ctypes.CDLL
-        The loaded KeyDNN CUDA native library handle.
-
-    Notes
-    -----
-    This function intentionally delegates to `Tensor._get_cuda_lib()` so all CUDA
-    ops share the same loaded library/runtime context within the process.
+    This function centralizes access to the process-wide CUDA DLL loaded
+    by the Tensor infrastructure, ensuring all ops dispatch against the
+    same native library instance.
     """
-    # use Tensor's cached handle so we share the same runtime / context
     return Tensor._get_cuda_lib()
 
 
 def _numel(shape: Tuple[int, ...]) -> int:
     """
-    Compute the number of elements for a tensor shape.
+    Compute the total number of elements for a given tensor shape.
 
     Parameters
     ----------
-    shape : tuple[int, ...]
+    shape : Tuple[int, ...]
         Tensor shape.
 
     Returns
     -------
     int
-        Product of all dimensions in `shape` (1 for an empty shape).
+        Product of all dimensions in `shape`.
     """
     n = 1
     for d in shape:
@@ -110,21 +125,41 @@ def _numel(shape: Tuple[int, ...]) -> int:
     return int(n)
 
 
+def _empty_cuda_tensor_like(x: Tensor, *, dtype: np.dtype) -> Tensor:
+    """
+    Construct an empty CUDA Tensor with the same shape/device as `x`, but with
+    the provided dtype. Uses devptr=0 and performs no allocation.
+
+    Notes
+    -----
+    Some CUDA allocators and wrappers treat cudaMalloc(0) as an error. For
+    numel==0 tensors, out-of-place ops should return an empty CUDA tensor
+    without calling cuda_malloc(0).
+    """
+    return Tensor._from_devptr(
+        0,
+        shape=tuple(x.shape),
+        dtype=np.dtype(dtype),
+        device=x.device,
+        requires_grad=False,
+    )
+
+
 def _require_cuda(x: Tensor, name: str) -> None:
     """
-    Require a tensor to be placed on CUDA.
+    Ensure that a tensor resides on a CUDA device.
 
     Parameters
     ----------
     x : Tensor
         Tensor to validate.
     name : str
-        Name used in error messages.
+        Human-readable tensor name for error messages.
 
     Raises
     ------
     TypeError
-        If `x` is not a CUDA tensor.
+        If the tensor is not a CUDA tensor.
     """
     if not x.device.is_cuda():
         raise TypeError(f"{name} must be a CUDA Tensor; got device={x.device}")
@@ -132,24 +167,24 @@ def _require_cuda(x: Tensor, name: str) -> None:
 
 def _require_f32_f64(x: Tensor, name: str) -> np.dtype:
     """
-    Require a tensor dtype to be float32 or float64.
+    Ensure that a tensor has dtype float32 or float64.
 
     Parameters
     ----------
     x : Tensor
         Tensor to validate.
     name : str
-        Name used in error messages.
+        Human-readable tensor name for error messages.
 
     Returns
     -------
     np.dtype
-        The normalized NumPy dtype (np.float32 or np.float64).
+        Normalized NumPy dtype of the tensor.
 
     Raises
     ------
     TypeError
-        If dtype is not float32/float64.
+        If the tensor dtype is not supported.
     """
     dt = np.dtype(x.dtype)
     if dt not in (np.float32, np.float64):
@@ -159,7 +194,7 @@ def _require_f32_f64(x: Tensor, name: str) -> np.dtype:
 
 def _require_same_shape(a: Tensor, b: Tensor) -> None:
     """
-    Require two tensors to have exactly the same shape.
+    Ensure two tensors have exactly the same shape.
 
     Parameters
     ----------
@@ -177,7 +212,7 @@ def _require_same_shape(a: Tensor, b: Tensor) -> None:
 
 def _require_same_device(a: Tensor, b: Tensor) -> None:
     """
-    Require two tensors to be on the same device.
+    Ensure two tensors are placed on the same device.
 
     Parameters
     ----------
@@ -187,61 +222,48 @@ def _require_same_device(a: Tensor, b: Tensor) -> None:
     Raises
     ------
     ValueError
-        If device placements differ.
-
-    Notes
-    -----
-    Device objects are typically value objects; equality should work when
-    implemented. A string fallback is used for robustness across DeviceLike
-    implementations.
+        If devices differ.
     """
-    # Device is usually a small value object; equality should work if implemented.
-    # Fallback to string compare to be robust across DeviceLike implementations.
     if a.device != b.device and str(a.device) != str(b.device):
         raise ValueError(f"device mismatch: a.device={a.device} vs b.device={b.device}")
 
 
+# ============================
+# Out-of-place ops
+# ============================
 def neg(x: Tensor, *, device: int = 0) -> Tensor:
     """
-    Elementwise negation on CUDA: `y = -x`.
+    Elementwise negation on CUDA.
+
+    Computes `y = -x`.
 
     Parameters
     ----------
     x : Tensor
-        CUDA tensor with dtype float32/float64.
+        Input CUDA tensor.
     device : int, optional
-        CUDA device ordinal used for `cuda_set_device`. Defaults to 0.
+        CUDA device index.
 
     Returns
     -------
     Tensor
-        CUDA tensor with the same shape and dtype as `x`.
-
-    Raises
-    ------
-    TypeError
-        If `x` is not CUDA or has unsupported dtype.
-    RuntimeError
-        If the underlying CUDA kernel returns an error (propagated from ctypes).
+        New CUDA tensor containing the result.
     """
     _require_cuda(x, "x")
     dt = _require_f32_f64(x, "x")
 
+    n = _numel(tuple(x.shape))
+    if n == 0:
+        return _empty_cuda_tensor_like(x, dtype=dt)
+
     lib = _get_lib()
     cuda_set_device(lib, int(device))
 
-    n = _numel(tuple(x.shape))
     nbytes = int(n * np.dtype(dt).itemsize)
     y_dev = cuda_malloc(lib, nbytes)
 
     try:
-        _neg_cuda(
-            lib,
-            x_dev=int(x.data),
-            y_dev=int(y_dev),
-            n=int(n),
-            dtype=dt,
-        )
+        _neg_cuda(lib, x_dev=int(x.data), y_dev=int(y_dev), n=int(n), dtype=dt)
         return Tensor._from_devptr(
             int(y_dev),
             shape=tuple(x.shape),
@@ -256,28 +278,21 @@ def neg(x: Tensor, *, device: int = 0) -> Tensor:
 
 def add(a: Tensor, b: Tensor, *, device: int = 0) -> Tensor:
     """
-    Elementwise addition on CUDA: `y = a + b` (no broadcasting).
+    Elementwise addition on CUDA.
+
+    Computes `y = a + b`.
 
     Parameters
     ----------
     a, b : Tensor
-        CUDA tensors with identical shape, dtype (float32/float64), and device.
+        Input CUDA tensors with identical shape, dtype, and device.
     device : int, optional
-        CUDA device ordinal used for `cuda_set_device`. Defaults to 0.
+        CUDA device index.
 
     Returns
     -------
     Tensor
-        CUDA tensor with the same shape and dtype as inputs.
-
-    Raises
-    ------
-    TypeError
-        If inputs are not CUDA, have unsupported dtype, or dtypes mismatch.
-    ValueError
-        If shapes differ or devices differ.
-    RuntimeError
-        If the underlying CUDA kernel returns an error (propagated from ctypes).
+        New CUDA tensor containing the result.
     """
     _require_cuda(a, "a")
     _require_cuda(b, "b")
@@ -290,10 +305,13 @@ def add(a: Tensor, b: Tensor, *, device: int = 0) -> Tensor:
         raise TypeError(f"dtype mismatch: a.dtype={dt_a} vs b.dtype={dt_b}")
     dt = dt_a
 
+    n = _numel(tuple(a.shape))
+    if n == 0:
+        return _empty_cuda_tensor_like(a, dtype=dt)
+
     lib = _get_lib()
     cuda_set_device(lib, int(device))
 
-    n = _numel(tuple(a.shape))
     nbytes = int(n * np.dtype(dt).itemsize)
     y_dev = cuda_malloc(lib, nbytes)
 
@@ -320,28 +338,9 @@ def add(a: Tensor, b: Tensor, *, device: int = 0) -> Tensor:
 
 def sub(a: Tensor, b: Tensor, *, device: int = 0) -> Tensor:
     """
-    Elementwise subtraction on CUDA: `y = a - b` (no broadcasting).
+    Elementwise subtraction on CUDA.
 
-    Parameters
-    ----------
-    a, b : Tensor
-        CUDA tensors with identical shape, dtype (float32/float64), and device.
-    device : int, optional
-        CUDA device ordinal used for `cuda_set_device`. Defaults to 0.
-
-    Returns
-    -------
-    Tensor
-        CUDA tensor with the same shape and dtype as inputs.
-
-    Raises
-    ------
-    TypeError
-        If inputs are not CUDA, have unsupported dtype, or dtypes mismatch.
-    ValueError
-        If shapes differ or devices differ.
-    RuntimeError
-        If the underlying CUDA kernel returns an error (propagated from ctypes).
+    Computes `y = a - b`.
     """
     _require_cuda(a, "a")
     _require_cuda(b, "b")
@@ -354,10 +353,13 @@ def sub(a: Tensor, b: Tensor, *, device: int = 0) -> Tensor:
         raise TypeError(f"dtype mismatch: a.dtype={dt_a} vs b.dtype={dt_b}")
     dt = dt_a
 
+    n = _numel(tuple(a.shape))
+    if n == 0:
+        return _empty_cuda_tensor_like(a, dtype=dt)
+
     lib = _get_lib()
     cuda_set_device(lib, int(device))
 
-    n = _numel(tuple(a.shape))
     nbytes = int(n * np.dtype(dt).itemsize)
     y_dev = cuda_malloc(lib, nbytes)
 
@@ -384,28 +386,9 @@ def sub(a: Tensor, b: Tensor, *, device: int = 0) -> Tensor:
 
 def div(a: Tensor, b: Tensor, *, device: int = 0) -> Tensor:
     """
-    Elementwise division on CUDA: `y = a / b` (no broadcasting).
+    Elementwise division on CUDA.
 
-    Parameters
-    ----------
-    a, b : Tensor
-        CUDA tensors with identical shape, dtype (float32/float64), and device.
-    device : int, optional
-        CUDA device ordinal used for `cuda_set_device`. Defaults to 0.
-
-    Returns
-    -------
-    Tensor
-        CUDA tensor with the same shape and dtype as inputs.
-
-    Raises
-    ------
-    TypeError
-        If inputs are not CUDA, have unsupported dtype, or dtypes mismatch.
-    ValueError
-        If shapes differ or devices differ.
-    RuntimeError
-        If the underlying CUDA kernel returns an error (propagated from ctypes).
+    Computes `y = a / b`.
     """
     _require_cuda(a, "a")
     _require_cuda(b, "b")
@@ -418,10 +401,13 @@ def div(a: Tensor, b: Tensor, *, device: int = 0) -> Tensor:
         raise TypeError(f"dtype mismatch: a.dtype={dt_a} vs b.dtype={dt_b}")
     dt = dt_a
 
+    n = _numel(tuple(a.shape))
+    if n == 0:
+        return _empty_cuda_tensor_like(a, dtype=dt)
+
     lib = _get_lib()
     cuda_set_device(lib, int(device))
 
-    n = _numel(tuple(a.shape))
     nbytes = int(n * np.dtype(dt).itemsize)
     y_dev = cuda_malloc(lib, nbytes)
 
@@ -448,32 +434,13 @@ def div(a: Tensor, b: Tensor, *, device: int = 0) -> Tensor:
 
 def gt(a: Tensor, b: Tensor, *, device: int = 0) -> Tensor:
     """
-    Elementwise greater-than on CUDA: `y = float32(a > b)`.
+    Elementwise greater-than comparison on CUDA.
 
-    Parameters
-    ----------
-    a, b : Tensor
-        CUDA tensors with identical shape, dtype (float32/float64), and device.
-    device : int, optional
-        CUDA device ordinal used for `cuda_set_device`. Defaults to 0.
-
-    Returns
-    -------
-    Tensor
-        CUDA tensor of dtype float32 with the same shape as inputs.
-
-    Raises
-    ------
-    TypeError
-        If inputs are not CUDA, have unsupported dtype, or dtypes mismatch.
-    ValueError
-        If shapes differ or devices differ.
-    RuntimeError
-        If the underlying CUDA kernel returns an error (propagated from ctypes).
+    Computes `y = (a > b)`.
 
     Notes
     -----
-    The output dtype is always float32 by design of the native kernel ABI.
+    The output dtype is always float32, regardless of input dtype.
     """
     _require_cuda(a, "a")
     _require_cuda(b, "b")
@@ -486,13 +453,15 @@ def gt(a: Tensor, b: Tensor, *, device: int = 0) -> Tensor:
         raise TypeError(f"dtype mismatch: a.dtype={dt_a} vs b.dtype={dt_b}")
     dt_in = dt_a
 
+    n = _numel(tuple(a.shape))
+    out_dt = np.float32
+    if n == 0:
+        return _empty_cuda_tensor_like(a, dtype=out_dt)
+
     lib = _get_lib()
     cuda_set_device(lib, int(device))
 
-    n = _numel(tuple(a.shape))
-    out_dt = np.float32
-    nbytes_y = int(n * np.dtype(out_dt).itemsize)
-    y_dev = cuda_malloc(lib, nbytes_y)
+    y_dev = cuda_malloc(lib, int(n * np.dtype(out_dt).itemsize))
 
     try:
         _gt_cuda(
@@ -501,7 +470,7 @@ def gt(a: Tensor, b: Tensor, *, device: int = 0) -> Tensor:
             b_dev=int(b.data),
             y_dev=int(y_dev),
             n=int(n),
-            dtype=dt_in,  # selects gt_f32 vs gt_f64
+            dtype=dt_in,
         )
         return Tensor._from_devptr(
             int(y_dev),
@@ -517,22 +486,21 @@ def gt(a: Tensor, b: Tensor, *, device: int = 0) -> Tensor:
 
 def add_scalar(a: Tensor, alpha: float, *, device: int = 0) -> Tensor:
     """
-    Elementwise scalar add on CUDA: `y = a + alpha`.
+    Elementwise scalar addition on CUDA.
 
-    Notes
-    -----
-    - No broadcasting: scalar is a true scalar value (not a Tensor).
-    - This avoids materializing a full scalar-filled Tensor on device.
+    Computes `y = a + alpha`.
     """
     _require_cuda(a, "a")
     dt = _require_f32_f64(a, "a")
 
+    n = _numel(tuple(a.shape))
+    if n == 0:
+        return _empty_cuda_tensor_like(a, dtype=dt)
+
     lib = _get_lib()
     cuda_set_device(lib, int(device))
 
-    n = _numel(tuple(a.shape))
-    nbytes = int(n * np.dtype(dt).itemsize)
-    y_dev = cuda_malloc(lib, nbytes)
+    y_dev = cuda_malloc(lib, int(n * np.dtype(dt).itemsize))
 
     try:
         _add_scalar_cuda(
@@ -557,22 +525,21 @@ def add_scalar(a: Tensor, alpha: float, *, device: int = 0) -> Tensor:
 
 def sub_scalar(a: Tensor, alpha: float, *, device: int = 0) -> Tensor:
     """
-    Elementwise scalar sub on CUDA: `y = a - alpha`.
+    Elementwise scalar subtraction on CUDA.
 
-    Notes
-    -----
-    - No broadcasting: scalar is a true scalar value (not a Tensor).
-    - This avoids materializing a full scalar-filled Tensor on device.
+    Computes `y = a - alpha`.
     """
     _require_cuda(a, "a")
     dt = _require_f32_f64(a, "a")
 
+    n = _numel(tuple(a.shape))
+    if n == 0:
+        return _empty_cuda_tensor_like(a, dtype=dt)
+
     lib = _get_lib()
     cuda_set_device(lib, int(device))
 
-    n = _numel(tuple(a.shape))
-    nbytes = int(n * np.dtype(dt).itemsize)
-    y_dev = cuda_malloc(lib, nbytes)
+    y_dev = cuda_malloc(lib, int(n * np.dtype(dt).itemsize))
 
     try:
         _sub_scalar_cuda(
@@ -597,22 +564,21 @@ def sub_scalar(a: Tensor, alpha: float, *, device: int = 0) -> Tensor:
 
 def div_scalar(a: Tensor, alpha: float, *, device: int = 0) -> Tensor:
     """
-    Elementwise scalar div on CUDA: `y = a / alpha`.
+    Elementwise scalar division on CUDA.
 
-    Notes
-    -----
-    - No broadcasting: scalar is a true scalar value (not a Tensor).
-    - This avoids materializing a full scalar-filled Tensor on device.
+    Computes `y = a / alpha`.
     """
     _require_cuda(a, "a")
     dt = _require_f32_f64(a, "a")
 
+    n = _numel(tuple(a.shape))
+    if n == 0:
+        return _empty_cuda_tensor_like(a, dtype=dt)
+
     lib = _get_lib()
     cuda_set_device(lib, int(device))
 
-    n = _numel(tuple(a.shape))
-    nbytes = int(n * np.dtype(dt).itemsize)
-    y_dev = cuda_malloc(lib, nbytes)
+    y_dev = cuda_malloc(lib, int(n * np.dtype(dt).itemsize))
 
     try:
         _div_scalar_cuda(
@@ -635,12 +601,148 @@ def div_scalar(a: Tensor, alpha: float, *, device: int = 0) -> Tensor:
         raise
 
 
-# ---- convenience aliases (match the tensor-tensor style) ----
+# ============================
+# In-place ops
+# ============================
+def add_inplace(a: Tensor, b: Tensor, *, device: int = 0) -> None:
+    """
+    In-place elementwise addition on CUDA.
+
+    Mutates `a` as `a += b`.
+    """
+    _require_cuda(a, "a")
+    _require_cuda(b, "b")
+    _require_same_device(a, b)
+    _require_same_shape(a, b)
+    dt_a = _require_f32_f64(a, "a")
+    dt_b = _require_f32_f64(b, "b")
+    if dt_a != dt_b:
+        raise TypeError(f"dtype mismatch: a.dtype={dt_a} vs b.dtype={dt_b}")
+
+    n = _numel(tuple(a.shape))
+    if n <= 0:
+        return
+
+    lib = _get_lib()
+    cuda_set_device(lib, int(device))
+    _add_inplace_cuda(lib, a_dev=int(a.data), b_dev=int(b.data), n=int(n), dtype=dt_a)
+
+
+def sub_inplace(a: Tensor, b: Tensor, *, device: int = 0) -> None:
+    """
+    In-place elementwise subtraction on CUDA.
+
+    Mutates `a` as `a -= b`.
+    """
+    _require_cuda(a, "a")
+    _require_cuda(b, "b")
+    _require_same_device(a, b)
+    _require_same_shape(a, b)
+    dt_a = _require_f32_f64(a, "a")
+    dt_b = _require_f32_f64(b, "b")
+    if dt_a != dt_b:
+        raise TypeError(f"dtype mismatch: a.dtype={dt_a} vs b.dtype={dt_b}")
+
+    n = _numel(tuple(a.shape))
+    if n <= 0:
+        return
+
+    lib = _get_lib()
+    cuda_set_device(lib, int(device))
+    _sub_inplace_cuda(lib, a_dev=int(a.data), b_dev=int(b.data), n=int(n), dtype=dt_a)
+
+
+def div_inplace(a: Tensor, b: Tensor, *, device: int = 0) -> None:
+    """
+    In-place elementwise division on CUDA.
+
+    Mutates `a` as `a /= b`.
+    """
+    _require_cuda(a, "a")
+    _require_cuda(b, "b")
+    _require_same_device(a, b)
+    _require_same_shape(a, b)
+    dt_a = _require_f32_f64(a, "a")
+    dt_b = _require_f32_f64(b, "b")
+    if dt_a != dt_b:
+        raise TypeError(f"dtype mismatch: a.dtype={dt_a} vs b.dtype={dt_b}")
+
+    n = _numel(tuple(a.shape))
+    if n <= 0:
+        return
+
+    lib = _get_lib()
+    cuda_set_device(lib, int(device))
+    _div_inplace_cuda(lib, a_dev=int(a.data), b_dev=int(b.data), n=int(n), dtype=dt_a)
+
+
+def add_scalar_inplace(a: Tensor, alpha: float, *, device: int = 0) -> None:
+    """
+    In-place elementwise scalar addition on CUDA.
+
+    Mutates `a` as `a += alpha`.
+    """
+    _require_cuda(a, "a")
+    dt = _require_f32_f64(a, "a")
+
+    n = _numel(tuple(a.shape))
+    if n <= 0:
+        return
+
+    lib = _get_lib()
+    cuda_set_device(lib, int(device))
+    _add_scalar_inplace_cuda(
+        lib, a_dev=int(a.data), alpha=float(alpha), n=int(n), dtype=dt
+    )
+
+
+def sub_scalar_inplace(a: Tensor, alpha: float, *, device: int = 0) -> None:
+    """
+    In-place elementwise scalar subtraction on CUDA.
+
+    Mutates `a` as `a -= alpha`.
+    """
+    _require_cuda(a, "a")
+    dt = _require_f32_f64(a, "a")
+
+    n = _numel(tuple(a.shape))
+    if n <= 0:
+        return
+
+    lib = _get_lib()
+    cuda_set_device(lib, int(device))
+    _sub_scalar_inplace_cuda(
+        lib, a_dev=int(a.data), alpha=float(alpha), n=int(n), dtype=dt
+    )
+
+
+def div_scalar_inplace(a: Tensor, alpha: float, *, device: int = 0) -> None:
+    """
+    In-place elementwise scalar division on CUDA.
+
+    Mutates `a` as `a /= alpha`.
+    """
+    _require_cuda(a, "a")
+    dt = _require_f32_f64(a, "a")
+
+    n = _numel(tuple(a.shape))
+    if n <= 0:
+        return
+
+    lib = _get_lib()
+    cuda_set_device(lib, int(device))
+    _div_scalar_inplace_cuda(
+        lib, a_dev=int(a.data), alpha=float(alpha), n=int(n), dtype=dt
+    )
+
+
+# ---- convenience aliases ----
 cuda_add_scalar = add_scalar
 cuda_sub_scalar = sub_scalar
 cuda_div_scalar = div_scalar
 
 __all__ = [
+    # out-of-place
     "neg",
     "add",
     "sub",
@@ -649,6 +751,14 @@ __all__ = [
     "add_scalar",
     "sub_scalar",
     "div_scalar",
+    # in-place
+    "add_inplace",
+    "sub_inplace",
+    "div_inplace",
+    "add_scalar_inplace",
+    "sub_scalar_inplace",
+    "div_scalar_inplace",
+    # aliases
     "cuda_add_scalar",
     "cuda_sub_scalar",
     "cuda_div_scalar",

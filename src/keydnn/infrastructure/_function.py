@@ -192,7 +192,24 @@ class SigmoidFn(Function):
         Tensor
             Tensor containing `sigmoid(x)` elementwise.
         """
-        out = 1 / (1 + exp(-x))
+        # Original: out = 1 / (1 + exp(-x))
+        #
+        # Optimized (allocation-reduced):
+        #   t = exp(-x)          (alloc)
+        #   t += 1               (in-place scalar add; avoids scalar-fill tensor)
+        #   out = 1 / t          (alloc; relies on existing scalar / tensor path)
+        #
+        # NOTE: This is safe because `t` is a fresh temporary.
+        t = exp(-x)
+
+        # Prefer CUDA scalar in-place if available; otherwise fallback to expression.
+        try:
+            t += 1.0
+        except Exception:
+            # fallback keeps semantics
+            t = t + 1.0
+
+        out = 1 / t
         ctx.save_for_backward(out)
         return out
 
@@ -218,7 +235,21 @@ class SigmoidFn(Function):
             Gradient dL/dx.
         """
         (out,) = ctx.saved_tensors
-        return grad_out * out * (1 - out)
+
+        # tmp = grad_out * out
+        tmp = grad_out * out
+
+        # Build (1 - out) without scalar-lift tensor allocation:
+        # one_minus = -out; one_minus += 1
+        one_minus = -out
+        try:
+            one_minus += 1.0
+        except Exception:
+            one_minus = one_minus + 1.0
+
+        # tmp *= (1 - out)
+        tmp *= one_minus
+        return tmp
 
 
 class ReLUFn(Function):
@@ -319,14 +350,33 @@ class LeakyReLUFn(Function):
         Tensor
             Tensor containing `leaky_relu(x)` elementwise.
         """
+        # Original:
+        #   pos_mask = x > 0
+        #   neg_mask = 1 - pos_mask
+        #   out = x * pos_mask + x * neg_mask * alpha
+        #
+        # Optimized (allocation-reduced):
+        #   pos_mask = x > 0                      (alloc)
+        #   neg_mask = -pos_mask; neg_mask += 1   (alloc + in-place scalar add)
+        #   out = x * pos_mask                    (alloc)
+        #   tmp = x * neg_mask                    (alloc)
+        #   tmp *= alpha                          (in-place scalar mul)
+        #   out += tmp                            (in-place add)
         pos_mask = x > 0
-        neg_mask = 1 - pos_mask
 
-        out = x * pos_mask + x * neg_mask * alpha
+        neg_mask = -pos_mask
+        try:
+            neg_mask += 1.0
+        except Exception:
+            neg_mask = neg_mask + 1.0
+
+        out = x * pos_mask
+        tmp = x * neg_mask
+        tmp *= float(alpha)
+        out += tmp
 
         ctx.save_for_backward(pos_mask, neg_mask)
-        ctx.saved_meta["alpha"] = alpha
-
+        ctx.saved_meta["alpha"] = float(alpha)
         return out
 
     @staticmethod
@@ -347,10 +397,17 @@ class LeakyReLUFn(Function):
             Gradient dL/dx.
         """
         pos_mask, neg_mask = ctx.saved_tensors
-        alpha = ctx.saved_meta["alpha"]
+        alpha = float(ctx.saved_meta["alpha"])
 
-        grad_x = grad_out * (pos_mask + neg_mask * alpha)
-        return grad_x
+        # Safer than mutating grad_out:
+        # dx = grad_out * pos_mask
+        dx = grad_out * pos_mask
+
+        # tmp = grad_out * neg_mask; tmp *= alpha; dx += tmp
+        tmp = grad_out * neg_mask
+        tmp *= alpha
+        dx += tmp
+        return dx
 
 
 class TanhFn(Function):
@@ -388,9 +445,28 @@ class TanhFn(Function):
         Tensor
             Tensor containing `tanh(x)` elementwise.
         """
+        # Original:
+        #   e_pos = exp(x)
+        #   e_neg = exp(-x)
+        #   out = (e_pos - e_neg) / (e_pos + e_neg)
+        #
+        # Optimized:
+        #   e_pos = exp(x)           (alloc)
+        #   e_neg = exp(-x)          (alloc)
+        #   num  = e_pos - e_neg     (alloc)
+        #   e_pos += e_neg           (in-place; e_pos becomes denom, saves one alloc)
+        #   out  = num / e_pos       (alloc)
         e_pos = exp(x)
         e_neg = exp(-x)
-        out = (e_pos - e_neg) / (e_pos + e_neg)
+
+        num = e_pos - e_neg
+
+        try:
+            e_pos += e_neg
+        except Exception:
+            e_pos = e_pos + e_neg
+
+        out = num / e_pos
         ctx.save_for_backward(out)
         return out
 
@@ -412,7 +488,9 @@ class TanhFn(Function):
             Gradient dL/dx.
         """
         (out,) = ctx.saved_tensors
-        return grad_out * (1 - out * out)
+        tmp = out * out
+        tmp *= grad_out
+        return grad_out - tmp
 
 
 class SoftmaxFn(Function):
