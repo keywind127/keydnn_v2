@@ -38,6 +38,35 @@ from ..ops.conv2d_cpu_ext import (
     conv2d_backward_cpu_tensor,
     conv2d_forward_cpu_tensor,
 )
+from ..ops.conv2d_cuda_ext import (
+    conv2d_backward_cuda_tensor,
+    conv2d_forward_cuda_tensor,
+)
+
+
+def _cuda_device_index(dev: object) -> int:
+    """
+    Best-effort: extract CUDA device index from a Device-like object.
+
+    Prefers `dev.index` when present; otherwise parses string forms like "cuda:0".
+    """
+    idx = getattr(dev, "index", None)
+    if idx is not None:
+        try:
+            return int(idx)
+        except Exception:
+            pass
+
+    s = str(dev)
+    if "cuda" not in s:
+        return 0
+    if ":" in s:
+        tail = s.split(":", 1)[1].strip()
+        try:
+            return int(tail)
+        except Exception:
+            return 0
+    return 0
 
 
 class Conv2dFn(Function):
@@ -107,19 +136,45 @@ class Conv2dFn(Function):
         stride2 = _pair(stride)
         padding2 = _pair(padding)
 
+        # Require all tensors on the same device (no implicit cross-device copy here)
+        if str(x.device) != str(weight.device):
+            raise RuntimeError(
+                f"conv2d requires x and weight on the same device; got x={x.device} weight={weight.device}"
+            )
+        if bias is not None and str(bias.device) != str(x.device):
+            raise RuntimeError(
+                f"conv2d requires bias on the same device as x; got bias={bias.device} x={x.device}"
+            )
+
         out_req = Tensor._result_requires_grad(x, weight) or (
             bias is not None and bias.requires_grad
         )
 
-        # Forward via CPU boundary helper (Conv2dFn uses no NumPy directly)
-        y = conv2d_forward_cpu_tensor(
-            x,
-            weight,
-            bias,
-            stride=stride2,
-            padding=padding2,
-            out_requires_grad=out_req,
-        )
+        # Dispatch by device
+        if x.device.is_cuda():
+            device_index = _cuda_device_index(x.device)
+            y = conv2d_forward_cuda_tensor(
+                x,
+                weight,
+                bias,
+                stride=stride2,
+                padding=padding2,
+                out_requires_grad=out_req,
+                device_index=int(device_index),
+                sync=True,
+            )
+        elif x.device.is_cpu():
+            y = conv2d_forward_cpu_tensor(
+                x,
+                weight,
+                bias,
+                stride=stride2,
+                padding=padding2,
+                out_requires_grad=out_req,
+            )
+        else:
+            x._raise_device_not_supported("conv2d_forward")
+            raise RuntimeError("Unreachable")
 
         # Save tensors + meta for backward
         ctx.save_for_backward(x, weight)
@@ -129,6 +184,7 @@ class Conv2dFn(Function):
         ctx.saved_meta["has_bias"] = bias is not None
         ctx.saved_meta["stride"] = stride2
         ctx.saved_meta["padding"] = padding2
+        ctx.saved_meta["is_cuda"] = bool(x.device.is_cuda())
 
         return y
 
@@ -173,20 +229,39 @@ class Conv2dFn(Function):
         has_bias: bool = bool(ctx.saved_meta["has_bias"])
         stride: Tuple[int, int] = ctx.saved_meta["stride"]
         padding: Tuple[int, int] = ctx.saved_meta["padding"]
+        is_cuda: bool = bool(ctx.saved_meta.get("is_cuda", False))
 
         x = ctx.saved_tensors[0]
         weight = ctx.saved_tensors[1]
         bias = ctx.saved_tensors[2] if has_bias else None
 
-        # Backward via CPU boundary helper
-        gx, gw, gb = conv2d_backward_cpu_tensor(
-            x,
-            weight,
-            bias,
-            grad_out,
-            stride=stride,
-            padding=padding,
-        )
+        # Enforce grad_out device matches forward device
+        if str(grad_out.device) != str(x.device):
+            raise RuntimeError(
+                f"grad_out must be on the same device as forward inputs; got grad_out={grad_out.device} x={x.device}"
+            )
+
+        if is_cuda:
+            device_index = _cuda_device_index(x.device)
+            gx, gw, gb = conv2d_backward_cuda_tensor(
+                x,
+                weight,
+                bias,
+                grad_out,
+                stride=stride,
+                padding=padding,
+                device_index=int(device_index),
+                sync=True,
+            )
+        else:
+            gx, gw, gb = conv2d_backward_cpu_tensor(
+                x,
+                weight,
+                bias,
+                grad_out,
+                stride=stride,
+                padding=padding,
+            )
 
         grad_x = gx if x.requires_grad else None
         grad_w = gw if weight.requires_grad else None
