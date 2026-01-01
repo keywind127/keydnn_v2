@@ -17,6 +17,9 @@ from src.keydnn.infrastructure.native_cuda.python.ops.unary_ctypes import (
     exp_cuda,
     mul_cuda,
     mul_scalar_cuda,
+    # NEW: in-place wrappers
+    mul_inplace_cuda,
+    mul_scalar_inplace_cuda,
 )
 
 
@@ -218,6 +221,164 @@ class TestUnaryCtypes(_CudaTestCase):
         finally:
             cuda_free(lib, a_dev)
             cuda_free(lib, y_dev)
+
+    # -------------------------------------------------------------------------
+    # NEW: in-place mul tests
+    # -------------------------------------------------------------------------
+
+    def _run_mul_inplace(self, dtype: np.dtype) -> None:
+        lib = self.lib
+        dtype = np.dtype(dtype)
+
+        a0 = (np.random.rand(256) - 0.5).astype(dtype, copy=False)
+        b = (np.random.rand(256) - 0.5).astype(dtype, copy=False)
+        a_ref = (a0 * b).astype(dtype, copy=False)
+
+        nbytes = int(a0.nbytes)
+
+        a_dev = int(cuda_malloc(lib, nbytes))
+        b_dev = int(cuda_malloc(lib, nbytes))
+        try:
+            cudaMemcpyHtoD(lib, a_dev, a0, nbytes)
+            cudaMemcpyHtoD(lib, b_dev, b, nbytes)
+
+            mul_inplace_cuda(
+                lib,
+                a_dev=a_dev,
+                b_dev=b_dev,
+                numel=int(a0.size),
+                dtype=dtype,
+            )
+            cuda_synchronize(lib)
+
+            a1 = np.empty_like(a0)
+            cudaMemcpyDtoH(lib, a1, a_dev, nbytes)
+
+            if dtype == np.float32:
+                np.testing.assert_allclose(a1, a_ref, rtol=2e-6, atol=3e-7)
+            else:
+                np.testing.assert_allclose(a1, a_ref, rtol=1e-14, atol=1e-14)
+
+        finally:
+            cuda_free(lib, a_dev)
+            cuda_free(lib, b_dev)
+
+    def test_mul_inplace_float32(self) -> None:
+        self._run_mul_inplace(np.float32)
+
+    def test_mul_inplace_float64(self) -> None:
+        self._run_mul_inplace(np.float64)
+
+    def test_mul_inplace_unsupported_dtype_raises(self) -> None:
+        lib = self.lib
+        with self.assertRaises(TypeError):
+            mul_inplace_cuda(lib, a_dev=1, b_dev=2, numel=3, dtype=np.int32)
+
+    def test_mul_inplace_numel_zero_is_ok(self) -> None:
+        lib = self.lib
+        dtype = np.float32
+        a_dev = int(cuda_malloc(lib, 1))
+        b_dev = int(cuda_malloc(lib, 1))
+        try:
+            mul_inplace_cuda(lib, a_dev=a_dev, b_dev=b_dev, numel=0, dtype=dtype)
+            cuda_synchronize(lib)
+        finally:
+            cuda_free(lib, a_dev)
+            cuda_free(lib, b_dev)
+
+    def _run_mul_scalar_inplace(self, dtype: np.dtype) -> None:
+        lib = self.lib
+        dtype = np.dtype(dtype)
+
+        a0 = (np.random.rand(256) - 0.5).astype(dtype, copy=False)
+        alpha = dtype.type(0.37)
+        a_ref = (a0 * alpha).astype(dtype, copy=False)
+
+        nbytes = int(a0.nbytes)
+
+        a_dev = int(cuda_malloc(lib, nbytes))
+        try:
+            cudaMemcpyHtoD(lib, a_dev, a0, nbytes)
+
+            mul_scalar_inplace_cuda(
+                lib,
+                a_dev=a_dev,
+                alpha=float(alpha),
+                numel=int(a0.size),
+                dtype=dtype,
+            )
+            cuda_synchronize(lib)
+
+            a1 = np.empty_like(a0)
+            cudaMemcpyDtoH(lib, a1, a_dev, nbytes)
+
+            if dtype == np.float32:
+                np.testing.assert_allclose(a1, a_ref, rtol=2e-6, atol=3e-7)
+            else:
+                np.testing.assert_allclose(a1, a_ref, rtol=1e-14, atol=1e-14)
+
+        finally:
+            cuda_free(lib, a_dev)
+
+    def test_mul_scalar_inplace_float32(self) -> None:
+        self._run_mul_scalar_inplace(np.float32)
+
+    def test_mul_scalar_inplace_float64(self) -> None:
+        self._run_mul_scalar_inplace(np.float64)
+
+    def test_mul_scalar_inplace_unsupported_dtype_raises(self) -> None:
+        lib = self.lib
+        with self.assertRaises(TypeError):
+            mul_scalar_inplace_cuda(lib, a_dev=1, alpha=2.0, numel=3, dtype=np.int32)
+
+    def test_mul_scalar_inplace_numel_zero_is_ok(self) -> None:
+        lib = self.lib
+        dtype = np.float32
+        a_dev = int(cuda_malloc(lib, 1))
+        try:
+            mul_scalar_inplace_cuda(lib, a_dev=a_dev, alpha=2.0, numel=0, dtype=dtype)
+            cuda_synchronize(lib)
+        finally:
+            cuda_free(lib, a_dev)
+
+    def _run_mul_inplace_scalar_tensor(self, dtype: np.dtype) -> None:
+        """
+        Scalar tensor case (numel=1): ensure in-place works for scalar buffers too.
+        """
+        lib = self.lib
+        dtype = np.dtype(dtype)
+
+        a0 = np.array([0.25], dtype=dtype)  # numel=1
+        b = np.array([1.5], dtype=dtype)
+        a_ref = (a0 * b).astype(dtype, copy=False)
+
+        nbytes = int(a0.nbytes)
+
+        a_dev = int(cuda_malloc(lib, nbytes))
+        b_dev = int(cuda_malloc(lib, nbytes))
+        try:
+            cudaMemcpyHtoD(lib, a_dev, a0, nbytes)
+            cudaMemcpyHtoD(lib, b_dev, b, nbytes)
+
+            mul_inplace_cuda(lib, a_dev=a_dev, b_dev=b_dev, numel=1, dtype=dtype)
+            cuda_synchronize(lib)
+
+            a1 = np.empty_like(a0)
+            cudaMemcpyDtoH(lib, a1, a_dev, nbytes)
+
+            if dtype == np.float32:
+                np.testing.assert_allclose(a1, a_ref, rtol=2e-6, atol=3e-7)
+            else:
+                np.testing.assert_allclose(a1, a_ref, rtol=1e-14, atol=1e-14)
+        finally:
+            cuda_free(lib, a_dev)
+            cuda_free(lib, b_dev)
+
+    def test_mul_inplace_scalar_tensor_float32(self) -> None:
+        self._run_mul_inplace_scalar_tensor(np.float32)
+
+    def test_mul_inplace_scalar_tensor_float64(self) -> None:
+        self._run_mul_inplace_scalar_tensor(np.float64)
 
 
 if __name__ == "__main__":

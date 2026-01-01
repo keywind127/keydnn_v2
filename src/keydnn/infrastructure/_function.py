@@ -218,7 +218,12 @@ class SigmoidFn(Function):
             Gradient dL/dx.
         """
         (out,) = ctx.saved_tensors
-        return grad_out * out * (1 - out)
+
+        tmp = grad_out * out
+
+        tmp *= 1 - out
+
+        return tmp
 
 
 class ReLUFn(Function):
@@ -347,10 +352,21 @@ class LeakyReLUFn(Function):
             Gradient dL/dx.
         """
         pos_mask, neg_mask = ctx.saved_tensors
-        alpha = ctx.saved_meta["alpha"]
+        alpha = float(ctx.saved_meta["alpha"])
 
-        grad_x = grad_out * (pos_mask + neg_mask * alpha)
-        return grad_x
+        # tmp = grad_out * neg_mask            (1 allocation)
+        tmp = grad_out * neg_mask
+
+        # tmp *= alpha                         (in-place scalar)
+        tmp *= alpha
+
+        # grad_out *= pos_mask                 (in-place; reuses grad_out buffer)
+        grad_out *= pos_mask
+
+        # grad_out += tmp                      (in-place add; no extra alloc)
+        grad_out += tmp
+
+        return grad_out
 
 
 class TanhFn(Function):
@@ -412,7 +428,9 @@ class TanhFn(Function):
             Gradient dL/dx.
         """
         (out,) = ctx.saved_tensors
-        return grad_out * (1 - out * out)
+        tmp = out * out
+        tmp *= grad_out
+        return grad_out - tmp
 
 
 class SoftmaxFn(Function):

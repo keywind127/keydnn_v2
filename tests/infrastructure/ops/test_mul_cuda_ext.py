@@ -3,7 +3,8 @@
 Unit tests for CUDA Tensor-boundary mul ops wrapper (mul_cuda_ext.py).
 
 We validate:
-- mul_forward produces numerically correct results vs NumPy multiply
+- mul_forward / mul_scalar_forward produce numerically correct results vs NumPy
+- mul_inplace / mul_scalar_inplace mutate in-place and match NumPy reference
 - output shape/dtype/device are correct
 - appropriate error behavior (CPU tensor, unsupported dtype, shape mismatch, dtype mismatch)
 
@@ -30,6 +31,8 @@ from src.keydnn.infrastructure.ops.pool2d_cuda import (
 from src.keydnn.infrastructure.ops.mul_cuda_ext import (
     mul_forward,
     mul_scalar_forward,
+    mul_inplace,
+    mul_scalar_inplace,
 )
 
 
@@ -139,9 +142,16 @@ class TestMulCudaExt(unittest.TestCase):
     def _make_cuda_tensor_from_host(self, x: np.ndarray) -> Tensor:
         """Allocate device memory, copy host -> device, and wrap as CUDA Tensor."""
         x_c = np.ascontiguousarray(x)
-        dev_ptr = int(cuda_malloc(self.lib, int(x_c.nbytes)))
+
+        # NOTE: your cuda_malloc does not allow nbytes=0, so allocate 1 byte as a dummy
+        nbytes = int(x_c.nbytes)
+        alloc_bytes = max(1, nbytes)
+
+        dev_ptr = int(cuda_malloc(self.lib, alloc_bytes))
         try:
-            _h2d(self.lib, dev_ptr, x_c)
+            # Only copy if there is actual payload
+            if nbytes > 0:
+                _h2d(self.lib, dev_ptr, x_c)
         except Exception:
             cuda_free(self.lib, dev_ptr)
             raise
@@ -175,8 +185,7 @@ class TestMulCudaExt(unittest.TestCase):
         self.assertEqual(np.dtype(y_t.dtype), np.float32)
 
         y = self._read_cuda_tensor_to_host(y_t)
-        ref = a * b
-        np.testing.assert_allclose(y, ref, rtol=1e-5, atol=1e-6)
+        np.testing.assert_allclose(y, a * b, rtol=1e-5, atol=1e-6)
 
     def test_mul_forward_f64_matches_numpy(self) -> None:
         """float64 mul matches NumPy reference."""
@@ -193,8 +202,7 @@ class TestMulCudaExt(unittest.TestCase):
         self.assertEqual(np.dtype(y_t.dtype), np.float64)
 
         y = self._read_cuda_tensor_to_host(y_t)
-        ref = a * b
-        np.testing.assert_allclose(y, ref, rtol=1e-12, atol=1e-12)
+        np.testing.assert_allclose(y, a * b, rtol=1e-12, atol=1e-12)
 
     def test_mul_forward_preserves_shape_multi_dim(self) -> None:
         """mul_forward supports arbitrary shapes by flattening numel internally."""
@@ -208,8 +216,68 @@ class TestMulCudaExt(unittest.TestCase):
 
         self.assertEqual(tuple(y_t.shape), (3, 4, 5))
         y = self._read_cuda_tensor_to_host(y_t)
-        ref = a * b
-        np.testing.assert_allclose(y, ref, rtol=1e-5, atol=1e-6)
+        np.testing.assert_allclose(y, a * b, rtol=1e-5, atol=1e-6)
+
+    def test_mul_inplace_f32_matches_numpy_and_returns_same_object(self) -> None:
+        """mul_inplace mutates 'a' in-place and returns the same Tensor object."""
+        rng = np.random.default_rng(20)
+        a0 = rng.standard_normal((256,), dtype=np.float32)
+        b = rng.standard_normal((256,), dtype=np.float32)
+
+        a_t = self._make_cuda_tensor_from_host(a0)
+        b_t = self._make_cuda_tensor_from_host(b)
+
+        out = mul_inplace(a_t, b_t, device=self.device_index, sync=True)
+        self.assertIs(out, a_t)
+
+        y = self._read_cuda_tensor_to_host(a_t)
+        np.testing.assert_allclose(y, a0 * b, rtol=1e-5, atol=1e-6)
+
+    def test_mul_inplace_f64_matches_numpy_and_preserves_shape(self) -> None:
+        """mul_inplace works for float64 and multi-d shapes."""
+        rng = np.random.default_rng(21)
+        a0 = rng.standard_normal((9, 7)).astype(np.float64)
+        b = rng.standard_normal((9, 7)).astype(np.float64)
+
+        a_t = self._make_cuda_tensor_from_host(a0)
+        b_t = self._make_cuda_tensor_from_host(b)
+
+        out = mul_inplace(a_t, b_t, device=self.device_index, sync=True)
+        self.assertIs(out, a_t)
+        self.assertEqual(tuple(a_t.shape), (9, 7))
+        self.assertEqual(np.dtype(a_t.dtype), np.float64)
+
+        y = self._read_cuda_tensor_to_host(a_t)
+        np.testing.assert_allclose(y, a0 * b, rtol=1e-12, atol=1e-12)
+
+    def test_mul_inplace_allows_aliasing_a_equals_b(self) -> None:
+        """
+        mul_inplace should allow a and b to alias (a *= a).
+
+        NOTE: This assumes your kernel reads then writes per element (safe).
+        """
+        rng = np.random.default_rng(22)
+        a0 = rng.standard_normal((128,), dtype=np.float32)
+
+        a_t = self._make_cuda_tensor_from_host(a0)
+
+        out = mul_inplace(a_t, a_t, device=self.device_index, sync=True)
+        self.assertIs(out, a_t)
+
+        y = self._read_cuda_tensor_to_host(a_t)
+        np.testing.assert_allclose(y, a0 * a0, rtol=1e-5, atol=1e-6)
+
+    def test_mul_inplace_numel_zero_is_ok(self) -> None:
+        """numel==0 should not crash and should be a no-op."""
+        a0 = np.empty((0,), dtype=np.float32)
+        b0 = np.empty((0,), dtype=np.float32)
+
+        a_t = self._make_cuda_tensor_from_host(a0)
+        b_t = self._make_cuda_tensor_from_host(b0)
+
+        _ = mul_inplace(a_t, b_t, device=self.device_index, sync=True)
+        y = self._read_cuda_tensor_to_host(a_t)
+        self.assertEqual(y.size, 0)
 
     def test_raises_on_shape_mismatch(self) -> None:
         """Shape mismatch should raise ValueError."""
@@ -223,6 +291,9 @@ class TestMulCudaExt(unittest.TestCase):
         with self.assertRaises(ValueError):
             _ = mul_forward(a_t, b_t, device=self.device_index, sync=True)
 
+        with self.assertRaises(ValueError):
+            _ = mul_inplace(a_t, b_t, device=self.device_index, sync=True)
+
     def test_raises_on_dtype_mismatch(self) -> None:
         """Dtype mismatch should raise TypeError."""
         rng = np.random.default_rng(4)
@@ -235,6 +306,9 @@ class TestMulCudaExt(unittest.TestCase):
         with self.assertRaises(TypeError):
             _ = mul_forward(a_t, b_t, device=self.device_index, sync=True)
 
+        with self.assertRaises(TypeError):
+            _ = mul_inplace(a_t, b_t, device=self.device_index, sync=True)
+
     def test_raises_on_unsupported_dtype(self) -> None:
         """int32 dtype should be rejected."""
         a = np.arange(16, dtype=np.int32).reshape(4, 4)
@@ -245,6 +319,9 @@ class TestMulCudaExt(unittest.TestCase):
 
         with self.assertRaises(TypeError):
             _ = mul_forward(a_t, b_t, device=self.device_index, sync=True)
+
+        with self.assertRaises(TypeError):
+            _ = mul_inplace(a_t, b_t, device=self.device_index, sync=True)
 
     def test_raises_on_cpu_tensor(self) -> None:
         """CPU tensor input should raise TypeError."""
@@ -268,6 +345,9 @@ class TestMulCudaExt(unittest.TestCase):
         with self.assertRaises(TypeError):
             _ = mul_forward(a_cpu, b_cpu, device=self.device_index, sync=True)
 
+        with self.assertRaises(TypeError):
+            _ = mul_inplace(a_cpu, b_cpu, device=self.device_index, sync=True)
+
     def test_mul_scalar_forward_f32_matches_numpy(self) -> None:
         """float32 scalar mul matches NumPy reference."""
         rng = np.random.default_rng(10)
@@ -282,8 +362,7 @@ class TestMulCudaExt(unittest.TestCase):
         self.assertEqual(np.dtype(y_t.dtype), np.float32)
 
         y = self._read_cuda_tensor_to_host(y_t)
-        ref = a * alpha
-        np.testing.assert_allclose(y, ref, rtol=1e-5, atol=1e-6)
+        np.testing.assert_allclose(y, a * alpha, rtol=1e-5, atol=1e-6)
 
     def test_mul_scalar_forward_f64_matches_numpy(self) -> None:
         """float64 scalar mul matches NumPy reference."""
@@ -299,8 +378,7 @@ class TestMulCudaExt(unittest.TestCase):
         self.assertEqual(np.dtype(y_t.dtype), np.float64)
 
         y = self._read_cuda_tensor_to_host(y_t)
-        ref = a * alpha
-        np.testing.assert_allclose(y, ref, rtol=1e-12, atol=1e-12)
+        np.testing.assert_allclose(y, a * alpha, rtol=1e-12, atol=1e-12)
 
     def test_mul_scalar_preserves_multi_dim_shape(self) -> None:
         """Scalar mul preserves arbitrary tensor shapes."""
@@ -314,6 +392,41 @@ class TestMulCudaExt(unittest.TestCase):
         self.assertEqual(tuple(y_t.shape), (2, 3, 4))
         y = self._read_cuda_tensor_to_host(y_t)
         np.testing.assert_allclose(y, a * alpha, rtol=1e-5, atol=1e-6)
+
+    def test_mul_scalar_inplace_f32_matches_numpy_and_returns_same_object(self) -> None:
+        """mul_scalar_inplace mutates 'a' and returns the same object."""
+        rng = np.random.default_rng(30)
+        a0 = rng.standard_normal((512,), dtype=np.float32)
+        alpha = 0.5
+
+        a_t = self._make_cuda_tensor_from_host(a0)
+        out = mul_scalar_inplace(a_t, alpha, device=self.device_index, sync=True)
+        self.assertIs(out, a_t)
+
+        y = self._read_cuda_tensor_to_host(a_t)
+        np.testing.assert_allclose(y, a0 * alpha, rtol=1e-5, atol=1e-6)
+
+    def test_mul_scalar_inplace_f64_matches_numpy(self) -> None:
+        """mul_scalar_inplace works for float64."""
+        rng = np.random.default_rng(31)
+        a0 = rng.standard_normal((17, 5)).astype(np.float64)
+        alpha = -3.0
+
+        a_t = self._make_cuda_tensor_from_host(a0)
+        out = mul_scalar_inplace(a_t, alpha, device=self.device_index, sync=True)
+        self.assertIs(out, a_t)
+
+        y = self._read_cuda_tensor_to_host(a_t)
+        np.testing.assert_allclose(y, a0 * alpha, rtol=1e-12, atol=1e-12)
+
+    def test_mul_scalar_inplace_numel_zero_is_ok(self) -> None:
+        """numel==0 should not crash and should be a no-op for scalar inplace."""
+        a0 = np.empty((0,), dtype=np.float32)
+        a_t = self._make_cuda_tensor_from_host(a0)
+
+        _ = mul_scalar_inplace(a_t, 2.0, device=self.device_index, sync=True)
+        y = self._read_cuda_tensor_to_host(a_t)
+        self.assertEqual(y.size, 0)
 
     def test_mul_scalar_raises_on_cpu_tensor(self) -> None:
         """CPU tensor input should raise TypeError for scalar mul."""
@@ -330,14 +443,19 @@ class TestMulCudaExt(unittest.TestCase):
         with self.assertRaises(TypeError):
             _ = mul_scalar_forward(a_cpu, 2.0, device=self.device_index, sync=True)
 
+        with self.assertRaises(TypeError):
+            _ = mul_scalar_inplace(a_cpu, 2.0, device=self.device_index, sync=True)
+
     def test_mul_scalar_raises_on_unsupported_dtype(self) -> None:
         """int32 dtype should be rejected for scalar mul."""
         a = np.arange(16, dtype=np.int32)
-
         a_t = self._make_cuda_tensor_from_host(a)
 
         with self.assertRaises(TypeError):
             _ = mul_scalar_forward(a_t, 3.0, device=self.device_index, sync=True)
+
+        with self.assertRaises(TypeError):
+            _ = mul_scalar_inplace(a_t, 3.0, device=self.device_index, sync=True)
 
 
 if __name__ == "__main__":

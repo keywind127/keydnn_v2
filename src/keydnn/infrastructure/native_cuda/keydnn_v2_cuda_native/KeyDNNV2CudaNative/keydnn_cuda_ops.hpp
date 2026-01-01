@@ -37,5 +37,14 @@ extern "C" {
 	KEYDNN_CUDA_API int keydnn_cuda_mul_scalar_f32(const float* a, float alpha, float* y, int numel);
 	KEYDNN_CUDA_API int keydnn_cuda_mul_scalar_f64(const double* a, double alpha, double* y, int numel);
 
+	// Elementwise mul in-place: a *= b, length numel
+	KEYDNN_CUDA_API int keydnn_cuda_mul_inplace_f32(float* a, const float* b, int numel);
+	KEYDNN_CUDA_API int keydnn_cuda_mul_inplace_f64(double* a, const double* b, int numel);
+
+	// Elementwise mul scalar in-place: a *= alpha, length numel
+	KEYDNN_CUDA_API int keydnn_cuda_mul_scalar_inplace_f32(float* a, float alpha, int numel);
+	KEYDNN_CUDA_API int keydnn_cuda_mul_scalar_inplace_f64(double* a, double alpha, int numel);
+
+
 
 } // extern "C"

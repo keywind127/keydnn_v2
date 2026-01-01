@@ -1245,3 +1245,21 @@ class ITensor(Protocol):
         ...
 
     def __isub__(self: ITensor, other: ITensor) -> ITensor: ...
+
+    def __imul__(self: ITensor, other: Union["ITensor", Number]) -> ITensor:
+        """
+        In-place elementwise multiplication: self *= other.
+
+        CUDA behavior
+        -------------
+        - If self is CUDA AND it is safe to mutate storage (no autograd tracking),
+        dispatch to native in-place CUDA kernels to avoid intermediate allocations.
+        - Otherwise, fall back to out-of-place multiply + copy_from (same semantics
+        pattern as __isub__), which is graph-safer.
+
+        CPU behavior
+        ------------
+        - Uses out-of-place multiply + copy_from (keeps behavior consistent and avoids
+        relying on internal numpy storage layout).
+        """
+        ...
