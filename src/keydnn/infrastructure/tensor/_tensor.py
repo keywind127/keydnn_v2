@@ -1617,30 +1617,37 @@ class Tensor(
                     or type(ctx).__name__
                 )
 
-                t0 = time.perf_counter()
-                if event_timer is not None:
-
-                    def _call():
-                        nonlocal parent_grads
-                        parent_grads = ctx.backward_fn(grad_t)
-
-                    parent_grads: list[Optional[Tensor]]
-                    gpu_ms = event_timer.time_block(_call)
-                    cpu_ms = (time.perf_counter() - t0) * 1000.0
-                else:
-                    _sync()
-                    t0b = time.perf_counter()
+                # ------------------------------------------------------------
+                # Call backward_fn
+                # - If not profiling: do NOT synchronize or create CUDA events.
+                # - If profiling: time with CUDA events when available, else sync timing.
+                # ------------------------------------------------------------
+                if prof is None:
                     parent_grads = ctx.backward_fn(grad_t)
-                    _sync()
-                    cpu_ms = (time.perf_counter() - t0b) * 1000.0
-                    gpu_ms = cpu_ms
+                else:
+                    t0 = time.perf_counter()
+                    if event_timer is not None:
 
-                if prof is not None:
+                        def _call():
+                            nonlocal parent_grads
+                            parent_grads = ctx.backward_fn(grad_t)
+
+                        parent_grads: list[Optional[Tensor]]
+                        gpu_ms = event_timer.time_block(_call)
+                        cpu_ms = (time.perf_counter() - t0) * 1000.0
+                    else:
+                        _sync()
+                        t0b = time.perf_counter()
+                        parent_grads = ctx.backward_fn(grad_t)
+                        _sync()
+                        cpu_ms = (time.perf_counter() - t0b) * 1000.0
+                        gpu_ms = cpu_ms
+
                     prof.add("backward_fn_total", cpu_ms, gpu_ms)
                     prof.add_op(op_name, cpu_ms, gpu_ms)
                     prof.per_node.append((op_name, cpu_ms, gpu_ms))
 
-                if len(parent_grads) != len(ctx.parents):
+                if __debug__ and len(parent_grads) != len(ctx.parents):
                     raise RuntimeError(
                         "backward_fn must return one grad per parent. "
                         f"Got {len(parent_grads)} grads for {len(ctx.parents)} parents."
@@ -1649,13 +1656,13 @@ class Tensor(
                 for parent, g in zip(ctx.parents, parent_grads):
                     if g is None:
                         continue
-                    if not isinstance(g, Tensor):
+                    if __debug__ and not isinstance(g, Tensor):
                         raise TypeError(
                             f"backward_fn must return Tensor or None, got {type(g)!r}"
                         )
-                    if g.device != parent.device:
+                    if __debug__ and g.device != parent.device:
                         raise ValueError("Gradient device must match parent device")
-                    if g.shape != parent.shape:
+                    if __debug__ and g.shape != parent.shape:
                         raise ValueError(
                             f"Gradient shape mismatch for parent: expected {parent.shape}, got {g.shape}"
                         )

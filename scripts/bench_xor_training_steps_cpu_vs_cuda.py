@@ -365,6 +365,8 @@ def main() -> None:
     model = Sequential(
         Linear(2, hidden_dim, device=device),
         Sigmoid(),
+        Linear(hidden_dim, hidden_dim, device=device),
+        Sigmoid(),
         Linear(hidden_dim, 1, device=device),
         Sigmoid(),
     )
