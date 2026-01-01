@@ -342,27 +342,32 @@ class Linear(Module):
 
             # Sanity: require allocated device buffers for inputs/params.
             # (We do not implicitly allocate or H2D-copy parameters here.)
-            if int(getattr(x, "data")) == 0:
+            if __debug__ and int(getattr(x, "data")) == 0:
                 raise RuntimeError(
                     "Linear CUDA requires allocated x device buffer (x.data != 0)."
                 )
-            if int(getattr(self.weight, "data")) == 0:
+            if __debug__ and int(getattr(self.weight, "data")) == 0:
                 raise RuntimeError(
                     "Linear CUDA requires allocated weight device buffer (weight.data != 0)."
                 )
-            if self.bias is not None and int(getattr(self.bias, "data")) == 0:
+            if (
+                __debug__
+                and self.bias is not None
+                and int(getattr(self.bias, "data")) == 0
+            ):
                 raise RuntimeError(
                     "Linear CUDA requires allocated bias device buffer (bias.data != 0)."
                 )
 
             # Enforce dtype compatibility for CUDA matmul kernels (your Tensor.matmul checks too).
             dt = np.dtype(getattr(x, "dtype", np.float32))
-            if np.dtype(getattr(self.weight, "dtype", dt)) != dt:
+            if __debug__ and np.dtype(getattr(self.weight, "dtype", dt)) != dt:
                 raise TypeError(
                     f"Linear CUDA dtype mismatch: x.dtype={np.dtype(getattr(x,'dtype',dt))} vs weight.dtype={np.dtype(getattr(self.weight,'dtype',dt))}"
                 )
             if (
-                self.bias is not None
+                __debug__
+                and self.bias is not None
                 and np.dtype(getattr(self.bias, "dtype", dt)) != dt
             ):
                 raise TypeError(
@@ -434,30 +439,36 @@ class Linear(Module):
                     grad_w._set_ctx(None)
 
                 # dB = sum(dY, axis=0)  (fallback: do reduction on host then H2D copy)
+                # if self.bias is not None and self.bias.requires_grad:
+                #     # NOTE:
+                #     # Your current Tensor.sum CUDA only supports axis=None.
+                #     # Until a sum-axis kernel exists, we do a correctness-first fallback:
+                #     #   1) DtoH grad_out
+                #     #   2) host reduction
+                #     #   3) HtoD into a CUDA tensor grad_b
+                #     go_np = grad_out.to_numpy()  # (batch, out_features) on host
+                #     gb_np = go_np.sum(axis=0).astype(np.float32, copy=False)  # (out,)
+
+                #     grad_b = Tensor(
+                #         shape=(int(self.out_features),),
+                #         device=self.device,
+                #         requires_grad=False,
+                #         ctx=None,
+                #         dtype=np.dtype(gb_np.dtype),
+                #     )
+                #     grad_b._ensure_cuda_alloc(dtype=np.dtype(gb_np.dtype))
+
+                #     # HtoD copy
+                #     from .native_cuda.python import maxpool2d_ctypes as m
+
+                #     lib = grad_b._get_cuda_lib()
+                #     m.cudaMemcpyHtoD(lib, int(grad_b.data), gb_np, int(gb_np.nbytes))
+
+                # dB = sum(dY, axis=0)  (CUDA axis reduction; stays on device)
                 if self.bias is not None and self.bias.requires_grad:
-                    # NOTE:
-                    # Your current Tensor.sum CUDA only supports axis=None.
-                    # Until a sum-axis kernel exists, we do a correctness-first fallback:
-                    #   1) DtoH grad_out
-                    #   2) host reduction
-                    #   3) HtoD into a CUDA tensor grad_b
-                    go_np = grad_out.to_numpy()  # (batch, out_features) on host
-                    gb_np = go_np.sum(axis=0).astype(np.float32, copy=False)  # (out,)
-
-                    grad_b = Tensor(
-                        shape=(int(self.out_features),),
-                        device=self.device,
-                        requires_grad=False,
-                        ctx=None,
-                        dtype=np.dtype(gb_np.dtype),
-                    )
-                    grad_b._ensure_cuda_alloc(dtype=np.dtype(gb_np.dtype))
-
-                    # HtoD copy
-                    from .native_cuda.python import maxpool2d_ctypes as m
-
-                    lib = grad_b._get_cuda_lib()
-                    m.cudaMemcpyHtoD(lib, int(grad_b.data), gb_np, int(gb_np.nbytes))
+                    grad_b = grad_out.sum(axis=0)  # (out_features,)
+                    grad_b.requires_grad = False
+                    grad_b._set_ctx(None)
 
                 if self.bias is None:
                     return (grad_x, grad_w)
