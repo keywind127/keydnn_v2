@@ -31,6 +31,7 @@ from ._tensor_clone import *
 from ._tensor_tonumpy import *
 from ._tensor_transpose import *
 from ._tensor_broadcast import *
+from ._tensor_sum_to_shape import *
 from ._tensor_copyfromnumpy import *
 from ._base import TensorMixinMemory
 

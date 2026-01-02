@@ -1,20 +1,47 @@
 """
-CPU broadcast implementation for KeyDNN tensors.
+Broadcast-to implementations for KeyDNN tensors (CPU and CUDA control paths).
 
-This module defines a CPU-only broadcast helper that expands a tensor to a
-target shape using NumPy broadcasting semantics, then materializes the result
-as a new `Tensor`.
+This module registers concrete implementations of `Tensor.broadcast_to` via
+`tensor_control_path_manager` for two device targets:
 
-The function is registered through `tensor_control_path_manager`, which
-dispatches calls for the (mixin, method, device) triple to this concrete
-implementation.
+- CPU (`Device("cpu")`)
+- CUDA (`Device("cuda:0")`)
 
-Autograd
---------
-If `self.requires_grad` is True, the broadcast operation records a backward
-rule that reduces `grad_out` back to the original source shape by summing over
-broadcasted axes (i.e., the inverse of broadcast expansion), matching standard
-array autodiff behavior.
+Both implementations follow NumPy broadcasting semantics: a tensor is expanded to
+a target shape (if compatible) and the result is *materialized* as a new tensor
+(not a view).
+
+Device behavior
+---------------
+CPU path
+- Forward: uses NumPy `np.broadcast_to` on host and materializes a new CPU tensor.
+- Backward: reduces `grad_out` back to the source shape by summing over the
+  broadcasted axes (the inverse of broadcast expansion). The backward currently
+  expects `grad_out` to be on CPU and performs the reduction with NumPy.
+
+CUDA path
+- Forward: performed fully on GPU using the Tensor-boundary CUDA ops wrapper
+  (`broadcast_to_cuda_ext.broadcast_to_forward`), avoiding any NumPy round-trips.
+- Backward: performed fully on GPU using the CUDA sum-to-shape reduction wrapper
+  (`reduce_cuda_ext.sum_to_shape`) to reduce `grad_out` back to the source shape.
+  This removes the previous CUDA->CPU->CUDA fallback and keeps CUDA graphs
+  device-resident.
+
+Autograd semantics
+------------------
+If `self.requires_grad` is True, the broadcast operation records a backward rule:
+
+- Identify which axes were broadcasted (source dim == 1 while target dim > 1,
+  after left-padding the source shape with ones to match rank).
+- Sum-reduce `grad_out` over those axes and return a gradient tensor with the
+  original source shape.
+
+Notes
+-----
+- The CPU path currently normalizes to float32 to match existing CPU tensor
+  conventions in this codebase.
+- The CUDA path supports float32/float64 as defined by the underlying CUDA reduce
+  kernels and wrappers.
 """
 
 from typing import Union
@@ -40,18 +67,13 @@ def tensor_broadcast_gpu(self: ITensor, shape: tuple[int, ...]) -> "ITensor":
     Forward is performed entirely on GPU using the Tensor-boundary CUDA ops wrapper
     (`broadcast_to_forward`), avoiding any NumPy round-trips.
 
-    Autograd (current)
-    ------------------
+    Autograd (CUDA)
+    ---------------
     If `self.requires_grad` is True, we attach a backward rule that reduces
     `grad_out` back to the source shape by summing over broadcasted axes.
 
-    Current implementation uses a CPU fallback for the reduction:
-      1) copy grad_out CUDA -> CPU (to_numpy)
-      2) NumPy sum over broadcasted axes
-      3) copy reduced grad CPU -> CUDA tensor
-
-    This matches the project's current constraint that reduction/backward helpers
-    are CPU-based, while still enabling correctness for CUDA graphs.
+    This implementation uses the CUDA sum-to-shape reduction path (no NumPy):
+      - sum_to_shape(grad_out, target_shape=src_shape)
 
     Parameters
     ----------
@@ -70,23 +92,19 @@ def tensor_broadcast_gpu(self: ITensor, shape: tuple[int, ...]) -> "ITensor":
     TypeError / RuntimeError
         If dtype/device constraints are violated (from the CUDA ext wrapper).
     """
-    import numpy as np
-
-    Tensor = type(self)
-
     from .....infrastructure.ops.broadcast_to_cuda_ext import (
         broadcast_to_forward as _broadcast_to_forward,
+    )
+    from .....infrastructure.ops.reduce_cuda_ext import (
+        sum_to_shape as _sum_to_shape,
     )
 
     # Forward (GPU)
     try:
         out = _broadcast_to_forward(self, shape, device=0, sync=True)  # type: ignore[arg-type]
     except ValueError:
-        # preserve ValueError as-is
         raise
     except Exception as e:
-        # normalize any lower-level error into a ValueError for API consistency if desired
-        # but keep original exception type might be more helpful; here we mirror CPU path message.
         raise ValueError(f"Cannot broadcast shape {self.shape} to {shape}") from e
 
     req = bool(getattr(self, "requires_grad", False))
@@ -98,37 +116,31 @@ def tensor_broadcast_gpu(self: ITensor, shape: tuple[int, ...]) -> "ITensor":
 
     def backward_fn(grad_out: "ITensor"):
         """
-        Reduce broadcasted gradient back to the source tensor shape.
+        Reduce broadcasted gradient back to the source tensor shape (CUDA-native).
 
-        Current fallback:
-        - Accepts CUDA or CPU grad_out; if CUDA, copies to CPU for NumPy reduction.
-        - Returns gradient on the same device as `self` (CUDA) for consistency.
+        Uses sum-to-shape reduction on CUDA (no NumPy / no host round-trips).
         """
-        # Step 1: move grad_out to CPU ndarray
-        g = grad_out.to_numpy().astype(np.float32, copy=False)
+        g = grad_out
 
-        # Step 2: align src_shape to target rank by left-padding with ones
-        src_rank = len(src_shape)
-        tgt_rank = len(tgt_shape)
-        padded_src = (1,) * (tgt_rank - src_rank) + src_shape
+        # Best-effort: ensure grad_out is on CUDA if some upstream produced CPU grads.
+        try:
+            if hasattr(g, "device") and (not g.device.is_cuda()):  # type: ignore[attr-defined]
+                if hasattr(g, "to"):
+                    g = g.to(self.device)  # type: ignore[call-arg]
+                else:
+                    raise TypeError(
+                        f"broadcast_to backward requires CUDA grad_out; got device={g.device}"  # type: ignore[attr-defined]
+                    )
+        except AttributeError:
+            # If grad_out doesn't expose `.device`, we assume it's already CUDA in this path.
+            pass
 
-        # Step 3: sum over axes that were broadcasted (src dim == 1 and target dim > 1)
-        reduce_axes = []
-        for i, (sd, td) in enumerate(zip(padded_src, tgt_shape)):
-            if int(sd) == 1 and int(td) != 1:
-                reduce_axes.append(i)
-
-        if reduce_axes:
-            g = np.sum(g, axis=tuple(reduce_axes), keepdims=True)
-
-        # Step 4: remove left padding dims to return to src_shape
-        if tgt_rank != src_rank:
-            for _ in range(tgt_rank - src_rank):
-                g = np.squeeze(g, axis=0)
-
-        # Step 5: copy reduced grad back to CUDA tensor
-        grad = Tensor(shape=src_shape, device=self.device, requires_grad=False)  # type: ignore[call-arg]
-        grad.copy_from_numpy(g.astype(np.float32, copy=False))
+        grad = _sum_to_shape(
+            g,  # type: ignore[arg-type]
+            target_shape=src_shape,
+            device=0,
+            sync=True,
+        )
         return (grad,)
 
     ctx = Context(parents=(self,), backward_fn=backward_fn)

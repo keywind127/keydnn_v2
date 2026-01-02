@@ -631,10 +631,17 @@ def sum_to_shape_cuda(
     in_shape = tuple(int(d) for d in in_shape)
     out_shape = tuple(int(d) for d in out_shape)
 
-    if len(in_shape) != len(out_shape):
+    # Allow rank drop by left-padding out_shape with ones (unbroadcast semantics).
+    # Examples:
+    #   in_shape=(5,7),   out_shape=(7,)   -> padded=(1,7)
+    #   in_shape=(2,3,4), out_shape=(3,1)  -> padded=(1,3,1)
+    if len(out_shape) > len(in_shape):
         raise ValueError(
             f"rank mismatch: in_shape rank={len(in_shape)} out_shape rank={len(out_shape)}"
         )
+
+    pad = len(in_shape) - len(out_shape)
+    out_shape = (1,) * pad + out_shape
 
     # Validate compatibility (out dim must be 1 or equal to in dim)
     for i, (id_, od_) in enumerate(zip(in_shape, out_shape)):

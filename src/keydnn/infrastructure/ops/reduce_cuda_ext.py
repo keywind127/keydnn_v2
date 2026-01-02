@@ -636,17 +636,30 @@ def sum_to_shape_forward(
     in_shape = tuple(int(d) for d in x.shape)
     out_shape_t = tuple(int(d) for d in out_shape)
 
-    if len(in_shape) != len(out_shape_t):
+    # --- rank normalization -------------------------------------------------
+    # sum_to_shape semantics allow rank drop by left-padding out_shape with ones.
+    # Example: (2,3,4) -> (3,1) is treated as (1,3,1)
+    #          (5,7)   -> (7,)  is treated as (1,7)
+    in_shape = tuple(int(d) for d in x.shape)  # or however you already compute it
+    out_shape_t = tuple(int(d) for d in out_shape)  # your passed target shape
+
+    in_rank = len(in_shape)
+    out_rank = len(out_shape_t)
+
+    if out_rank > in_rank:
         raise ValueError(f"rank mismatch: in_shape={in_shape} out_shape={out_shape_t}")
 
-    for i, (id_, od_) in enumerate(zip(in_shape, out_shape_t)):
-        if od_ == id_:
-            continue
-        if od_ == 1 and id_ >= 1:
-            continue
-        raise ValueError(
-            f"incompatible shapes: in_shape={in_shape} out_shape={out_shape_t}"
-        )
+    # Pad on the LEFT with ones so ranks match
+    pad = in_rank - out_rank
+    out_shape_padded = (1,) * pad + out_shape_t
+
+    # Validate broadcast-compat: each dim must be equal or target dim == 1
+    for sd, td in zip(in_shape, out_shape_padded):
+        if td != 1 and td != sd:
+            raise ValueError(
+                f"shape mismatch: cannot sum from in_shape={in_shape} to out_shape={out_shape_t}"
+            )
+    # -----------------------------------------------------------------------
 
     lib = _load_cuda_lib()
     cuda_set_device(lib, int(device))
@@ -665,15 +678,15 @@ def sum_to_shape_forward(
             x_dev=int(x.data),
             y_dev=int(y_dev),
             in_shape=in_shape,
-            out_shape=out_shape_t,
+            out_shape=out_shape_padded,
             dtype=np.dtype(dt),
-            zero_y=True,  # safe default: kernel may use atomics / accumulate
+            zero_y=True,
             sync=bool(sync),
         )
 
         return Tensor._from_devptr(
             int(y_dev),
-            shape=out_shape_t,
+            shape=out_shape_t,  # keep original (rank-dropped) shape
             dtype=dt,
             device=x.device,
             requires_grad=False,

@@ -983,3 +983,14 @@ class TensorMixinMemory(ABC):
             return
 
         raise RuntimeError(f"Unsupported device copy: {other.device} -> {self.device}")
+
+    def sum_to_shape(self: "ITensor", target_shape: tuple[int, ...]) -> "ITensor":
+        """
+        Sum-reduce this tensor to `target_shape` (inverse of broadcasting).
+
+        This primitive is commonly used in autograd to reduce broadcasted gradients
+        back to the original source shape.
+
+        Dispatches via tensor_control_path_manager.
+        """
+        ...
