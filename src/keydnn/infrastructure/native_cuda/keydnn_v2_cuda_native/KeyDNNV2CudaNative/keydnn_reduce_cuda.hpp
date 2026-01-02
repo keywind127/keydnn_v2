@@ -108,3 +108,33 @@ KEYDNN_EXPORT int keydnn_cuda_sum_axis2d_backward_f64(
     const double* grad_out, double* grad_x,
     int rows, int cols, int axis
 );
+
+// ---- sum_to_shape (general unbroadcast reduction) ----
+//
+// Reduce `x` of shape `in_shape[ndim]` into `y` of shape `out_shape[ndim]`,
+// where for each dimension d:
+//   out_shape[d] == in_shape[d]   OR   out_shape[d] == 1
+//
+// This is the primitive needed for broadcast backward ("sum to size").
+//
+// Notes:
+// - Both shapes must have the SAME rank `ndim` (pad with leading 1s in caller if needed).
+// - y is contiguous row-major with shape out_shape.
+// - x is contiguous row-major with shape in_shape.
+// - Implementation performs atomic adds into y.
+//
+KEYDNN_EXPORT int keydnn_cuda_sum_to_shape_f32(
+    const float* x,
+    float* y,
+    const int64_t* in_shape,
+    const int64_t* out_shape,
+    int ndim
+);
+
+KEYDNN_EXPORT int keydnn_cuda_sum_to_shape_f64(
+    const double* x,
+    double* y,
+    const int64_t* in_shape,
+    const int64_t* out_shape,
+    int ndim
+);

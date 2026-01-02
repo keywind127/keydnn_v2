@@ -19,6 +19,10 @@ Implemented ops
     2D max reduction with argmax indices along axis {0, 1}, plus backward scatter.
 - sum_axis2d_forward_cuda / sum_axis2d_backward_cuda:
     2D sum reduction along axis {0, 1}, plus backward broadcast.
+- sum_to_shape_cuda:
+    General "unbroadcast" reduction that reduces a flat input buffer of shape
+    `in_shape` into an output buffer of shape `out_shape` by summing along
+    broadcasted axes (out dim == 1 and in dim > 1).
 
 Notes
 -----
@@ -565,3 +569,110 @@ def sum_axis2d_backward_cuda(
 
     if sync:
         cuda_synchronize(lib)
+
+
+# -----------------------------------------------------------------------------
+# NEW: sum_to_shape
+# -----------------------------------------------------------------------------
+
+
+def sum_to_shape_cuda(
+    lib,
+    *,
+    x_dev: int,
+    y_dev: int,
+    in_shape: tuple[int, ...],
+    out_shape: tuple[int, ...],
+    dtype: np.dtype,
+    sync: bool = True,
+    zero_y: bool = True,
+) -> None:
+    """
+    Reduce `x` from `in_shape` into `y` of `out_shape` by summing over broadcasted axes.
+
+    This is the inverse of broadcast: it sums `x` over any axis where:
+        out_shape[d] == 1 and in_shape[d] != 1
+
+    Parameters
+    ----------
+    lib : object
+        Loaded native CUDA library handle passed through to ctypes wrappers.
+    x_dev : int
+        Device pointer to the input buffer of length prod(in_shape) (flattened).
+    y_dev : int
+        Device pointer to the output buffer of length prod(out_shape) (flattened).
+    in_shape : tuple[int, ...]
+        Logical input shape (rank R). Must match how `x_dev` was produced.
+    out_shape : tuple[int, ...]
+        Target reduced shape (rank R). For each dim d:
+            out_shape[d] == in_shape[d] OR out_shape[d] == 1
+    dtype : np.dtype
+        Element dtype. Only `np.float32` and `np.float64` are supported.
+    sync : bool, optional
+        If True, synchronizes the CUDA device after the kernel call. Defaults True.
+    zero_y : bool, optional
+        If True, memset `y` to zero before calling the kernel. This is recommended
+        if the kernel uses atomic accumulation into `y` (common implementation).
+        Defaults True.
+
+    Raises
+    ------
+    ValueError
+        If rank mismatches or shape is incompatible with sum-to-shape semantics.
+    TypeError
+        If dtype is unsupported.
+    """
+    from ..native_cuda.python.reduce_ctypes import sum_to_shape_cuda as _sum_to_shape
+
+    dtype = np.dtype(dtype)
+    if dtype not in (np.float32, np.float64):
+        raise TypeError(f"sum_to_shape_cuda supports float32/float64 only, got {dtype}")
+
+    in_shape = tuple(int(d) for d in in_shape)
+    out_shape = tuple(int(d) for d in out_shape)
+
+    if len(in_shape) != len(out_shape):
+        raise ValueError(
+            f"rank mismatch: in_shape rank={len(in_shape)} out_shape rank={len(out_shape)}"
+        )
+
+    # Validate compatibility (out dim must be 1 or equal to in dim)
+    for i, (id_, od_) in enumerate(zip(in_shape, out_shape)):
+        if id_ < 0 or od_ < 0:
+            raise ValueError(f"negative dim at axis {i}: in={id_} out={od_}")
+        if od_ != 1 and od_ != id_:
+            raise ValueError(
+                f"incompatible shapes at axis {i}: in_shape={in_shape} out_shape={out_shape}"
+            )
+
+    if zero_y:
+        nbytes_y = int(np.prod(out_shape, dtype=np.int64)) * np.dtype(dtype).itemsize
+        # allow empty outputs: memset(0 bytes) is fine, but your wrapper might not like it.
+        if nbytes_y > 0:
+            cuda_memset(lib, int(y_dev), 0, int(nbytes_y))
+
+    # NOTE: reduce_ctypes.sum_to_shape_cuda does NOT accept sync=; handled here
+    _sum_to_shape(
+        lib,
+        x_dev=int(x_dev),
+        y_dev=int(y_dev),
+        in_shape=in_shape,
+        out_shape=out_shape,
+        dtype=dtype,
+    )
+
+    if sync:
+        cuda_synchronize(lib)
+
+
+__all__ = [
+    "sum_all_cuda",
+    "mean_all_cuda",
+    "sum_backward_fill_cuda",
+    "mean_backward_fill_cuda",
+    "max_axis2d_forward_cuda",
+    "max_axis2d_backward_cuda",
+    "sum_axis2d_forward_cuda",
+    "sum_axis2d_backward_cuda",
+    "sum_to_shape_cuda",
+]

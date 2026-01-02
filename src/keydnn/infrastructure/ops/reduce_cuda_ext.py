@@ -51,6 +51,7 @@ from .reduce_cuda import (
     max_axis2d_backward_cuda as _max_axis2d_bwd_devptr,
     sum_axis2d_forward_cuda as _sum_axis2d_fwd_devptr,
     sum_axis2d_backward_cuda as _sum_axis2d_bwd_devptr,
+    sum_to_shape_cuda as _sum_to_shape_devptr,
 )
 
 
@@ -609,9 +610,84 @@ def max_axis2d_backward(
         raise
 
 
+def sum_to_shape_forward(
+    x: Tensor,
+    *,
+    out_shape: tuple[int, ...],
+    device: int = 0,
+    sync: bool = True,
+) -> Tensor:
+    """
+    Sum-reduce `x` to `out_shape` using "unbroadcast" semantics.
+
+    This is used in broadcast backward: if x was broadcast from out_shape to x.shape,
+    then grad w.r.t. the original tensor is sum_to_shape(grad, out_shape).
+
+    Rules:
+    - ranks must match
+    - for each dim i:
+        - if out_shape[i] == x.shape[i], keep
+        - if out_shape[i] == 1 and x.shape[i] > 1, reduce (sum) over that axis
+        - otherwise incompatible
+    """
+    _require_cuda(x, "x")
+    dt = _require_f32_f64(x, "x")
+
+    in_shape = tuple(int(d) for d in x.shape)
+    out_shape_t = tuple(int(d) for d in out_shape)
+
+    if len(in_shape) != len(out_shape_t):
+        raise ValueError(f"rank mismatch: in_shape={in_shape} out_shape={out_shape_t}")
+
+    for i, (id_, od_) in enumerate(zip(in_shape, out_shape_t)):
+        if od_ == id_:
+            continue
+        if od_ == 1 and id_ >= 1:
+            continue
+        raise ValueError(
+            f"incompatible shapes: in_shape={in_shape} out_shape={out_shape_t}"
+        )
+
+    lib = _load_cuda_lib()
+    cuda_set_device(lib, int(device))
+
+    out_numel = _numel(out_shape_t)
+    if out_numel <= 0:
+        raise ValueError(
+            f"out_shape must have positive numel, got out_shape={out_shape_t}"
+        )
+
+    y_dev = cuda_malloc(lib, int(out_numel * np.dtype(dt).itemsize))
+
+    try:
+        _sum_to_shape_devptr(
+            lib,
+            x_dev=int(x.data),
+            y_dev=int(y_dev),
+            in_shape=in_shape,
+            out_shape=out_shape_t,
+            dtype=np.dtype(dt),
+            zero_y=True,  # safe default: kernel may use atomics / accumulate
+            sync=bool(sync),
+        )
+
+        return Tensor._from_devptr(
+            int(y_dev),
+            shape=out_shape_t,
+            dtype=dt,
+            device=x.device,
+            requires_grad=False,
+        )
+    except Exception:
+        cuda_free(lib, y_dev)
+        raise
+
+
 # Convenience aliases
 sum_all = sum_all_forward
 mean_all = mean_all_forward
+sum_to_shape = sum_to_shape_forward
+
 
 __all__ = [
     "sum_all_forward",
@@ -624,4 +700,6 @@ __all__ = [
     "max_axis2d_backward",
     "sum_all",
     "mean_all",
+    "sum_to_shape_forward",
+    "sum_to_shape",
 ]
