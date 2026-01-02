@@ -243,107 +243,6 @@ class CudaLib:
 
         self._debug_bound = True
 
-    # def _bind_stack(self) -> None:
-    #     """
-    #     Bind argtypes/restype for stack-related CUDA exports (idempotent).
-
-    #     ABI overview
-    #     ------------
-    #     - Pointer arrays are uploaded as uint64_t[K] via `keydnn_cuda_upload_u64_array`.
-    #     - Stack kernels receive the device pointer to that uint64_t array:
-    #       - forward: `xs_u64_dev`
-    #       - backward: `dxs_u64_dev`
-
-    #     Binding strategy
-    #     ----------------
-    #     Pointer parameters are bound as `c_void_p` to avoid fragile pointer casts.
-    #     This keeps the wrapper tolerant to `uintptr_t` differences across platforms.
-
-    #     Side effects
-    #     ------------
-    #     - Binds debug exports and enables debug messages (opt-in semantics in native).
-    #     """
-    #     if self._stack_bound:
-    #         return
-
-    #     lib = self.lib
-
-    #     # int keydnn_cuda_upload_u64_array(uint64_t* dst_dev_u64, const uint64_t* src_host_u64, int64 K)
-    #     if not hasattr(lib, "keydnn_cuda_upload_u64_array"):
-    #         raise AttributeError(
-    #             "CUDA DLL missing symbol: keydnn_cuda_upload_u64_array"
-    #         )
-    #     lib.keydnn_cuda_upload_u64_array.argtypes = [
-    #         c_void_p,  # dst_dev_u64 (device pointer)
-    #         c_void_p,  # src_host_u64 (host pointer)
-    #         c_int64,  # K
-    #     ]
-    #     lib.keydnn_cuda_upload_u64_array.restype = c_int
-
-    #     # Forward:
-    #     if not hasattr(lib, "keydnn_cuda_stack_fwd_u64_f32"):
-    #         raise AttributeError(
-    #             "CUDA DLL missing symbol: keydnn_cuda_stack_fwd_u64_f32"
-    #         )
-    #     lib.keydnn_cuda_stack_fwd_u64_f32.argtypes = [
-    #         c_void_p,  # xs_u64_dev (device uint64[K])
-    #         c_int64,
-    #         c_int64,
-    #         c_int64,
-    #         c_void_p,  # y (device)
-    #     ]
-    #     lib.keydnn_cuda_stack_fwd_u64_f32.restype = c_int
-
-    #     if not hasattr(lib, "keydnn_cuda_stack_fwd_u64_f64"):
-    #         raise AttributeError(
-    #             "CUDA DLL missing symbol: keydnn_cuda_stack_fwd_u64_f64"
-    #         )
-    #     lib.keydnn_cuda_stack_fwd_u64_f64.argtypes = [
-    #         c_void_p,
-    #         c_int64,
-    #         c_int64,
-    #         c_int64,
-    #         c_void_p,
-    #     ]
-    #     lib.keydnn_cuda_stack_fwd_u64_f64.restype = c_int
-
-    #     # Backward:
-    #     if not hasattr(lib, "keydnn_cuda_stack_bwd_u64_f32"):
-    #         raise AttributeError(
-    #             "CUDA DLL missing symbol: keydnn_cuda_stack_bwd_u64_f32"
-    #         )
-    #     lib.keydnn_cuda_stack_bwd_u64_f32.argtypes = [
-    #         c_void_p,  # dy (device)
-    #         c_int64,
-    #         c_int64,
-    #         c_int64,
-    #         c_void_p,  # dxs_u64_dev (device uint64[K])
-    #     ]
-    #     lib.keydnn_cuda_stack_bwd_u64_f32.restype = c_int
-
-    #     if not hasattr(lib, "keydnn_cuda_stack_bwd_u64_f64"):
-    #         raise AttributeError(
-    #             "CUDA DLL missing symbol: keydnn_cuda_stack_bwd_u64_f64"
-    #         )
-    #     lib.keydnn_cuda_stack_bwd_u64_f64.argtypes = [
-    #         c_void_p,
-    #         c_int64,
-    #         c_int64,
-    #         c_int64,
-    #         c_void_p,
-    #     ]
-    #     lib.keydnn_cuda_stack_bwd_u64_f64.restype = c_int
-
-    #     # Bind debug (optional) and enable if requested
-    #     self._bind_debug()
-    #     self.cuda_debug_set_enabled(True)
-
-    #     self._stack_bound = True
-
-    # ----------------------------
-    # native debug helpers
-    # ----------------------------
-
     def cuda_debug_set_enabled(self, enabled: bool) -> None:
         """
         Enable or disable native debug message collection (if supported).
@@ -944,7 +843,7 @@ class CudaLib:
         pre,
         post,
         dtype,
-        sync: bool = False,              # <- default False
+        sync: bool = False,  # <- default False
         debug_verify_ptrs: bool = False,
     ) -> DevPtr:
         self._bind_stack()
@@ -956,26 +855,40 @@ class CudaLib:
 
         xs_u64_dev = self.cuda_malloc(K * ctypes.sizeof(c_uint64))
         try:
-            self.cuda_upload_u64_array(dst_u64_array_dev=xs_u64_dev, src_ptrs_host=xs_dev_ptrs)
+            self.cuda_upload_u64_array(
+                dst_u64_array_dev=xs_u64_dev, src_ptrs_host=xs_dev_ptrs
+            )
 
             if debug_verify_ptrs:
                 readback = self.debug_read_u64_array(u64_array_dev=xs_u64_dev, K=K)
                 if readback != [int(p) for p in xs_dev_ptrs]:
-                    raise RuntimeError(f"xs pointer u64 array mismatch: {readback} vs {list(map(int, xs_dev_ptrs))}")
+                    raise RuntimeError(
+                        f"xs pointer u64 array mismatch: {readback} vs {list(map(int, xs_dev_ptrs))}"
+                    )
 
             if dtype == np.float32:
                 st = self.lib.keydnn_cuda_stack_fwd_u64_f32(
-                    self._as_dev_ptr(xs_u64_dev), c_int64(K), c_int64(int(pre)), c_int64(int(post)), self._as_dev_ptr(y_dev)
+                    self._as_dev_ptr(xs_u64_dev),
+                    c_int64(K),
+                    c_int64(int(pre)),
+                    c_int64(int(post)),
+                    self._as_dev_ptr(y_dev),
                 )
             elif dtype == np.float64:
                 st = self.lib.keydnn_cuda_stack_fwd_u64_f64(
-                    self._as_dev_ptr(xs_u64_dev), c_int64(K), c_int64(int(pre)), c_int64(int(post)), self._as_dev_ptr(y_dev)
+                    self._as_dev_ptr(xs_u64_dev),
+                    c_int64(K),
+                    c_int64(int(pre)),
+                    c_int64(int(post)),
+                    self._as_dev_ptr(y_dev),
                 )
             else:
                 raise TypeError(f"Unsupported dtype for stack_forward_cuda: {dtype}")
 
             if st != 0:
-                self._raise_with_native_debug("keydnn_cuda_stack_fwd_u64 failed with", st)
+                self._raise_with_native_debug(
+                    "keydnn_cuda_stack_fwd_u64 failed with", st
+                )
 
             if sync:
                 self.cuda_synchronize()
@@ -994,8 +907,8 @@ class CudaLib:
         pre,
         post,
         dtype,
-        sync: bool = False,              # <- default False
-        debug_verify_ptrs: bool = False, # <- default False (perf)
+        sync: bool = False,  # <- default False
+        debug_verify_ptrs: bool = False,  # <- default False (perf)
     ) -> DevPtr:
         self._bind_stack()
         self._bind_cuda_utils()
@@ -1006,26 +919,40 @@ class CudaLib:
 
         dxs_u64_dev = self.cuda_malloc(K * ctypes.sizeof(c_uint64))
         try:
-            self.cuda_upload_u64_array(dst_u64_array_dev=dxs_u64_dev, src_ptrs_host=dxs_dev_ptrs)
+            self.cuda_upload_u64_array(
+                dst_u64_array_dev=dxs_u64_dev, src_ptrs_host=dxs_dev_ptrs
+            )
 
             if debug_verify_ptrs:
                 readback = self.debug_read_u64_array(u64_array_dev=dxs_u64_dev, K=K)
                 if readback != [int(p) for p in dxs_dev_ptrs]:
-                    raise RuntimeError(f"dx pointer u64 array mismatch: {readback} vs {list(map(int, dxs_dev_ptrs))}")
+                    raise RuntimeError(
+                        f"dx pointer u64 array mismatch: {readback} vs {list(map(int, dxs_dev_ptrs))}"
+                    )
 
             if dtype == np.float32:
                 st = self.lib.keydnn_cuda_stack_bwd_u64_f32(
-                    self._as_dev_ptr(dy_dev), c_int64(K), c_int64(int(pre)), c_int64(int(post)), self._as_dev_ptr(dxs_u64_dev)
+                    self._as_dev_ptr(dy_dev),
+                    c_int64(K),
+                    c_int64(int(pre)),
+                    c_int64(int(post)),
+                    self._as_dev_ptr(dxs_u64_dev),
                 )
             elif dtype == np.float64:
                 st = self.lib.keydnn_cuda_stack_bwd_u64_f64(
-                    self._as_dev_ptr(dy_dev), c_int64(K), c_int64(int(pre)), c_int64(int(post)), self._as_dev_ptr(dxs_u64_dev)
+                    self._as_dev_ptr(dy_dev),
+                    c_int64(K),
+                    c_int64(int(pre)),
+                    c_int64(int(post)),
+                    self._as_dev_ptr(dxs_u64_dev),
                 )
             else:
                 raise TypeError(f"Unsupported dtype for stack_backward_cuda: {dtype}")
 
             if st != 0:
-                self._raise_with_native_debug("keydnn_cuda_stack_bwd_u64 failed with", st)
+                self._raise_with_native_debug(
+                    "keydnn_cuda_stack_bwd_u64 failed with", st
+                )
 
             if sync:
                 self.cuda_synchronize()

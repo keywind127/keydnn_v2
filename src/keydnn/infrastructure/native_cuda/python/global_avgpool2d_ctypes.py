@@ -55,70 +55,7 @@ from .maxpool2d_ctypes import (
 # Device pointer handle type: uintptr_t stored as Python int
 DevPtr = int
 
-from functools import lru_cache
-
-@lru_cache(maxsize = 1)
-def load_keydnn_cuda_native():
-    import os
-    import ctypes
-    from pathlib import Path
-
-    # your existing path logic:
-    p = (
-        Path(__file__).resolve().parents[2]
-        / "native_cuda"
-        / "keydnn_v2_cuda_native"
-        / "x64"
-        / "Debug"
-        / "KeyDNNV2CudaNative.dll"
-    )
-    p = p.resolve()
-
-    if not p.exists():
-        raise FileNotFoundError(f"KeyDNN CUDA native DLL not found at: {p}")
-
-    def _add_dll_dir_or_path(dir_path: str) -> None:
-        """
-        Add a directory for DLL dependency resolution.
-
-        On some Windows setups, os.add_dll_directory can raise WinError 206.
-        If that happens, fall back to prepending the directory to PATH.
-        """
-        if not dir_path:
-            return
-        if not os.path.isdir(dir_path):
-            return
-
-        try:
-            os.add_dll_directory(dir_path)
-        except OSError as e:
-            # WinError 206: The filename or extension is too long
-            if getattr(e, "winerror", None) == 206:
-                # Fallback: PATH-based resolution for this process
-                cur = os.environ.get("PATH", "")
-                parts = cur.split(os.pathsep) if cur else []
-                if dir_path not in parts:
-                    os.environ["PATH"] = (
-                        dir_path + os.pathsep + cur if cur else dir_path
-                    )
-            else:
-                raise
-
-    # ---- ensure CUDA runtime deps are discoverable ----
-    cuda_path = os.environ.get("CUDA_PATH", "")
-    if cuda_path:
-        cuda_bin = os.path.join(cuda_path, "bin")
-        _add_dll_dir_or_path(cuda_bin)
-
-    cudnn_path = os.environ.get("CUDNN_PATH", "")
-    if cudnn_path:
-        cudnn_bin = os.path.join(cudnn_path, "bin")
-        _add_dll_dir_or_path(cudnn_bin)
-
-    # Also add the DLL folder itself (this is where you currently crash with WinError 206)
-    _add_dll_dir_or_path(str(p.parent))
-
-    return ctypes.CDLL(str(p))
+from ._native_loader import load_keydnn_cuda_native  # dynamic loading, do not remove
 
 
 def _bind_cuda_utils(lib: ctypes.CDLL) -> None:
