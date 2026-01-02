@@ -41,6 +41,7 @@ from src.keydnn.infrastructure.ops.reduce_cuda_ext import (
     mean_backward_fill_forward,
     max_axis2d_forward,
     max_axis2d_backward,
+    sum_to_shape_forward,
 )
 
 
@@ -569,6 +570,126 @@ class TestReduceCudaExt(unittest.TestCase):
 
         with self.assertRaises(TypeError):
             _ = sum_all_forward(x_cpu, device=self.device_index, sync=True)
+
+        # ---------------------------------------------------------------------
+
+    # sum_to_shape (unbroadcast reduction)
+    # ---------------------------------------------------------------------
+
+    def _sum_to_shape_cpu(
+        self, x: np.ndarray, out_shape: tuple[int, ...]
+    ) -> np.ndarray:
+        """
+        NumPy reference for sum_to_shape (reduce over broadcasted axes).
+
+        Requires same rank.
+        For each dim i:
+          - if out[i] == in[i] -> keep
+          - if out[i] == 1 and in[i] >= 1 -> reduce along that axis with keepdims=True
+          - else -> error
+        """
+        in_shape = tuple(int(d) for d in x.shape)
+        out_shape_t = tuple(int(d) for d in out_shape)
+        if len(in_shape) != len(out_shape_t):
+            raise ValueError(
+                f"rank mismatch: in_shape={in_shape} out_shape={out_shape_t}"
+            )
+
+        y = x
+        for i, (id_, od_) in enumerate(zip(in_shape, out_shape_t)):
+            if od_ == id_:
+                continue
+            if od_ == 1 and id_ >= 1:
+                y = y.sum(axis=i, keepdims=True)
+                continue
+            raise ValueError(
+                f"incompatible shapes: in_shape={in_shape} out_shape={out_shape_t}"
+            )
+        return y.astype(x.dtype, copy=False)
+
+    def _run_sum_to_shape_case(
+        self,
+        dtype: np.dtype,
+        *,
+        in_shape: tuple[int, ...],
+        out_shape: tuple[int, ...],
+    ) -> None:
+        rng = np.random.default_rng(11)
+        x = rng.standard_normal(in_shape).astype(dtype, copy=False)
+        x_t = self._make_cuda_tensor_from_host(x)
+
+        y_t = sum_to_shape_forward(
+            x_t,
+            out_shape=out_shape,
+            device=self.device_index,
+            sync=True,
+        )
+
+        self.assertTrue(y_t.device.is_cuda())
+        self.assertEqual(tuple(y_t.shape), tuple(int(d) for d in out_shape))
+        self.assertEqual(np.dtype(y_t.dtype), np.dtype(dtype))
+
+        y = self._read_cuda_tensor_to_host(y_t)
+        ref = self._sum_to_shape_cpu(x, out_shape)
+
+        # Reduction uses atomics for some shapes/kernels => tolerate like sum.
+        rtol, atol = _tols_sum(np.dtype(dtype), int(x.size))
+        np.testing.assert_allclose(y, ref, rtol=rtol, atol=atol)
+
+    def test_sum_to_shape_f32_reduce_last_dim(self) -> None:
+        self._run_sum_to_shape_case(
+            np.float32,
+            in_shape=(7, 9),
+            out_shape=(7, 1),
+        )
+
+    def test_sum_to_shape_f64_reduce_first_dim(self) -> None:
+        self._run_sum_to_shape_case(
+            np.float64,
+            in_shape=(11, 5),
+            out_shape=(1, 5),
+        )
+
+    def test_sum_to_shape_f32_reduce_both_broadcast_dims(self) -> None:
+        # typical broadcast-backward case: (B, C, H, W) -> (1, C, 1, 1)
+        self._run_sum_to_shape_case(
+            np.float32,
+            in_shape=(3, 4, 5, 6),
+            out_shape=(1, 4, 1, 1),
+        )
+
+    def test_sum_to_shape_identity_is_allowed(self) -> None:
+        self._run_sum_to_shape_case(
+            np.float32,
+            in_shape=(2, 3, 4),
+            out_shape=(2, 3, 4),
+        )
+
+    def test_sum_to_shape_rejects_rank_mismatch(self) -> None:
+        rng = np.random.default_rng(12)
+        x = rng.standard_normal((2, 3)).astype(np.float32, copy=False)
+        x_t = self._make_cuda_tensor_from_host(x)
+
+        with self.assertRaises(ValueError):
+            _ = sum_to_shape_forward(
+                x_t,
+                out_shape=(2, 3, 1),  # rank mismatch
+                device=self.device_index,
+                sync=True,
+            )
+
+    def test_sum_to_shape_rejects_incompatible_dim(self) -> None:
+        rng = np.random.default_rng(13)
+        x = rng.standard_normal((2, 3, 4)).astype(np.float32, copy=False)
+        x_t = self._make_cuda_tensor_from_host(x)
+
+        with self.assertRaises(ValueError):
+            _ = sum_to_shape_forward(
+                x_t,
+                out_shape=(2, 2, 4),  # 2 is neither 1 nor 3
+                device=self.device_index,
+                sync=True,
+            )
 
 
 if __name__ == "__main__":

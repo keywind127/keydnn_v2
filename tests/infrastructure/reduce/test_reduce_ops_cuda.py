@@ -17,6 +17,7 @@ Covered ops
 - max_axis2d_backward_cuda (with zero_grad_x=True)
 - sum_axis2d_forward_cuda
 - sum_axis2d_backward_cuda
+- sum_to_shape_cuda   <-- NEW
 
 Assumptions
 -----------
@@ -30,6 +31,8 @@ Notes
 - Tests are skipped cleanly if the DLL cannot be loaded or CUDA is unavailable.
 - float32 tolerances are relaxed for large reductions due to atomicAdd order.
 - For max backward, we validate argmax-scatter semantics (single index per slice).
+- For sum_to_shape, we validate "unbroadcast" semantics used in broadcast backward:
+  reduce axes where out_dim == 1 and in_dim > 1.
 """
 
 from __future__ import annotations
@@ -57,6 +60,7 @@ from src.keydnn.infrastructure.ops.reduce_cuda import (
     max_axis2d_backward_cuda,
     sum_axis2d_forward_cuda,
     sum_axis2d_backward_cuda,
+    sum_to_shape_cuda,  # NEW
 )
 
 
@@ -137,21 +141,44 @@ def sum_axis2d_backward_cpu(
     grad_out: np.ndarray, *, rows: int, cols: int, axis: int, dtype: np.dtype
 ) -> np.ndarray:
     if axis == 1:
-        # grad_out shape: (rows,)
         return np.broadcast_to(grad_out.reshape(rows, 1), (rows, cols)).astype(
             dtype, copy=False
         )
     if axis == 0:
-        # grad_out shape: (cols,)
         return np.broadcast_to(grad_out.reshape(1, cols), (rows, cols)).astype(
             dtype, copy=False
         )
     raise ValueError("axis must be 0 or 1")
 
 
+def sum_to_shape_cpu(x: np.ndarray, *, out_shape: tuple[int, ...]) -> np.ndarray:
+    """
+    Reference "unbroadcast" reduction.
+
+    Given x with shape in_shape, reduce to out_shape by summing over axes where:
+        out_dim == 1 and in_dim > 1
+    keeping dims, then squeeze none (we keep out_shape rank).
+    """
+    in_shape = x.shape
+    if len(in_shape) != len(out_shape):
+        raise ValueError("rank mismatch")
+    reduce_axes = []
+    for i, (id_, od_) in enumerate(zip(in_shape, out_shape)):
+        if od_ == 1 and id_ != 1:
+            reduce_axes.append(i)
+        elif od_ != 1 and od_ != id_:
+            raise ValueError(f"incompatible shapes: in={in_shape} out={out_shape}")
+    if reduce_axes:
+        y = x.sum(axis=tuple(reduce_axes), keepdims=True, dtype=x.dtype)
+    else:
+        # still materialize copy for consistency
+        y = x.astype(x.dtype, copy=True)
+    # ensure exact out_shape (keepdims already matches, but guard anyway)
+    return y.reshape(out_shape).astype(x.dtype, copy=False)
+
+
 def _tols_sum(dtype: np.dtype, numel: int) -> tuple[float, float]:
     if dtype == np.float32:
-        # atomicAdd reduction order is nondeterministic; error grows with numel
         if numel >= 100_000:
             return (2e-5, 1e-4)
         return (1e-5, 1e-6)
@@ -290,7 +317,6 @@ class TestReduceCudaOps(unittest.TestCase):
 
         grad_x_ref = sum_backward_fill_cpu(grad_out, numel=numel)
 
-        # device scalar grad_out: pass as a 1-element buffer
         go_host = np.array([grad_out.item()], dtype=dtype)
         go_dev = cuda_from_host(self.lib, go_host)
 
@@ -436,7 +462,7 @@ class TestReduceCudaOps(unittest.TestCase):
                 cols=cols,
                 axis=axis,
                 dtype=dtype,
-                zero_grad_x=True,  # exercise ops-level zeroing path
+                zero_grad_x=True,
                 sync=True,
             )
 
@@ -508,7 +534,6 @@ class TestReduceCudaOps(unittest.TestCase):
             cuda_free(self.lib, x_dev)
             cuda_free(self.lib, y_dev)
 
-        # Forward here is deterministic (single thread per row/col), so default tol is fine.
         rtol, atol = _tols_default(dtype)
         np.testing.assert_allclose(y_host, y_ref, rtol=rtol, atol=atol)
 
@@ -574,6 +599,120 @@ class TestReduceCudaOps(unittest.TestCase):
         self._run_sum_axis2d_backward_case(np.float64, rows=19, cols=31, axis=0)
 
     # -------------------------
+    # NEW: sum_to_shape
+    # -------------------------
+
+    def _run_sum_to_shape_case(
+        self,
+        dtype: np.dtype,
+        *,
+        in_shape: tuple[int, ...],
+        out_shape: tuple[int, ...],
+    ) -> None:
+        rng = self._rng()
+        x = rng.standard_normal(in_shape).astype(dtype, copy=False)
+        y_ref = sum_to_shape_cpu(x, out_shape=out_shape)
+
+        x_dev = cuda_from_host(self.lib, x)
+
+        y_host = np.empty(out_shape, dtype=dtype)
+        y_dev = cuda_malloc(self.lib, int(y_host.nbytes))
+
+        try:
+            sum_to_shape_cuda(
+                self.lib,
+                x_dev=int(x_dev),
+                y_dev=int(y_dev),
+                in_shape=in_shape,
+                out_shape=out_shape,
+                dtype=dtype,
+                sync=True,
+                zero_y=True,
+            )
+            cuda_memcpy_d2h(self.lib, y_host, y_dev)
+            cuda_synchronize(self.lib)
+        finally:
+            cuda_free(self.lib, x_dev)
+            cuda_free(self.lib, y_dev)
+
+        # If your kernel uses atomics, numerical behavior is similar to reductions.
+        rtol, atol = _tols_sum(dtype, int(np.prod(in_shape)))
+        np.testing.assert_allclose(y_host, y_ref, rtol=rtol, atol=atol)
+
+    def test_sum_to_shape_f32_reduce_last_dim(self) -> None:
+        # (2, 3, 4) -> (2, 3, 1) : sum over last axis
+        self._run_sum_to_shape_case(np.float32, in_shape=(2, 3, 4), out_shape=(2, 3, 1))
+
+    def test_sum_to_shape_f64_reduce_last_dim(self) -> None:
+        self._run_sum_to_shape_case(np.float64, in_shape=(2, 3, 4), out_shape=(2, 3, 1))
+
+    def test_sum_to_shape_f32_reduce_middle_dim(self) -> None:
+        # (5, 7, 3) -> (5, 1, 3) : sum over axis=1
+        self._run_sum_to_shape_case(np.float32, in_shape=(5, 7, 3), out_shape=(5, 1, 3))
+
+    def test_sum_to_shape_f64_reduce_middle_dim(self) -> None:
+        self._run_sum_to_shape_case(np.float64, in_shape=(5, 7, 3), out_shape=(5, 1, 3))
+
+    def test_sum_to_shape_f32_reduce_multi_axes(self) -> None:
+        # (4, 6, 5) -> (1, 6, 1) : sum over axes 0 and 2
+        self._run_sum_to_shape_case(np.float32, in_shape=(4, 6, 5), out_shape=(1, 6, 1))
+
+    def test_sum_to_shape_f64_reduce_multi_axes(self) -> None:
+        self._run_sum_to_shape_case(np.float64, in_shape=(4, 6, 5), out_shape=(1, 6, 1))
+
+    def test_sum_to_shape_identity_no_reduction(self) -> None:
+        # in == out should behave like a copy/materialization (numerically identical)
+        self._run_sum_to_shape_case(np.float32, in_shape=(3, 2, 5), out_shape=(3, 2, 5))
+
+    def test_sum_to_shape_rejects_rank_mismatch(self) -> None:
+        dtype = np.float32
+        x = self._rng().standard_normal((2, 3, 4)).astype(dtype, copy=False)
+        x_dev = cuda_from_host(self.lib, x)
+
+        y_host = np.empty((2, 3), dtype=dtype)
+        y_dev = cuda_malloc(self.lib, y_host.nbytes)
+
+        try:
+            with self.assertRaises(ValueError):
+                sum_to_shape_cuda(
+                    self.lib,
+                    x_dev=int(x_dev),
+                    y_dev=int(y_dev),
+                    in_shape=(2, 3, 4),
+                    out_shape=(2, 3),  # rank mismatch
+                    dtype=dtype,
+                    sync=True,
+                    zero_y=True,
+                )
+        finally:
+            cuda_free(self.lib, x_dev)
+            cuda_free(self.lib, y_dev)
+
+    def test_sum_to_shape_rejects_incompatible_shapes(self) -> None:
+        dtype = np.float32
+        x = self._rng().standard_normal((2, 3, 4)).astype(dtype, copy=False)
+        x_dev = cuda_from_host(self.lib, x)
+
+        y_host = np.empty((2, 2, 4), dtype=dtype)
+        y_dev = cuda_malloc(self.lib, y_host.nbytes)
+
+        try:
+            with self.assertRaises(ValueError):
+                sum_to_shape_cuda(
+                    self.lib,
+                    x_dev=int(x_dev),
+                    y_dev=int(y_dev),
+                    in_shape=(2, 3, 4),
+                    out_shape=(2, 2, 4),  # invalid: out dim neither 1 nor equal
+                    dtype=dtype,
+                    sync=True,
+                    zero_y=True,
+                )
+        finally:
+            cuda_free(self.lib, x_dev)
+            cuda_free(self.lib, y_dev)
+
+    # -------------------------
     # Edge / validation tests
     # -------------------------
 
@@ -581,8 +720,8 @@ class TestReduceCudaOps(unittest.TestCase):
         dtype = np.float32
         x = np.array(
             [
-                [1.0, 2.0, 2.0, 0.0],  # tie at 1 and 2 -> argmax=1
-                [3.0, 3.0, -1.0, 3.0],  # tie at 0,1,3 -> argmax=0
+                [1.0, 2.0, 2.0, 0.0],
+                [3.0, 3.0, -1.0, 3.0],
             ],
             dtype=dtype,
         )
@@ -621,7 +760,6 @@ class TestReduceCudaOps(unittest.TestCase):
         np.testing.assert_array_equal(idx_host, idx_ref)
 
     def test_ops_rejects_unsupported_dtype(self) -> None:
-        # Allocate dummy float buffers
         x = self._rng().standard_normal((16,)).astype(np.float32, copy=False)
         x_dev = cuda_from_host(self.lib, x)
         y_host = np.empty((1,), dtype=np.float32)
@@ -636,13 +774,11 @@ class TestReduceCudaOps(unittest.TestCase):
                 mean_all_cuda(
                     self.lib, x_dev=x_dev, y_dev=y_dev, numel=16, dtype=np.int32
                 )
-
-            # exercise new ops dtype validation too (use same dummy buffers)
             with self.assertRaises(TypeError):
                 sum_axis2d_forward_cuda(
                     self.lib,
                     x_dev=x_dev,
-                    y_dev=y_dev,  # dummy
+                    y_dev=y_dev,
                     rows=4,
                     cols=4,
                     axis=1,
@@ -652,13 +788,24 @@ class TestReduceCudaOps(unittest.TestCase):
             with self.assertRaises(TypeError):
                 sum_axis2d_backward_cuda(
                     self.lib,
-                    grad_out_dev=x_dev,  # dummy
-                    grad_x_dev=y_dev,  # dummy
+                    grad_out_dev=x_dev,
+                    grad_x_dev=y_dev,
                     rows=4,
                     cols=4,
                     axis=1,
                     dtype=np.int32,
                     sync=True,
+                )
+            with self.assertRaises(TypeError):
+                sum_to_shape_cuda(
+                    self.lib,
+                    x_dev=int(x_dev),
+                    y_dev=int(y_dev),
+                    in_shape=(4, 4),
+                    out_shape=(4, 1),
+                    dtype=np.int32,
+                    sync=True,
+                    zero_y=True,
                 )
         finally:
             cuda_free(self.lib, x_dev)
@@ -682,19 +829,19 @@ class TestReduceCudaOps(unittest.TestCase):
                     idx_dev=idx_dev,
                     rows=3,
                     cols=4,
-                    axis=2,  # invalid
+                    axis=2,
                     dtype=dtype,
                     sync=True,
                 )
             with self.assertRaises(ValueError):
                 max_axis2d_backward_cuda(
                     self.lib,
-                    grad_out_dev=x_dev,  # dummy
+                    grad_out_dev=x_dev,
                     idx_dev=idx_dev,
-                    grad_x_dev=y_dev,  # dummy
+                    grad_x_dev=y_dev,
                     rows=3,
                     cols=4,
-                    axis=-1,  # invalid
+                    axis=-1,
                     dtype=dtype,
                     zero_grad_x=False,
                     sync=True,
@@ -719,18 +866,18 @@ class TestReduceCudaOps(unittest.TestCase):
                     y_dev=y_dev,
                     rows=3,
                     cols=4,
-                    axis=2,  # invalid
+                    axis=2,
                     dtype=dtype,
                     sync=True,
                 )
             with self.assertRaises(ValueError):
                 sum_axis2d_backward_cuda(
                     self.lib,
-                    grad_out_dev=x_dev,  # dummy
-                    grad_x_dev=y_dev,  # dummy
+                    grad_out_dev=x_dev,
+                    grad_x_dev=y_dev,
                     rows=3,
                     cols=4,
-                    axis=-1,  # invalid
+                    axis=-1,
                     dtype=dtype,
                     sync=True,
                 )

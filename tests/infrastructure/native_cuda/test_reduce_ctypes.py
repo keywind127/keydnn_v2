@@ -51,6 +51,7 @@ from src.keydnn.infrastructure.native_cuda.python.reduce_ctypes import (
     mean_backward_fill_cuda,
     max_axis2d_forward_cuda,
     max_axis2d_backward_cuda,
+    sum_to_shape_cuda,
 )
 
 
@@ -134,6 +135,38 @@ def max_axis2d_backward_cpu(
             grad_x[r, c] += grad_out[c]
         return grad_x
     raise ValueError("axis must be 0 or 1")
+
+
+def sum_to_shape_cpu(
+    x: np.ndarray, *, in_shape: tuple[int, ...], out_shape: tuple[int, ...]
+) -> np.ndarray:
+    """
+    NumPy reference for sum_to_shape ("unbroadcast sum").
+
+    Assumes:
+    - x is contiguous flattened buffer with numel == prod(in_shape)
+    - in_shape and out_shape have the same rank
+    - for each dim d: out_shape[d] == in_shape[d] or out_shape[d] == 1
+    """
+    in_shape = tuple(int(d) for d in in_shape)
+    out_shape = tuple(int(d) for d in out_shape)
+    if len(in_shape) != len(out_shape):
+        raise ValueError("rank mismatch")
+    x_view = x.reshape(in_shape)
+
+    reduce_axes = tuple(
+        i
+        for i, (id_, od_) in enumerate(zip(in_shape, out_shape))
+        if (od_ == 1 and id_ != 1)
+    )
+    if reduce_axes:
+        y = x_view.sum(axis=reduce_axes, keepdims=True, dtype=x.dtype)
+    else:
+        y = x_view.astype(x.dtype, copy=False)
+
+    # keepdims=True already matches out_shape (same rank), but be strict:
+    y = y.reshape(out_shape)
+    return y
 
 
 # -----------------------------------------------------------------------------
@@ -594,6 +627,191 @@ class TestReduceCudaCtypes(unittest.TestCase):
             cuda_free(self.lib, x_dev)
             cuda_free(self.lib, y_dev)
             cuda_free(self.lib, idx_dev)
+
+        # -------------------------
+
+    # sum_to_shape (general unbroadcast reduction)
+    # -------------------------
+
+    def _tols_sum_to_shape(self, dtype: np.dtype, numel_in: int) -> tuple[float, float]:
+        """
+        Tolerances for sum_to_shape.
+
+        Uses atomicAdd into multiple outputs; float32 can differ slightly from NumPy.
+        """
+        if dtype == np.float32:
+            if numel_in >= 100_000:
+                return (2e-5, 1e-4)
+            return (1e-5, 1e-6)
+        return (1e-12, 1e-12)
+
+    def _run_sum_to_shape_case(
+        self,
+        dtype: np.dtype,
+        *,
+        in_shape: tuple[int, ...],
+        out_shape: tuple[int, ...],
+        seed: int = 0,
+    ) -> None:
+        rng = np.random.default_rng(seed)
+        dtype = np.dtype(dtype)
+
+        in_shape = tuple(int(d) for d in in_shape)
+        out_shape = tuple(int(d) for d in out_shape)
+
+        # Rank must match (caller pads in real use)
+        self.assertEqual(len(in_shape), len(out_shape))
+
+        numel_in = int(np.prod(in_shape, dtype=np.int64))
+        # Allocate host input as flat buffer (matches kernel assumption)
+        x = rng.standard_normal((numel_in,)).astype(dtype, copy=False)
+
+        y_ref = sum_to_shape_cpu(x, in_shape=in_shape, out_shape=out_shape)
+
+        # Device allocations
+        x_dev = cuda_from_host(self.lib, x)
+
+        y_host = np.empty(out_shape, dtype=dtype)
+        y_dev = cuda_malloc(self.lib, int(y_host.nbytes))
+
+        try:
+            sum_to_shape_cuda(
+                self.lib,
+                x_dev=int(x_dev),
+                y_dev=int(y_dev),
+                in_shape=in_shape,
+                out_shape=out_shape,
+                dtype=dtype,
+            )
+            cuda_memcpy_d2h(self.lib, y_host, y_dev)
+            cuda_synchronize(self.lib)
+        finally:
+            cuda_free(self.lib, x_dev)
+            cuda_free(self.lib, y_dev)
+
+        rtol, atol = self._tols_sum_to_shape(dtype, numel_in)
+        np.testing.assert_allclose(y_host, y_ref, rtol=rtol, atol=atol)
+
+    def test_sum_to_shape_f32_reduce_two_axes(self) -> None:
+        # (2,3,4) -> (1,3,1): reduce axes 0 and 2
+        self._run_sum_to_shape_case(
+            np.float32,
+            in_shape=(2, 3, 4),
+            out_shape=(1, 3, 1),
+            seed=10,
+        )
+
+    def test_sum_to_shape_f64_reduce_two_axes(self) -> None:
+        self._run_sum_to_shape_case(
+            np.float64,
+            in_shape=(2, 3, 4),
+            out_shape=(1, 3, 1),
+            seed=11,
+        )
+
+    def test_sum_to_shape_f32_no_reduction_identity(self) -> None:
+        # out_shape == in_shape => should match x reshaped
+        self._run_sum_to_shape_case(
+            np.float32,
+            in_shape=(4, 5),
+            out_shape=(4, 5),
+            seed=12,
+        )
+
+    def test_sum_to_shape_f32_reduce_last_dim(self) -> None:
+        # (7,9,8) -> (7,9,1): reduce axis 2
+        self._run_sum_to_shape_case(
+            np.float32,
+            in_shape=(7, 9, 8),
+            out_shape=(7, 9, 1),
+            seed=13,
+        )
+
+    def test_sum_to_shape_f32_reduce_middle_dim(self) -> None:
+        # (5,6,7) -> (5,1,7): reduce axis 1
+        self._run_sum_to_shape_case(
+            np.float32,
+            in_shape=(5, 6, 7),
+            out_shape=(5, 1, 7),
+            seed=14,
+        )
+
+    def test_sum_to_shape_f32_large(self) -> None:
+        # Large-ish to exercise atomic accumulation differences
+        self._run_sum_to_shape_case(
+            np.float32,
+            in_shape=(64, 33, 7),  # numel ~ 14784 (not huge but enough)
+            out_shape=(1, 33, 1),
+            seed=15,
+        )
+
+    def test_sum_to_shape_rejects_unsupported_dtype(self) -> None:
+        # allocate a valid float buffer for x_dev
+        x = np.arange(12, dtype=np.float32)
+        x_dev = cuda_from_host(self.lib, x)
+        y_host = np.empty((1,), dtype=np.float32)
+        y_dev = cuda_malloc(self.lib, int(y_host.nbytes))
+        try:
+            with self.assertRaises(TypeError):
+                sum_to_shape_cuda(
+                    self.lib,
+                    x_dev=int(x_dev),
+                    y_dev=int(y_dev),
+                    in_shape=(12,),
+                    out_shape=(1,),
+                    dtype=np.int32,  # unsupported
+                )
+        finally:
+            cuda_free(self.lib, x_dev)
+            cuda_free(self.lib, y_dev)
+
+    def test_sum_to_shape_rank_mismatch_raises(self) -> None:
+        x = np.arange(6, dtype=np.float32)
+        x_dev = cuda_from_host(self.lib, x)
+        y_host = np.empty((1,), dtype=np.float32)
+        y_dev = cuda_malloc(self.lib, int(y_host.nbytes))
+        try:
+            with self.assertRaises(ValueError):
+                sum_to_shape_cuda(
+                    self.lib,
+                    x_dev=int(x_dev),
+                    y_dev=int(y_dev),
+                    in_shape=(2, 3),
+                    out_shape=(1, 1, 1),  # rank mismatch
+                    dtype=np.float32,
+                )
+        finally:
+            cuda_free(self.lib, x_dev)
+            cuda_free(self.lib, y_dev)
+
+    def test_sum_to_shape_incompatible_shapes_raises_runtime(self) -> None:
+        """
+        Out shape must be 1 or equal to input dim per axis.
+        Example: (2,3,4) -> (2,2,4) is invalid (2 != 3 and not 1).
+        """
+        dtype = np.float32
+        x = (
+            np.random.default_rng(0)
+            .standard_normal((2 * 3 * 4,))
+            .astype(dtype, copy=False)
+        )
+
+        x_dev = cuda_from_host(self.lib, x)
+        y_host = np.empty((2, 2, 4), dtype=dtype)
+        y_dev = cuda_malloc(self.lib, int(y_host.nbytes))
+        try:
+            with self.assertRaises(RuntimeError):
+                sum_to_shape_cuda(
+                    self.lib,
+                    x_dev=int(x_dev),
+                    y_dev=int(y_dev),
+                    in_shape=(2, 3, 4),
+                    out_shape=(2, 2, 4),  # invalid
+                    dtype=dtype,
+                )
+        finally:
+            cuda_free(self.lib, x_dev)
+            cuda_free(self.lib, y_dev)
 
 
 if __name__ == "__main__":
