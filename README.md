@@ -502,7 +502,7 @@ from keydnn.infrastructure._models import Sequential
 from keydnn.infrastructure.convolution._conv2d_module import Conv2d
 from keydnn.infrastructure._linear import Linear
 from keydnn.infrastructure.pooling._pooling_module import MaxPool2d
-from keydnn.infrastructure._flatten_module import Flatten
+from keydnn.infrastructure.flatten._flatten_module import Flatten
 from keydnn.infrastructure._activations import ReLU, Softmax
 
 model = Sequential(
@@ -516,6 +516,7 @@ model = Sequential(
 
 model.save_json("checkpoint.json")
 loaded = Sequential.load_json("checkpoint.json")
+
 ```
 
 #### Supported layers for JSON save/load
