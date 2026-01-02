@@ -60,7 +60,8 @@ from .maxpool2d_ctypes import (
 
 from functools import lru_cache
 
-@lru_cache(maxsize = 1)
+
+@lru_cache(maxsize=1)
 def load_keydnn_cuda_native():
     import os
     import ctypes
@@ -112,6 +113,11 @@ def load_keydnn_cuda_native():
     if cuda_path:
         cuda_bin = os.path.join(cuda_path, "bin")
         _add_dll_dir_or_path(cuda_bin)
+
+    cudnn_path = os.environ.get("CUDNN_PATH", "")
+    if cudnn_path:
+        cudnn_bin = os.path.join(cudnn_path, "bin")
+        _add_dll_dir_or_path(cudnn_bin)
 
     # Also add the DLL folder itself (this is where you currently crash with WinError 206)
     _add_dll_dir_or_path(str(p.parent))
