@@ -34,7 +34,7 @@ It is designed to be both:
 
 ```bash
 git clone https://github.com/keywind127/keydnn_v2.git
-cd keydnn
+cd keydnn_v2
 pip install -e .
 ```
 

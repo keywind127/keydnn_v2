@@ -60,7 +60,7 @@ If CUDA is unavailable, CPU execution remains fully supported.
 
 ```bash
 git clone https://github.com/keywind127/keydnn_v2.git
-cd keydnn
+cd keydnn_v2
 pip install -e .
 ```
 
