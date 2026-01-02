@@ -290,8 +290,8 @@ def main() -> None:
         "--shape",
         nargs="+",
         type=int,
-        default=[256, 32],
-        help="Tensor shape, e.g. --shape 256 32",
+        default=[512, 512],
+        help="Tensor shape, e.g. --shape 512 512",
     )
     ap.add_argument("--dtype", choices=["float32", "float64"], default="float32")
     ap.add_argument("--warmup", type=int, default=50)

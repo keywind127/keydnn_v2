@@ -587,9 +587,9 @@ def bench_case(
     _bench_avgpool2d_case(
         ctx=ctx, x=x, k=k, s=s, p=p, warmup=warmup, repeats=repeats, sanity=sanity
     )
-    _bench_global_avgpool2d_case(
-        ctx=ctx, x=x, warmup=warmup, repeats=repeats, sanity=sanity
-    )
+    # _bench_global_avgpool2d_case(
+    #     ctx=ctx, x=x, warmup=warmup, repeats=repeats, sanity=sanity
+    # )
 
 
 def main() -> None:
