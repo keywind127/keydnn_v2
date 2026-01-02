@@ -81,7 +81,7 @@ def load_keydnn_cuda_native():
         / "native_cuda"
         / "keydnn_v2_cuda_native"
         / "x64"
-        / "Debug"
+        / "Release"
         / "KeyDNNV2CudaNative.dll"
     )
     p = p.resolve()

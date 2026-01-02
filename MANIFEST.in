@@ -1,0 +1,6 @@
+include README.md
+include README_PYPI.md
+include LICENSE
+include requirements.txt
+
+recursive-include src/keydnn *.dll
