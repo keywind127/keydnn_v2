@@ -32,6 +32,112 @@ Number = Union[int, float]
 """Scalar types accepted by Tensor arithmetic operators."""
 
 
+@tensor_control_path_manager(TMM, TMM.broadcast_to, Device("cuda:0"))
+def tensor_broadcast_gpu(self: ITensor, shape: tuple[int, ...]) -> "ITensor":
+    """
+    Broadcast a tensor to `shape` on CUDA by materializing an expanded copy on device.
+
+    Forward is performed entirely on GPU using the Tensor-boundary CUDA ops wrapper
+    (`broadcast_to_forward`), avoiding any NumPy round-trips.
+
+    Autograd (current)
+    ------------------
+    If `self.requires_grad` is True, we attach a backward rule that reduces
+    `grad_out` back to the source shape by summing over broadcasted axes.
+
+    Current implementation uses a CPU fallback for the reduction:
+      1) copy grad_out CUDA -> CPU (to_numpy)
+      2) NumPy sum over broadcasted axes
+      3) copy reduced grad CPU -> CUDA tensor
+
+    This matches the project's current constraint that reduction/backward helpers
+    are CPU-based, while still enabling correctness for CUDA graphs.
+
+    Parameters
+    ----------
+    shape : tuple[int, ...]
+        Target shape to broadcast to.
+
+    Returns
+    -------
+    ITensor
+        A new CUDA tensor of shape `shape` containing broadcasted values.
+
+    Raises
+    ------
+    ValueError
+        If broadcasting is not possible.
+    TypeError / RuntimeError
+        If dtype/device constraints are violated (from the CUDA ext wrapper).
+    """
+    import numpy as np
+
+    Tensor = type(self)
+
+    from .....infrastructure.ops.broadcast_to_cuda_ext import (
+        broadcast_to_forward as _broadcast_to_forward,
+    )
+
+    # Forward (GPU)
+    try:
+        out = _broadcast_to_forward(self, shape, device=0, sync=True)  # type: ignore[arg-type]
+    except ValueError:
+        # preserve ValueError as-is
+        raise
+    except Exception as e:
+        # normalize any lower-level error into a ValueError for API consistency if desired
+        # but keep original exception type might be more helpful; here we mirror CPU path message.
+        raise ValueError(f"Cannot broadcast shape {self.shape} to {shape}") from e
+
+    req = bool(getattr(self, "requires_grad", False))
+    if not req:
+        return out
+
+    src_shape = tuple(int(d) for d in self.shape)
+    tgt_shape = tuple(int(d) for d in shape)
+
+    def backward_fn(grad_out: "ITensor"):
+        """
+        Reduce broadcasted gradient back to the source tensor shape.
+
+        Current fallback:
+        - Accepts CUDA or CPU grad_out; if CUDA, copies to CPU for NumPy reduction.
+        - Returns gradient on the same device as `self` (CUDA) for consistency.
+        """
+        # Step 1: move grad_out to CPU ndarray
+        g = grad_out.to_numpy().astype(np.float32, copy=False)
+
+        # Step 2: align src_shape to target rank by left-padding with ones
+        src_rank = len(src_shape)
+        tgt_rank = len(tgt_shape)
+        padded_src = (1,) * (tgt_rank - src_rank) + src_shape
+
+        # Step 3: sum over axes that were broadcasted (src dim == 1 and target dim > 1)
+        reduce_axes = []
+        for i, (sd, td) in enumerate(zip(padded_src, tgt_shape)):
+            if int(sd) == 1 and int(td) != 1:
+                reduce_axes.append(i)
+
+        if reduce_axes:
+            g = np.sum(g, axis=tuple(reduce_axes), keepdims=True)
+
+        # Step 4: remove left padding dims to return to src_shape
+        if tgt_rank != src_rank:
+            for _ in range(tgt_rank - src_rank):
+                g = np.squeeze(g, axis=0)
+
+        # Step 5: copy reduced grad back to CUDA tensor
+        grad = Tensor(shape=src_shape, device=self.device, requires_grad=False)  # type: ignore[call-arg]
+        grad.copy_from_numpy(g.astype(np.float32, copy=False))
+        return (grad,)
+
+    ctx = Context(parents=(self,), backward_fn=backward_fn)
+    ctx.saved_meta["broadcast_from"] = src_shape
+    ctx.saved_meta["broadcast_to"] = tgt_shape
+    out._set_ctx(ctx)
+    return out
+
+
 @tensor_control_path_manager(TMM, TMM.broadcast_to, Device("cpu"))
 def tensor_broadcast_cpu(self: ITensor, shape: tuple[int, ...]) -> "ITensor":
     """
