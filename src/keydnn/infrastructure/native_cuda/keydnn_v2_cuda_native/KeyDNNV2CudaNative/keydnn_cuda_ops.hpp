@@ -48,3 +48,21 @@ extern "C" {
 
 
 } // extern "C"
+
+extern "C" {
+	// Broadcast: y = broadcast_to(x, out_shape)
+	// x: contiguous row-major
+	// y: contiguous row-major
+	// Shapes are host pointers (passed from Python via ctypes).
+	KEYDNN_CUDA_API int keydnn_cuda_broadcast_to_f32(
+		const float* x, float* y,
+		const int64_t* in_shape, int in_ndim,
+		const int64_t* out_shape, int out_ndim
+	);
+
+	KEYDNN_CUDA_API int keydnn_cuda_broadcast_to_f64(
+		const double* x, double* y,
+		const int64_t* in_shape, int in_ndim,
+		const int64_t* out_shape, int out_ndim
+	);
+}

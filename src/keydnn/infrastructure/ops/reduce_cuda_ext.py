@@ -51,6 +51,7 @@ from .reduce_cuda import (
     max_axis2d_backward_cuda as _max_axis2d_bwd_devptr,
     sum_axis2d_forward_cuda as _sum_axis2d_fwd_devptr,
     sum_axis2d_backward_cuda as _sum_axis2d_bwd_devptr,
+    sum_to_shape_cuda as _sum_to_shape_devptr,
 )
 
 
@@ -609,9 +610,97 @@ def max_axis2d_backward(
         raise
 
 
+def sum_to_shape_forward(
+    x: Tensor,
+    *,
+    out_shape: tuple[int, ...],
+    device: int = 0,
+    sync: bool = True,
+) -> Tensor:
+    """
+    Sum-reduce `x` to `out_shape` using "unbroadcast" semantics.
+
+    This is used in broadcast backward: if x was broadcast from out_shape to x.shape,
+    then grad w.r.t. the original tensor is sum_to_shape(grad, out_shape).
+
+    Rules:
+    - ranks must match
+    - for each dim i:
+        - if out_shape[i] == x.shape[i], keep
+        - if out_shape[i] == 1 and x.shape[i] > 1, reduce (sum) over that axis
+        - otherwise incompatible
+    """
+    _require_cuda(x, "x")
+    dt = _require_f32_f64(x, "x")
+
+    in_shape = tuple(int(d) for d in x.shape)
+    out_shape_t = tuple(int(d) for d in out_shape)
+
+    # --- rank normalization -------------------------------------------------
+    # sum_to_shape semantics allow rank drop by left-padding out_shape with ones.
+    # Example: (2,3,4) -> (3,1) is treated as (1,3,1)
+    #          (5,7)   -> (7,)  is treated as (1,7)
+    in_shape = tuple(int(d) for d in x.shape)  # or however you already compute it
+    out_shape_t = tuple(int(d) for d in out_shape)  # your passed target shape
+
+    in_rank = len(in_shape)
+    out_rank = len(out_shape_t)
+
+    if out_rank > in_rank:
+        raise ValueError(f"rank mismatch: in_shape={in_shape} out_shape={out_shape_t}")
+
+    # Pad on the LEFT with ones so ranks match
+    pad = in_rank - out_rank
+    out_shape_padded = (1,) * pad + out_shape_t
+
+    # Validate broadcast-compat: each dim must be equal or target dim == 1
+    for sd, td in zip(in_shape, out_shape_padded):
+        if td != 1 and td != sd:
+            raise ValueError(
+                f"shape mismatch: cannot sum from in_shape={in_shape} to out_shape={out_shape_t}"
+            )
+    # -----------------------------------------------------------------------
+
+    lib = _load_cuda_lib()
+    cuda_set_device(lib, int(device))
+
+    out_numel = _numel(out_shape_t)
+    if out_numel <= 0:
+        raise ValueError(
+            f"out_shape must have positive numel, got out_shape={out_shape_t}"
+        )
+
+    y_dev = cuda_malloc(lib, int(out_numel * np.dtype(dt).itemsize))
+
+    try:
+        _sum_to_shape_devptr(
+            lib,
+            x_dev=int(x.data),
+            y_dev=int(y_dev),
+            in_shape=in_shape,
+            out_shape=out_shape_padded,
+            dtype=np.dtype(dt),
+            zero_y=True,
+            sync=bool(sync),
+        )
+
+        return Tensor._from_devptr(
+            int(y_dev),
+            shape=out_shape_t,  # keep original (rank-dropped) shape
+            dtype=dt,
+            device=x.device,
+            requires_grad=False,
+        )
+    except Exception:
+        cuda_free(lib, y_dev)
+        raise
+
+
 # Convenience aliases
 sum_all = sum_all_forward
 mean_all = mean_all_forward
+sum_to_shape = sum_to_shape_forward
+
 
 __all__ = [
     "sum_all_forward",
@@ -624,4 +713,6 @@ __all__ = [
     "max_axis2d_backward",
     "sum_all",
     "mean_all",
+    "sum_to_shape_forward",
+    "sum_to_shape",
 ]

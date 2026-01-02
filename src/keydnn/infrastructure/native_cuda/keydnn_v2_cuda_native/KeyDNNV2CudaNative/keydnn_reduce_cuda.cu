@@ -407,6 +407,186 @@ static inline int sum_axis2d_backward_impl(
 }
 
 
+// ----------------------------
+// sum_to_shape (general unbroadcast reduction)
+// ----------------------------
+
+#ifndef KEYDNN_SUM_TO_SHAPE_MAX_NDIM
+#define KEYDNN_SUM_TO_SHAPE_MAX_NDIM 8
+#endif
+
+template <typename T>
+__global__ void sum_to_shape_kernel(
+    const T* __restrict__ x,
+    T* __restrict__ y,
+    int64_t numel_in,
+    int ndim,
+    const int64_t* __restrict__ in_shape,
+    const int64_t* __restrict__ in_strides,
+    const int64_t* __restrict__ out_shape,
+    const int64_t* __restrict__ out_strides
+) {
+    int64_t i = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+    if (i >= numel_in) return;
+
+    // Convert linear index i -> multi-index using in_strides,
+    // and compute output linear index by collapsing reduced dims to 0.
+    int64_t rem = i;
+    int64_t out_off = 0;
+
+#pragma unroll
+    for (int d = 0; d < KEYDNN_SUM_TO_SHAPE_MAX_NDIM; ++d) {
+        if (d >= ndim) break;
+
+        const int64_t stride = in_strides[d];
+        const int64_t idx = (stride > 0) ? (rem / stride) : 0;
+        rem = (stride > 0) ? (rem - idx * stride) : rem;
+
+        const int64_t od = out_shape[d];
+        const int64_t oidx = (od == 1) ? 0 : idx;
+
+        out_off += oidx * out_strides[d];
+    }
+
+    // Atomic add into y[out_off]
+    if constexpr (std::is_same<T, double>::value) {
+        atomicAdd_double_fallback(reinterpret_cast<double*>(y + out_off), static_cast<double>(x[i]));
+    }
+    else {
+        atomicAdd(y + out_off, x[i]);
+    }
+}
+
+template <typename T>
+static inline int sum_to_shape_impl(
+    const T* x,
+    T* y,
+    const int64_t* in_shape_h,
+    const int64_t* out_shape_h,
+    int ndim
+) {
+    static_assert(std::is_floating_point<T>::value, "sum_to_shape_impl requires floating point T");
+
+    if (!x || !y || !in_shape_h || !out_shape_h) return -1;
+    if (ndim <= 0) return -2;
+    if (ndim > KEYDNN_SUM_TO_SHAPE_MAX_NDIM) return -3;
+
+    // Validate shapes + compute numel
+    int64_t in_shape[KEYDNN_SUM_TO_SHAPE_MAX_NDIM];
+    int64_t out_shape[KEYDNN_SUM_TO_SHAPE_MAX_NDIM];
+    int64_t in_strides[KEYDNN_SUM_TO_SHAPE_MAX_NDIM];
+    int64_t out_strides[KEYDNN_SUM_TO_SHAPE_MAX_NDIM];
+
+    // Copy + validate
+    int64_t numel_in = 1;
+    int64_t numel_out = 1;
+
+    for (int d = 0; d < ndim; ++d) {
+        const int64_t id = in_shape_h[d];
+        const int64_t od = out_shape_h[d];
+        if (id < 0 || od < 0) return -4; // invalid dims
+        // Broadcast reduction rule: od must be 1 or equal to id
+        if (!(od == 1 || od == id)) return -5;
+
+        in_shape[d] = id;
+        out_shape[d] = od;
+
+        // numel with zero-dim allowed
+        numel_in = (numel_in == 0 || id == 0) ? 0 : (numel_in * id);
+        numel_out = (numel_out == 0 || od == 0) ? 0 : (numel_out * od);
+    }
+
+    // If output is empty, just zero it and return (nothing to accumulate).
+    // (Caller expects valid output even for empty tensors.)
+    if (numel_out == 0) {
+        cudaError_t st = cudaMemset(y, 0, 0); // no-op; keep style consistent
+        (void)st;
+        return 0;
+    }
+
+    // Build row-major strides (contiguous)
+    // stride[d] = product(shape[d+1:])
+    // If any dim is 0, numel is 0 and kernel will no-op after memset.
+    {
+        int64_t s = 1;
+        for (int d = ndim - 1; d >= 0; --d) {
+            in_strides[d] = s;
+            const int64_t id = in_shape[d];
+            s = (id == 0) ? 0 : (s * id);
+        }
+    }
+    {
+        int64_t s = 1;
+        for (int d = ndim - 1; d >= 0; --d) {
+            out_strides[d] = s;
+            const int64_t od = out_shape[d];
+            s = (od == 0) ? 0 : (s * od);
+        }
+    }
+
+    cudaError_t st;
+
+    // Zero output buffer before atomic accumulation
+    st = cudaMemset(y, 0, static_cast<size_t>(numel_out) * sizeof(T));
+    if (st != cudaSuccess) return keydnn_cuda_ok(st);
+
+    // If input is empty, done after memset
+    if (numel_in == 0) {
+        st = cudaDeviceSynchronize();
+        return keydnn_cuda_ok(st);
+    }
+
+    // Upload shapes/strides to device (small arrays)
+    int64_t* d_in_shape = nullptr, * d_out_shape = nullptr, * d_in_strides = nullptr, * d_out_strides = nullptr;
+
+    st = cudaMalloc(reinterpret_cast<void**>(&d_in_shape), sizeof(int64_t) * ndim);
+    if (st != cudaSuccess) return keydnn_cuda_ok(st);
+    st = cudaMalloc(reinterpret_cast<void**>(&d_out_shape), sizeof(int64_t) * ndim);
+    if (st != cudaSuccess) { cudaFree(d_in_shape); return keydnn_cuda_ok(st); }
+    st = cudaMalloc(reinterpret_cast<void**>(&d_in_strides), sizeof(int64_t) * ndim);
+    if (st != cudaSuccess) { cudaFree(d_in_shape); cudaFree(d_out_shape); return keydnn_cuda_ok(st); }
+    st = cudaMalloc(reinterpret_cast<void**>(&d_out_strides), sizeof(int64_t) * ndim);
+    if (st != cudaSuccess) { cudaFree(d_in_shape); cudaFree(d_out_shape); cudaFree(d_in_strides); return keydnn_cuda_ok(st); }
+
+    st = cudaMemcpy(d_in_shape, in_shape, sizeof(int64_t) * ndim, cudaMemcpyHostToDevice);
+    if (st != cudaSuccess) goto cleanup;
+    st = cudaMemcpy(d_out_shape, out_shape, sizeof(int64_t) * ndim, cudaMemcpyHostToDevice);
+    if (st != cudaSuccess) goto cleanup;
+    st = cudaMemcpy(d_in_strides, in_strides, sizeof(int64_t) * ndim, cudaMemcpyHostToDevice);
+    if (st != cudaSuccess) goto cleanup;
+    st = cudaMemcpy(d_out_strides, out_strides, sizeof(int64_t) * ndim, cudaMemcpyHostToDevice);
+    if (st != cudaSuccess) goto cleanup;
+
+    {
+        const int block = 256;
+        const int grid = static_cast<int>((numel_in + block - 1) / block);
+        sum_to_shape_kernel<T> << <grid, block >> > (
+            x, y,
+            numel_in,
+            ndim,
+            d_in_shape,
+            d_in_strides,
+            d_out_shape,
+            d_out_strides
+            );
+    }
+
+    st = cudaGetLastError();
+    if (st != cudaSuccess) goto cleanup;
+
+    st = cudaDeviceSynchronize();
+
+cleanup:
+    cudaFree(d_in_shape);
+    cudaFree(d_out_shape);
+    cudaFree(d_in_strides);
+    cudaFree(d_out_strides);
+
+    return keydnn_cuda_ok(st);
+}
+
+
+
 
 // ----------------------------
 // Exported C ABI functions
@@ -468,3 +648,24 @@ int keydnn_cuda_sum_axis2d_backward_f32(const float* grad_out, float* grad_x, in
 int keydnn_cuda_sum_axis2d_backward_f64(const double* grad_out, double* grad_x, int rows, int cols, int axis) {
     return sum_axis2d_backward_impl<double>(grad_out, grad_x, rows, cols, axis);
 }
+
+int keydnn_cuda_sum_to_shape_f32(
+    const float* x,
+    float* y,
+    const int64_t* in_shape,
+    const int64_t* out_shape,
+    int ndim
+) {
+    return sum_to_shape_impl<float>(x, y, in_shape, out_shape, ndim);
+}
+
+int keydnn_cuda_sum_to_shape_f64(
+    const double* x,
+    double* y,
+    const int64_t* in_shape,
+    const int64_t* out_shape,
+    int ndim
+) {
+    return sum_to_shape_impl<double>(x, y, in_shape, out_shape, ndim);
+}
+

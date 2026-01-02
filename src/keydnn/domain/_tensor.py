@@ -1293,3 +1293,14 @@ class ITensor(Protocol):
 
     # Python 2 legacy alias (optional, but nice to keep symmetry with __div__)
     def __idiv__(self: ITensor, other: Union["ITensor", Number]) -> ITensor: ...
+
+    def sum_to_shape(self: "ITensor", target_shape: tuple[int, ...]) -> "ITensor":
+        """
+        Sum-reduce this tensor to `target_shape` (inverse of broadcasting).
+
+        This primitive is commonly used in autograd to reduce broadcasted gradients
+        back to the original source shape.
+
+        Dispatches via tensor_control_path_manager.
+        """
+        ...
