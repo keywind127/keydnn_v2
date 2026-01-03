@@ -72,7 +72,7 @@ class Dropout(Module):
         """
         if not 0.0 <= p < 1.0:
             raise ValueError("Dropout probability p must be in [0, 1).")
-        self.p = float(p)
+        self.p: float = float(p)  # must ensure self.p remains float
         self.training = True
 
     def forward(self, x: Tensor) -> Tensor:
@@ -103,23 +103,34 @@ class Dropout(Module):
         if not self.training or self.p == 0.0:
             return x
 
-        keep_prob = 1.0 - self.p
+        keep_prob: float = 1.0 - self.p
         if keep_prob <= 0.0:
             raise ValueError("Dropout keep_prob must be > 0.")
 
-        # Device-resident random mask
+        # Device-resident random mask source
         r = Tensor.rand(x.shape, device=x.device)  # [0, 1)
 
-        # scalar -> Tensor, then broadcast to match r
-        kp = Tensor.full((), keep_prob, device=x.device, requires_grad=False)
-        kp = kp.broadcast_to(x.shape)
+        # IMPORTANT: scalar comparison fast path (CUDA) — no scalar->tensor projection
+        # Produces float32 mask: 1.0 where r < keep_prob, else 0.0
+        mask = r < keep_prob
 
-        mask = r < kp
-        mask /= kp  # inverted dropout scaling
+        # Inverted dropout scaling (still scalar, no broadcast tensor)
+        mask /= keep_prob
 
         req = bool(x.requires_grad)
 
         y = x * mask
+
+        # NOTE:
+        # We intentionally materialize a new Tensor here instead of returning `y`
+        # directly. Although `y = x * mask` already produces the correct values,
+        # it also carries the default autograd graph for elementwise multiplication.
+        #
+        # Dropout requires a *custom backward* that treats the random mask as a
+        # non-differentiable constant and propagates gradients only to `x`.
+        # Creating a fresh Tensor and attaching an explicit Context cleanly
+        # severs the arithmetic autograd graph and enforces the intended
+        # dropout semantics.
 
         out = Tensor(shape=y.shape, device=y.device, requires_grad=req, ctx=None)
         out.copy_from(y)
