@@ -1,21 +1,28 @@
 """
 Dropout regularization module for KeyDNN.
 
-This module implements an inverted Dropout layer following the standard
-deep learning formulation. During training, activations are randomly
-masked with probability `p` and scaled by `1 / (1 - p)` to preserve the
-expected value of activations. During evaluation, the layer behaves as
-an identity function.
+This module implements **inverted dropout** (a.k.a. "scaled dropout").
+During training, activations are randomly masked with probability `p`
+and scaled by `1 / (1 - p)` to preserve the expected value of the
+activations. During evaluation, the layer behaves as an identity
+function.
+
+Device support
+--------------
+- **CPU and CUDA** tensors are supported.
+- The dropout mask is materialized on the **same device** as the input.
+- Backward uses the same mask (and scaling) as forward. On CUDA this is
+  fully device-resident (no NumPy / host round-trips), relying on the
+  framework's broadcast + sum-to-shape reduction support.
 
 Design notes
 ------------
-- This implementation follows *inverted dropout*, so no scaling is
-  required at inference time.
-- Dropout is currently supported for CPU tensors only.
-- The backward pass propagates gradients through the same dropout mask
-  used in the forward pass.
-- The module integrates with KeyDNN's serialization system via
-  `register_module`.
+- Uses *inverted dropout*, so no scaling is required at inference time.
+- The mask is constructed as:
+    mask = (rand(shape) < keep_prob) / keep_prob
+  so the output is:
+    y = x * mask
+- Integrates with KeyDNN's serialization system via `register_module`.
 """
 
 from __future__ import annotations
@@ -43,6 +50,7 @@ class Dropout(Module):
     --------
     - Training mode:
         y = x * mask / (1 - p), where mask ~ Bernoulli(1 - p)
+      (equivalently y = x * ((rand < keep_prob) / keep_prob))
     - Evaluation mode:
         y = x (identity)
 
@@ -79,7 +87,7 @@ class Dropout(Module):
         Parameters
         ----------
         x : Tensor
-            Input tensor.
+            Input tensor (CPU or CUDA).
 
         Returns
         -------
@@ -89,27 +97,25 @@ class Dropout(Module):
 
         Raises
         ------
-        RuntimeError
-            If the input tensor is not located on the CPU.
+        ValueError
+            If `p` implies a non-positive keep probability (numerical guard).
         """
         if not self.training or self.p == 0.0:
             return x
-
-        if not x.device.is_cpu():
-            raise RuntimeError("Dropout is only supported for CPU tensors for now.")
 
         keep_prob = 1.0 - self.p
         if keep_prob <= 0.0:
             raise ValueError("Dropout keep_prob must be > 0.")
 
-        r = Tensor.rand(x.shape, device=x.device)  # [0,1)
+        # Device-resident random mask
+        r = Tensor.rand(x.shape, device=x.device)  # [0, 1)
 
-        # scalar -> Tensor, then broadcast to match r (avoid Tensor < float)
+        # scalar -> Tensor, then broadcast to match r
         kp = Tensor.full((), keep_prob, device=x.device, requires_grad=False)
         kp = kp.broadcast_to(x.shape)
 
         mask = r < kp
-        mask = mask / kp  # inverted dropout scaling
+        mask /= kp  # inverted dropout scaling
 
         req = bool(x.requires_grad)
 
