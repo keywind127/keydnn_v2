@@ -118,6 +118,16 @@ def matmul2d_forward(
     nbytes_c = int(M * N * np.dtype(dt_a).itemsize)
     c_dev = cuda_malloc(lib, nbytes_c)
 
+    from ..tensor._cuda_storage import _CudaStorage
+
+    storage = _CudaStorage(
+        lib=lib,
+        device_index=a.device.index,
+        dev_ptr=int(c_dev),
+        nbytes=nbytes_c,
+        dtype=dt_a,
+    )
+
     try:
         # Call ops-layer kernel (device-pointer first)
         _matmul_devptr(
@@ -132,8 +142,8 @@ def matmul2d_forward(
             sync=bool(sync),
         )
 
-        return Tensor._from_devptr(
-            int(c_dev),
+        return Tensor._from_storage(
+            storage,
             shape=(M, N),
             dtype=dt_a,
             device=a.device,
