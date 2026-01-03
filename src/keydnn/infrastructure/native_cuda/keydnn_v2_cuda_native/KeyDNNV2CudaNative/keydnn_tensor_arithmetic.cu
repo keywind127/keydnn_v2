@@ -136,6 +136,124 @@ namespace {
         if (i < n) a[i] /= alpha;
     }
 
+    // ----------------------------
+    // Compare elementwise -> float32 mask
+    // ----------------------------
+    __global__ void ge_kernel_f32(const float* a, const float* b, float* y, int64_t n) {
+        int64_t i = int64_t(blockIdx.x) * blockDim.x + threadIdx.x;
+        if (i < n) y[i] = (a[i] >= b[i]) ? 1.0f : 0.0f;
+    }
+
+    __global__ void ge_kernel_f64_out_f32(const double* a, const double* b, float* y, int64_t n) {
+        int64_t i = int64_t(blockIdx.x) * blockDim.x + threadIdx.x;
+        if (i < n) y[i] = (a[i] >= b[i]) ? 1.0f : 0.0f;
+    }
+
+    __global__ void lt_kernel_f32(const float* a, const float* b, float* y, int64_t n) {
+        int64_t i = int64_t(blockIdx.x) * blockDim.x + threadIdx.x;
+        if (i < n) y[i] = (a[i] < b[i]) ? 1.0f : 0.0f;
+    }
+
+    __global__ void lt_kernel_f64_out_f32(const double* a, const double* b, float* y, int64_t n) {
+        int64_t i = int64_t(blockIdx.x) * blockDim.x + threadIdx.x;
+        if (i < n) y[i] = (a[i] < b[i]) ? 1.0f : 0.0f;
+    }
+
+    __global__ void le_kernel_f32(const float* a, const float* b, float* y, int64_t n) {
+        int64_t i = int64_t(blockIdx.x) * blockDim.x + threadIdx.x;
+        if (i < n) y[i] = (a[i] <= b[i]) ? 1.0f : 0.0f;
+    }
+
+    __global__ void le_kernel_f64_out_f32(const double* a, const double* b, float* y, int64_t n) {
+        int64_t i = int64_t(blockIdx.x) * blockDim.x + threadIdx.x;
+        if (i < n) y[i] = (a[i] <= b[i]) ? 1.0f : 0.0f;
+    }
+
+    __global__ void eq_kernel_f32(const float* a, const float* b, float* y, int64_t n) {
+        int64_t i = int64_t(blockIdx.x) * blockDim.x + threadIdx.x;
+        if (i < n) y[i] = (a[i] == b[i]) ? 1.0f : 0.0f;
+    }
+
+    __global__ void eq_kernel_f64_out_f32(const double* a, const double* b, float* y, int64_t n) {
+        int64_t i = int64_t(blockIdx.x) * blockDim.x + threadIdx.x;
+        if (i < n) y[i] = (a[i] == b[i]) ? 1.0f : 0.0f;
+    }
+
+    __global__ void ne_kernel_f32(const float* a, const float* b, float* y, int64_t n) {
+        int64_t i = int64_t(blockIdx.x) * blockDim.x + threadIdx.x;
+        if (i < n) y[i] = (a[i] != b[i]) ? 1.0f : 0.0f;
+    }
+
+    __global__ void ne_kernel_f64_out_f32(const double* a, const double* b, float* y, int64_t n) {
+        int64_t i = int64_t(blockIdx.x) * blockDim.x + threadIdx.x;
+        if (i < n) y[i] = (a[i] != b[i]) ? 1.0f : 0.0f;
+    }
+
+
+    // ----------------------------
+    // Compare scalar -> float32 mask
+    // ----------------------------
+    __global__ void gt_scalar_kernel_f32_out_f32(const float* a, float alpha, float* y, int64_t n) {
+        int64_t i = int64_t(blockIdx.x) * blockDim.x + threadIdx.x;
+        if (i < n) y[i] = (a[i] > alpha) ? 1.0f : 0.0f;
+    }
+
+    __global__ void gt_scalar_kernel_f64_out_f32(const double* a, double alpha, float* y, int64_t n) {
+        int64_t i = int64_t(blockIdx.x) * blockDim.x + threadIdx.x;
+        if (i < n) y[i] = (a[i] > alpha) ? 1.0f : 0.0f;
+    }
+
+    __global__ void ge_scalar_kernel_f32_out_f32(const float* a, float alpha, float* y, int64_t n) {
+        int64_t i = int64_t(blockIdx.x) * blockDim.x + threadIdx.x;
+        if (i < n) y[i] = (a[i] >= alpha) ? 1.0f : 0.0f;
+    }
+
+    __global__ void ge_scalar_kernel_f64_out_f32(const double* a, double alpha, float* y, int64_t n) {
+        int64_t i = int64_t(blockIdx.x) * blockDim.x + threadIdx.x;
+        if (i < n) y[i] = (a[i] >= alpha) ? 1.0f : 0.0f;
+    }
+
+    __global__ void lt_scalar_kernel_f32_out_f32(const float* a, float alpha, float* y, int64_t n) {
+        int64_t i = int64_t(blockIdx.x) * blockDim.x + threadIdx.x;
+        if (i < n) y[i] = (a[i] < alpha) ? 1.0f : 0.0f;
+    }
+
+    __global__ void lt_scalar_kernel_f64_out_f32(const double* a, double alpha, float* y, int64_t n) {
+        int64_t i = int64_t(blockIdx.x) * blockDim.x + threadIdx.x;
+        if (i < n) y[i] = (a[i] < alpha) ? 1.0f : 0.0f;
+    }
+
+    __global__ void le_scalar_kernel_f32_out_f32(const float* a, float alpha, float* y, int64_t n) {
+        int64_t i = int64_t(blockIdx.x) * blockDim.x + threadIdx.x;
+        if (i < n) y[i] = (a[i] <= alpha) ? 1.0f : 0.0f;
+    }
+
+    __global__ void le_scalar_kernel_f64_out_f32(const double* a, double alpha, float* y, int64_t n) {
+        int64_t i = int64_t(blockIdx.x) * blockDim.x + threadIdx.x;
+        if (i < n) y[i] = (a[i] <= alpha) ? 1.0f : 0.0f;
+    }
+
+    __global__ void eq_scalar_kernel_f32_out_f32(const float* a, float alpha, float* y, int64_t n) {
+        int64_t i = int64_t(blockIdx.x) * blockDim.x + threadIdx.x;
+        if (i < n) y[i] = (a[i] == alpha) ? 1.0f : 0.0f;
+    }
+
+    __global__ void eq_scalar_kernel_f64_out_f32(const double* a, double alpha, float* y, int64_t n) {
+        int64_t i = int64_t(blockIdx.x) * blockDim.x + threadIdx.x;
+        if (i < n) y[i] = (a[i] == alpha) ? 1.0f : 0.0f;
+    }
+
+    __global__ void ne_scalar_kernel_f32_out_f32(const float* a, float alpha, float* y, int64_t n) {
+        int64_t i = int64_t(blockIdx.x) * blockDim.x + threadIdx.x;
+        if (i < n) y[i] = (a[i] != alpha) ? 1.0f : 0.0f;
+    }
+
+    __global__ void ne_scalar_kernel_f64_out_f32(const double* a, double alpha, float* y, int64_t n) {
+        int64_t i = int64_t(blockIdx.x) * blockDim.x + threadIdx.x;
+        if (i < n) y[i] = (a[i] != alpha) ? 1.0f : 0.0f;
+    }
+
+
 
 } // namespace
 
@@ -246,8 +364,8 @@ extern "C" {
     }
 
     // ----------------------------
-// Add inplace
-// ----------------------------
+    // Add inplace
+    // ----------------------------
     int keydnn_cuda_add_inplace_f32(float* a, const float* b, int64_t n) {
         if (!a || !b) return int(cudaErrorInvalidDevicePointer);
         return launch_1d(n, add_inplace_kernel<float>, a, b);
@@ -323,5 +441,133 @@ extern "C" {
         return launch_1d(n, div_scalar_inplace_kernel<double>, a, alpha);
     }
 
+    // ----------------------------
+    // GE
+    // ----------------------------
+    int keydnn_cuda_ge_f32(const float* a, const float* b, float* y, int64_t n) {
+        if (!a || !b || !y) return int(cudaErrorInvalidDevicePointer);
+        return launch_1d(n, ge_kernel_f32, a, b, y);
+    }
+
+    int keydnn_cuda_ge_f64(const double* a, const double* b, float* y, int64_t n) {
+        if (!a || !b || !y) return int(cudaErrorInvalidDevicePointer);
+        return launch_1d(n, ge_kernel_f64_out_f32, a, b, y);
+    }
+
+    // ----------------------------
+    // LT
+    // ----------------------------
+    int keydnn_cuda_lt_f32(const float* a, const float* b, float* y, int64_t n) {
+        if (!a || !b || !y) return int(cudaErrorInvalidDevicePointer);
+        return launch_1d(n, lt_kernel_f32, a, b, y);
+    }
+
+    int keydnn_cuda_lt_f64(const double* a, const double* b, float* y, int64_t n) {
+        if (!a || !b || !y) return int(cudaErrorInvalidDevicePointer);
+        return launch_1d(n, lt_kernel_f64_out_f32, a, b, y);
+    }
+
+    // ----------------------------
+    // LE
+    // ----------------------------
+    int keydnn_cuda_le_f32(const float* a, const float* b, float* y, int64_t n) {
+        if (!a || !b || !y) return int(cudaErrorInvalidDevicePointer);
+        return launch_1d(n, le_kernel_f32, a, b, y);
+    }
+
+    int keydnn_cuda_le_f64(const double* a, const double* b, float* y, int64_t n) {
+        if (!a || !b || !y) return int(cudaErrorInvalidDevicePointer);
+        return launch_1d(n, le_kernel_f64_out_f32, a, b, y);
+    }
+
+    // ----------------------------
+    // EQ
+    // ----------------------------
+    int keydnn_cuda_eq_f32(const float* a, const float* b, float* y, int64_t n) {
+        if (!a || !b || !y) return int(cudaErrorInvalidDevicePointer);
+        return launch_1d(n, eq_kernel_f32, a, b, y);
+    }
+
+    int keydnn_cuda_eq_f64(const double* a, const double* b, float* y, int64_t n) {
+        if (!a || !b || !y) return int(cudaErrorInvalidDevicePointer);
+        return launch_1d(n, eq_kernel_f64_out_f32, a, b, y);
+    }
+
+    // ----------------------------
+    // NE
+    // ----------------------------
+    int keydnn_cuda_ne_f32(const float* a, const float* b, float* y, int64_t n) {
+        if (!a || !b || !y) return int(cudaErrorInvalidDevicePointer);
+        return launch_1d(n, ne_kernel_f32, a, b, y);
+    }
+
+    int keydnn_cuda_ne_f64(const double* a, const double* b, float* y, int64_t n) {
+        if (!a || !b || !y) return int(cudaErrorInvalidDevicePointer);
+        return launch_1d(n, ne_kernel_f64_out_f32, a, b, y);
+    }
+
+
+    // ----------------------------
+    // Compare scalar -> float32 mask
+    // ----------------------------
+    int keydnn_cuda_gt_scalar_f32(const float* a, float alpha, float* y, int64_t n) {
+        if (!a || !y) return int(cudaErrorInvalidDevicePointer);
+        return launch_1d(n, gt_scalar_kernel_f32_out_f32, a, alpha, y);
+    }
+
+    int keydnn_cuda_gt_scalar_f64(const double* a, double alpha, float* y, int64_t n) {
+        if (!a || !y) return int(cudaErrorInvalidDevicePointer);
+        return launch_1d(n, gt_scalar_kernel_f64_out_f32, a, alpha, y);
+    }
+
+    int keydnn_cuda_ge_scalar_f32(const float* a, float alpha, float* y, int64_t n) {
+        if (!a || !y) return int(cudaErrorInvalidDevicePointer);
+        return launch_1d(n, ge_scalar_kernel_f32_out_f32, a, alpha, y);
+    }
+
+    int keydnn_cuda_ge_scalar_f64(const double* a, double alpha, float* y, int64_t n) {
+        if (!a || !y) return int(cudaErrorInvalidDevicePointer);
+        return launch_1d(n, ge_scalar_kernel_f64_out_f32, a, alpha, y);
+    }
+
+    int keydnn_cuda_lt_scalar_f32(const float* a, float alpha, float* y, int64_t n) {
+        if (!a || !y) return int(cudaErrorInvalidDevicePointer);
+        return launch_1d(n, lt_scalar_kernel_f32_out_f32, a, alpha, y);
+    }
+
+    int keydnn_cuda_lt_scalar_f64(const double* a, double alpha, float* y, int64_t n) {
+        if (!a || !y) return int(cudaErrorInvalidDevicePointer);
+        return launch_1d(n, lt_scalar_kernel_f64_out_f32, a, alpha, y);
+    }
+
+    int keydnn_cuda_le_scalar_f32(const float* a, float alpha, float* y, int64_t n) {
+        if (!a || !y) return int(cudaErrorInvalidDevicePointer);
+        return launch_1d(n, le_scalar_kernel_f32_out_f32, a, alpha, y);
+    }
+
+    int keydnn_cuda_le_scalar_f64(const double* a, double alpha, float* y, int64_t n) {
+        if (!a || !y) return int(cudaErrorInvalidDevicePointer);
+        return launch_1d(n, le_scalar_kernel_f64_out_f32, a, alpha, y);
+    }
+
+    int keydnn_cuda_eq_scalar_f32(const float* a, float alpha, float* y, int64_t n) {
+        if (!a || !y) return int(cudaErrorInvalidDevicePointer);
+        return launch_1d(n, eq_scalar_kernel_f32_out_f32, a, alpha, y);
+    }
+
+    int keydnn_cuda_eq_scalar_f64(const double* a, double alpha, float* y, int64_t n) {
+        if (!a || !y) return int(cudaErrorInvalidDevicePointer);
+        return launch_1d(n, eq_scalar_kernel_f64_out_f32, a, alpha, y);
+    }
+
+    int keydnn_cuda_ne_scalar_f32(const float* a, float alpha, float* y, int64_t n) {
+        if (!a || !y) return int(cudaErrorInvalidDevicePointer);
+        return launch_1d(n, ne_scalar_kernel_f32_out_f32, a, alpha, y);
+    }
+
+    int keydnn_cuda_ne_scalar_f64(const double* a, double alpha, float* y, int64_t n) {
+        if (!a || !y) return int(cudaErrorInvalidDevicePointer);
+        return launch_1d(n, ne_scalar_kernel_f64_out_f32, a, alpha, y);
+    }
 
 } // extern "C"

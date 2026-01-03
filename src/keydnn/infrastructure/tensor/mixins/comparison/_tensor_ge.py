@@ -1,12 +1,12 @@
 """
-Device-specific implementations of Tensor greater-than comparison via control-path dispatch.
+Device-specific implementations of Tensor greater-than-or-equal comparison via control-path dispatch.
 
 This module registers CPU and CUDA implementations of the elementwise
-greater-than comparison operator (``__gt__``) for tensors. Implementations are
-selected at runtime using the `tensor_control_path_manager`, which dispatches
-based on the tensor's device.
+greater-than-or-equal comparison operator (``__ge__``) for tensors.
+Implementations are selected at runtime using the `tensor_control_path_manager`,
+which dispatches based on the tensor's device.
 
-The public operator entrypoint is `TensorMixinComparison.__gt__`, and this
+The public operator entrypoint is `TensorMixinComparison.__ge__`, and this
 module provides concrete control paths for:
 - Device("cpu")
 - Device("cuda:0")
@@ -14,32 +14,35 @@ module provides concrete control paths for:
 Semantics
 ---------
 - Performs an elementwise comparison with no broadcasting (shapes must match).
-- Scalars are promoted to tensor-like operands via `_as_tensor_like`.
-- The result is a float32 mask tensor: ``1.0`` where ``self > other``,
+- Scalars are supported:
+  - CPU: scalar is promoted to tensor-like via `_as_tensor_like`.
+  - CUDA: dispatches to a scalar CUDA kernel variant without promoting the
+    scalar to a tensor (to avoid temporary allocations).
+- The result is a float32 mask tensor: ``1.0`` where ``self >= other``,
   and ``0.0`` elsewhere.
 - Comparison operations do not participate in autograd; outputs always have
   ``requires_grad=False``.
 """
 
-from ..._tensor_builder import tensor_control_path_manager
+from __future__ import annotations
 
-from .....domain.device._device import Device
-from .....domain._tensor import ITensor
-
-from ._base import TensorMixinComparison as TMA
 from typing import Union
 
+from ..._tensor_builder import tensor_control_path_manager
+from .....domain.device._device import Device
+from .....domain._tensor import ITensor
+from ._base import TensorMixinComparison as TMA
 
 Number = Union[int, float]
 """Scalar types accepted by Tensor comparison operators."""
 
 
-@tensor_control_path_manager(TMA, TMA.__gt__, Device("cuda:0"))
-def tensor_gt_gpu(self: ITensor, other: Union["ITensor", Number]) -> "ITensor":
+@tensor_control_path_manager(TMA, TMA.__ge__, Device("cuda:0"))
+def tensor_ge_gpu(self: ITensor, other: Union["ITensor", Number]) -> "ITensor":
     """
-    CUDA control path for elementwise greater-than comparison (Tensor.__gt__).
+    CUDA control path for elementwise greater-than-or-equal comparison (Tensor.__ge__).
 
-    This implementation computes the elementwise mask ``self > other`` using
+    This implementation computes the elementwise mask ``self >= other`` using
     the dedicated CUDA comparison extension wrapper.
 
     Parameters
@@ -53,13 +56,14 @@ def tensor_gt_gpu(self: ITensor, other: Union["ITensor", Number]) -> "ITensor":
     Returns
     -------
     ITensor
-        A CUDA float32 mask tensor with ``1.0`` where ``self > other`` and
+        A CUDA float32 mask tensor with ``1.0`` where ``self >= other`` and
         ``0.0`` elsewhere.
 
     Raises
     ------
     TypeError
-        If `other` is a CUDA tensor with a mismatched dtype.
+        If `other` is a CUDA tensor with a mismatched dtype, or if `other` is
+        an unsupported type.
     ValueError
         If `other` is a CUDA tensor with a mismatched shape.
     NotImplementedError
@@ -77,10 +81,10 @@ def tensor_gt_gpu(self: ITensor, other: Union["ITensor", Number]) -> "ITensor":
     # CUDA path
     # -----------------------------
     if self.device.is_cuda():
-        # Prefer dedicated comparison ext wrapper (NOT arithmetic)
+        # Dedicated comparison ext wrapper (NOT arithmetic)
         from ....ops.tensor_comparison_cuda_ext import (
-            gt as _cuda_gt,
-            gt_scalar as _cuda_gt_scalar,
+            ge as _cuda_ge,
+            ge_scalar as _cuda_ge_scalar,
         )
 
         device_index = int(getattr(self.device, "index", 0) or 0)
@@ -89,38 +93,39 @@ def tensor_gt_gpu(self: ITensor, other: Union["ITensor", Number]) -> "ITensor":
         if hasattr(other, "device"):
             other_t = other  # type: ignore[assignment]
             if not other_t.device.is_cuda():
-                self._raise_device_not_supported("gt")
+                self._raise_device_not_supported("ge")
 
             self._binary_op_shape_check(self, other_t)
 
+            # dtype must match for current CUDA comparison kernels
             if np.dtype(self.dtype) != np.dtype(other_t.dtype):
                 raise TypeError(
                     f"dtype mismatch: self.dtype={np.dtype(self.dtype)} vs other.dtype={np.dtype(other_t.dtype)}"
                 )
 
-            out = _cuda_gt(self, other_t, device=device_index)
+            out = _cuda_ge(self, other_t, device=device_index)
             out.requires_grad = False
             return out
 
         # Tensor-scalar (no scalar->tensor projection)
         if isinstance(other, _Number):
-            out = _cuda_gt_scalar(self, float(other), device=device_index)
+            out = _cuda_ge_scalar(self, float(other), device=device_index)
             out.requires_grad = False
             return out
 
         raise TypeError(
-            f"unsupported operand type(s) for >: {type(self)!r} and {type(other)!r}"
+            f"unsupported operand type(s) for >=: {type(self)!r} and {type(other)!r}"
         )
 
-    self._raise_device_not_supported("gt")
+    self._raise_device_not_supported("ge")
 
 
-@tensor_control_path_manager(TMA, TMA.__gt__, Device("cpu"))
-def tensor_gt_cpu(self: ITensor, other: Union["ITensor", Number]) -> "ITensor":
+@tensor_control_path_manager(TMA, TMA.__ge__, Device("cpu"))
+def tensor_ge_cpu(self: ITensor, other: Union["ITensor", Number]) -> "ITensor":
     """
-    CPU control path for elementwise greater-than comparison (Tensor.__gt__).
+    CPU control path for elementwise greater-than-or-equal comparison (Tensor.__ge__).
 
-    This implementation computes the elementwise mask ``self > other`` using
+    This implementation computes the elementwise mask ``self >= other`` using
     NumPy and copies the result into a newly allocated output tensor on the CPU.
 
     Parameters
@@ -134,7 +139,7 @@ def tensor_gt_cpu(self: ITensor, other: Union["ITensor", Number]) -> "ITensor":
     Returns
     -------
     ITensor
-        A CPU float32 mask tensor with ``1.0`` where ``self > other`` and
+        A CPU float32 mask tensor with ``1.0`` where ``self >= other`` and
         ``0.0`` elsewhere.
 
     Raises
@@ -159,7 +164,7 @@ def tensor_gt_cpu(self: ITensor, other: Union["ITensor", Number]) -> "ITensor":
         self._binary_op_shape_check(self, other_t)
 
         out = Tensor(shape=self.shape, device=self.device, requires_grad=False)
-        out.copy_from_numpy((self.to_numpy() > other_t.to_numpy()).astype(np.float32))
+        out.copy_from_numpy((self.to_numpy() >= other_t.to_numpy()).astype(np.float32))
         return out
 
-    self._raise_device_not_supported("gt")
+    self._raise_device_not_supported("ge")
