@@ -490,7 +490,7 @@ class TensorMixinMemory(ABC):
           created with `requires_grad=False` and `ctx=None` in the transfer paths.
         """
         import numpy as np
-        from src.keydnn.domain.device._device import Device
+        from .....domain.device._device import Device
 
         Tensor = type(self)
 
