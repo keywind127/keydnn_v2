@@ -142,6 +142,16 @@ def bias_add_forward(
     cuda_set_device(lib, int(device))
     y_dev = cuda_malloc(lib, nbytes)
 
+    from ..tensor._cuda_storage import _CudaStorage
+
+    storage = _CudaStorage(
+        lib=lib,
+        device_index=x.device.index,
+        dev_ptr=int(y_dev),
+        nbytes=int(nbytes),
+        dtype=dt_x,
+    )
+
     try:
         _bias_add(
             lib,
@@ -153,8 +163,8 @@ def bias_add_forward(
             dtype=dt_x,
         )
         _ = bool(sync)
-        return Tensor._from_devptr(
-            int(y_dev),
+        return Tensor._from_storage(
+            storage,
             shape=(batch, out),
             dtype=dt_x,
             device=x.device,
