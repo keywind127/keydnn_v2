@@ -1304,3 +1304,49 @@ class ITensor(Protocol):
         Dispatches via tensor_control_path_manager.
         """
         ...
+
+    def __eq__(self: ITensor, other: Union["ITensor", Number]) -> "ITensor":
+        """
+        Compute the elementwise equality comparison.
+
+        Parameters
+        ----------
+        other : Union[ITensor, Number]
+            Right-hand operand. May be a tensor with matching shape and device,
+            or a scalar value.
+
+        Returns
+        -------
+        ITensor
+            A float32 tensor with value ``1.0`` where ``self == other``,
+            and ``0.0`` elsewhere.
+
+        Notes
+        -----
+        - This operation does not participate in autograd.
+        - No broadcasting is performed.
+        """
+        ...
+
+    def __ne__(self: ITensor, other: Union["ITensor", Number]) -> "ITensor":
+        """
+        Compute the elementwise not-equal comparison.
+
+        Parameters
+        ----------
+        other : Union[ITensor, Number]
+            Right-hand operand. May be a tensor with matching shape and device,
+            or a scalar value.
+
+        Returns
+        -------
+        ITensor
+            A float32 tensor with value ``1.0`` where ``self != other``,
+            and ``0.0`` elsewhere.
+
+        Notes
+        -----
+        - This operation does not participate in autograd.
+        - No broadcasting is performed.
+        """
+        ...
