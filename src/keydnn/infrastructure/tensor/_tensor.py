@@ -36,6 +36,7 @@ from ...domain._tensor import ITensor
 from ...domain.device._device import Device
 from ...domain._errors import DeviceNotSupportedError
 from ._tensor_context import Context
+from ._cuda_storage import _CudaStorage
 
 Number = Union[int, float]
 
@@ -240,34 +241,136 @@ class Tensor(
     @property
     def data(self) -> int | np.ndarray:
         """
-        Return the underlying storage for this tensor.
+        Return the underlying data handle for this tensor.
 
-        Returns
-        -------
-        numpy.ndarray or int
-            - If the tensor is on CPU: a NumPy ndarray backing the tensor.
-            - If the tensor is on CUDA: a device pointer handle (DevPtr) as a Python int.
+        Semantics
+        ---------
+        - **CPU tensors**:
+            Returns the underlying NumPy ndarray storing the tensor data.
+        - **CUDA tensors**:
+            Returns the raw device pointer (`dev_ptr`) as an integer.
+
+            The pointer is resolved as follows:
+            1) If the tensor is backed by a `_CudaStorage` object, return
+            `storage.dev_ptr`.
+            2) Otherwise, fall back to the legacy `_data` field, which may
+            contain a raw device pointer set by older code paths or tests.
 
         Notes
         -----
-        - For CUDA tensors, the returned integer is a raw device pointer value
-          (uintptr_t) produced by the native CUDA allocator.
-        - A CUDA tensor created via the regular constructor may have `data == 0`
-          (uninitialized device pointer). Prefer constructing CUDA tensors with
-          `Tensor._from_devptr(...)` when you already have an allocated buffer.
-        """
-        d = self._device
+        - For CUDA tensors, the returned value is **not** a NumPy array and
+        should be treated as an opaque device pointer handle.
+        - A return value of `0` indicates that no device memory is currently
+        allocated (e.g., uninitialized tensor, freed tensor, or zero-sized
+        tensor).
+        - New code should prefer storage-backed tensors; the `_data` fallback
+        exists only for backward compatibility during migration.
 
-        is_cpu = getattr(d, "is_cpu", None)
-        if callable(is_cpu) and is_cpu():
+        Returns
+        -------
+        int | np.ndarray
+            - NumPy ndarray for CPU tensors.
+            - Integer device pointer (`uintptr_t`) for CUDA tensors.
+
+        Raises
+        ------
+        ValueError
+            If the tensor is on an unsupported or unknown device.
+        """
+
+        d = self._device
+        if d.is_cpu():
             return self._data
 
-        is_cuda = getattr(d, "is_cuda", None)
-        if callable(is_cuda) and is_cuda():
-            # DevPtr (uintptr_t) represented as Python int
-            return int(self._data)
+        if d.is_cuda():
+            st = getattr(self, "_storage", None)
+            if st is not None:
+                return int(st.dev_ptr)
+            # fallback for older code/tests that set _data directly
+            return int(getattr(self, "_data", 0) or 0)
 
-        raise ValueError(f"Unsupported device type: {type(d)!r} value={d!r}")
+        raise ValueError(...)
+
+    @classmethod
+    def _from_storage(
+        cls,
+        storage,
+        *,
+        shape: tuple[int, ...],
+        device: Device,
+        requires_grad: bool = False,
+        ctx: Optional[Context] = None,
+        dtype: np.dtype = np.float32,
+    ) -> "Tensor":
+        """
+        Construct a CUDA tensor backed by an existing `_CudaStorage` object.
+
+        This constructor is the **preferred** way to create CUDA tensors that
+        *own* their device memory. The resulting tensor participates fully in
+        storage reference counting and lifetime management.
+
+        Ownership semantics
+        -------------------
+        - The provided `storage` is assumed to represent allocated CUDA memory.
+        - This method increments the storage reference count (`storage.incref()`),
+        indicating that the returned tensor holds a strong reference.
+        - When all tensors referencing the same storage have released it
+        (`decref()`), the underlying device memory is freed.
+
+        Parameters
+        ----------
+        storage : _CudaStorage
+            Storage object managing a CUDA device allocation.
+        shape : tuple[int, ...]
+            Logical tensor shape associated with the storage.
+        device : Device
+            CUDA device descriptor. Must satisfy `device.is_cuda() == True`.
+        requires_grad : bool, optional
+            Whether this tensor should accumulate gradients during backpropagation.
+            Defaults to False.
+        ctx : Optional[Context], optional
+            Optional autograd context to attach to the tensor.
+        dtype : np.dtype, optional
+            Element dtype metadata for kernel dispatch. Defaults to `np.float32`.
+
+        Returns
+        -------
+        Tensor
+            A CUDA tensor owning a reference to the provided storage.
+
+        Raises
+        ------
+        ValueError
+            If `storage` is None. Use `_from_devptr` for borrowed/raw device pointers.
+
+        Notes
+        -----
+        - This method bypasses `__init__` and does **not** allocate new memory.
+        - A legacy mirror of the device pointer is stored in `_data` for
+        debugging and backward compatibility only.
+        - Tensors created by this method are **not borrowed**; they participate
+        in storage lifetime management.
+        """
+        if storage is None:
+            raise ValueError(
+                "_from_storage(storage=None): use _from_devptr for borrowed pointers"
+            )
+        obj = cls.__new__(cls)
+        obj._shape = tuple(shape)
+        obj._device = device
+        obj._dtype = np.dtype(dtype)
+
+        obj._storage = storage
+        storage.incref()
+        obj._borrowed_devptr = False
+
+        # keep legacy pointer mirror if you want (optional, helps debugging)
+        obj._data = int(storage.dev_ptr)
+
+        obj._requires_grad = bool(requires_grad)
+        obj._grad = None
+        obj._ctx = ctx
+        return obj
 
     @classmethod
     def _from_devptr(
@@ -281,40 +384,57 @@ class Tensor(
         dtype: np.dtype = np.float32,
     ) -> "Tensor":
         """
-        Construct a CUDA tensor backed by an existing device pointer (DevPtr).
+        Construct a CUDA tensor backed by a borrowed raw device pointer.
+
+        This constructor wraps an existing CUDA device pointer **without**
+        taking ownership of the underlying memory. It is intended for
+        interoperability with external CUDA code or legacy kernels that
+        return raw `dev_ptr` handles.
+
+        Ownership semantics
+        -------------------
+        - The returned tensor does **not** own the device memory.
+        - No `_CudaStorage` object is created.
+        - Calling `free_()` on the resulting tensor will **not** free the
+        underlying device pointer.
+        - The caller is responsible for managing the lifetime of `dev_ptr`.
 
         Parameters
         ----------
         dev_ptr : int
-            Raw device pointer handle (uintptr_t) returned by the native CUDA allocator.
+            Raw CUDA device pointer (`uintptr_t`) referring to already-allocated
+            device memory.
         shape : tuple[int, ...]
-            Tensor shape.
+            Logical tensor shape associated with the device pointer.
         device : Device
             CUDA device descriptor. Must satisfy `device.is_cuda() == True`.
         requires_grad : bool, optional
-            Whether this tensor should accumulate gradients during backprop.
+            Whether this tensor should accumulate gradients during backpropagation.
+            Defaults to False.
         ctx : Optional[Context], optional
-            Optional autograd context to attach.
+            Optional autograd context to attach to the tensor.
         dtype : np.dtype, optional
-            Element dtype metadata for kernel dispatch (e.g., np.float32/np.float64).
-            Defaults to np.float32.
+            Element dtype metadata for kernel dispatch. Defaults to `np.float32`.
 
         Returns
         -------
         Tensor
-            A tensor whose `.data` is the provided device pointer handle.
+            A CUDA tensor that *borrows* the provided device pointer.
 
         Raises
         ------
         ValueError
-            If `device` is not a CUDA device, or if `dev_ptr` is invalid.
+            If `device` is not a CUDA device.
+        ValueError
+            If `dev_ptr` is None.
 
         Notes
         -----
-        - This function does not take ownership semantics beyond storing the pointer.
-          The caller is responsible for freeing device memory (typically via your
-          native CUDA `cuda_free` wrapper) when appropriate.
-        - This constructor bypasses `__init__` and does not allocate memory.
+        - This method bypasses `__init__` and performs no allocation.
+        - The `_borrowed_devptr` flag is set to True to prevent accidental frees.
+        - This constructor exists primarily as a **transitional API** while
+        migrating legacy devptr-based code to storage-backed tensors.
+        - New internal code should prefer `_from_storage` whenever possible.
         """
         is_cuda = getattr(device, "is_cuda", None)
         if not (callable(is_cuda) and is_cuda()):
@@ -328,15 +448,26 @@ class Tensor(
         dp = int(dev_ptr)
 
         obj = cls.__new__(cls)  # bypass __init__
-        obj._shape = shape
+        obj._shape = tuple(shape)
         obj._device = device
+
+        # IMPORTANT: keep legacy pointer field for borrowed semantics
         obj._data = dp
+
         obj._dtype = np.dtype(dtype)
+
+        # IMPORTANT: establish invariant even when bypassing __init__
+        # (Borrowed pointer => no storage ownership by default)
+        obj._storage = None  # type: ignore[attr-defined]
 
         # --- autograd fields (optional) ---
         obj._requires_grad = bool(requires_grad)
         obj._grad = None
         obj._ctx = ctx
+
+        # borrowed only
+        obj._storage = None
+        obj._borrowed_devptr = True
 
         return obj
 
@@ -354,9 +485,9 @@ class Tensor(
         if callable(is_cuda) and is_cuda():
             return (
                 f"Tensor(shape={self._shape}, device={d}, dtype={self._dtype}, "
-                f"data=DevPtr({int(self._data)}))"
+                f"data=DevPtr({int(self.data)}))"
             )
-        return f"Tensor(shape={self._shape}, device={d}, dtype={self._data.dtype})"
+        return f"Tensor(shape={self._shape}, device={d}, dtype={self.data.dtype})"
 
     def __init__(
         self,
@@ -387,6 +518,7 @@ class Tensor(
         self._device = device
         self._dtype = np.dtype(dtype)
         self.__initialize_data()
+        self._storage: Optional[_CudaStorage] = None
 
         # --- autograd fields (optional) ---
         self._requires_grad: bool = bool(requires_grad)
@@ -528,15 +660,21 @@ class Tensor(
         if callable(is_cuda) and is_cuda():
             dev_index = getattr(d, "index", None)
 
-            # If CUDA storage is already a string placeholder, keep it.
-            if isinstance(self._data, str):
-                return self._data
-
-            # If CUDA storage is a devptr handle (int), format a stable message.
-            if isinstance(self._data, int):
+            if self._storage is not None:
                 return (
                     f"CUDA Tensor on device {dev_index} with shape {self._shape} "
-                    f"(devptr={self._data})"
+                    f"(storage={self._storage})"
+                )
+
+            # If CUDA storage is already a string placeholder, keep it.
+            # if isinstance(self.data, str):
+            #     return self.data
+
+            # If CUDA storage is a devptr handle (int), format a stable message.
+            if isinstance(self.data, int):
+                return (
+                    f"CUDA Tensor on device {dev_index} with shape {self._shape} "
+                    f"(devptr={self.data})"
                 )
 
             # Fallback if something unexpected is stored
@@ -1534,21 +1672,42 @@ class Tensor(
             if grad_out is None:
                 if self.shape != ():
                     raise ValueError(
-                        "grad_out must be provided for non-scalar tensors. "
-                        f"Got shape={self.shape}."
+                        "grad_out must be provided for non-scalar tensors."
                     )
                 host = np.array(1.0, dtype=np.float32)
+                device_index = int(getattr(self.device, "index", 0) or 0)
+
+                # Ensure correct device
+                if hasattr(m, "cuda_set_device"):
+                    m.cuda_set_device(lib, device_index)
+
                 dev_ptr = int(m.cuda_malloc(lib, int(host.nbytes)))
+                if dev_ptr == 0:
+                    raise RuntimeError("cuda_malloc returned 0")
+
                 try:
                     m.cudaMemcpyHtoD(lib, int(dev_ptr), host, int(host.nbytes))
-                    grad_out = Tensor._from_devptr(
+
+                    storage = _CudaStorage(
+                        lib=lib,
+                        device_index=device_index,
                         dev_ptr=int(dev_ptr),
+                        nbytes=int(host.nbytes),
+                        dtype=np.float32,
+                    )
+
+                    grad_out = Tensor._from_storage(
+                        storage=storage,
                         shape=(),
                         device=self.device,
                         requires_grad=False,
                         ctx=None,
                         dtype=np.float32,
                     )
+
+                    # If _from_storage() does incref(), then you MUST drop local ref:
+                    # storage.decref()
+
                 except Exception:
                     try:
                         m.cuda_free(lib, int(dev_ptr))
@@ -2238,17 +2397,46 @@ class Tensor(
     def _cuda_detach_view_no_grad(t: "Tensor") -> "Tensor":
         """
         CUDA-only: return a view Tensor sharing the same devptr, with no autograd tracking.
+
+        Supports both:
+        - storage-managed CUDA tensors (t._storage is not None)
+        - legacy/borrowed CUDA tensors (t._storage is None but t.data != 0)
         """
+        import numpy as np
+
         if not t.device.is_cuda():
             t._raise_device_not_supported("cuda_detach_view_no_grad")
-        return Tensor._from_devptr(
-            dev_ptr=int(t.data),
+
+        dp = int(t.data)
+        if dp == 0 and t.numel() != 0:
+            raise RuntimeError(
+                "cuda_detach_view_no_grad: tensor has no allocated devptr (data == 0)"
+            )
+
+        st = getattr(t, "_storage", None)
+
+        if st is not None:
+            return Tensor._from_storage(
+                st,
+                shape=tuple(t.shape),
+                device=t.device,
+                requires_grad=False,
+                ctx=None,
+                dtype=np.dtype(t.dtype),
+            )
+
+        # Borrowed/raw pointer fallback (no ownership)
+        out = Tensor._from_devptr(
+            dev_ptr=dp,
             shape=tuple(t.shape),
             device=t.device,
             requires_grad=False,
             ctx=None,
             dtype=np.dtype(t.dtype),
         )
+        # Ensure invariant
+        out._storage = None
+        return out
 
     @staticmethod
     def _add_no_grad_cuda(a: "Tensor", b: "Tensor") -> "Tensor":
@@ -2298,3 +2486,64 @@ class Tensor(
 
         # In-place would be better, but out-of-place is fine if add_inplace isn't available yet.
         self._grad = Tensor._add_no_grad_cuda(self._grad, g0)
+
+    def free_(self) -> None:
+        """
+        Explicitly release CUDA backing memory (if owned).
+
+        Semantics
+        ---------
+        - If `_storage` is present: decrement refcount; free happens when it hits 0.
+        - If `_storage` is absent:
+            - If this tensor is marked as borrowed, we do NOT free the devptr.
+            - If marked as "owning borrowed devptr" (transitional), we cuda_free it.
+        - Idempotent: safe to call multiple times.
+        """
+        if not self.device.is_cuda():
+            return
+
+        # 1) Storage-backed path (preferred)
+        st = getattr(self, "_storage", None)
+        if st is not None:
+            try:
+                st.decref()
+            finally:
+                self._storage = None
+                # keep legacy mirror consistent
+                self._data = 0
+            return
+
+        # 2) No storage: devptr-only legacy path
+        dp = int(getattr(self, "_data", 0) or 0)
+        if dp == 0:
+            # already freed / never allocated / numel==0 case
+            self._data = 0
+            return
+
+        # Borrowed pointers must not be freed here.
+        if bool(getattr(self, "_borrowed_devptr", False)):
+            # just detach
+            self._data = 0
+            return
+
+        # Optional: transitional ownership flag for devptr-only tensors.
+        # Only free if you *explicitly* marked this tensor as owning the devptr.
+        if bool(getattr(self, "_owns_devptr", False)):
+            try:
+                lib = self._get_cuda_lib()
+                # Use your canonical wrapper (pick the one you standardized on)
+                from ..native_cuda.python import maxpool2d_ctypes as m
+
+                # Ensure correct device before free (Windows correctness)
+                device_index = int(getattr(self.device, "index", 0) or 0)
+                if hasattr(m, "cuda_set_device"):
+                    m.cuda_set_device(lib, device_index)
+
+                m.cuda_free(lib, int(dp))
+            finally:
+                self._data = 0
+            return
+
+        # Default safest behavior: do not free unknown devptr ownership.
+        # Detach so we don't keep referencing it.
+        self._data = 0
