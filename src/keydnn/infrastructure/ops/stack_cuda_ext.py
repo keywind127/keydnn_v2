@@ -48,6 +48,7 @@ from typing import Sequence, List, Tuple
 import numpy as np
 
 from ..tensor._tensor import Tensor
+from ..tensor._cuda_storage import _CudaStorage
 from .pool2d_cuda import _load_cuda_lib, cuda_set_device, cuda_malloc, cuda_free
 from ..native_cuda.python.stack_ctypes import (
     stack_forward_cuda as _stack_fwd,
@@ -254,6 +255,7 @@ def stack_forward(
         raise ValueError("stack_forward requires a non-empty sequence")
 
     first = tensors[0]
+    device_index: int = first.device.index
     _require_cuda(first, "tensors[0]")
     dt = _require_f32_f64(first, "tensors[0]")
 
@@ -288,6 +290,14 @@ def stack_forward(
     nbytes_y = int(_prod(out_shape) * np.dtype(dt).itemsize)
     y_dev = cuda_malloc(lib, nbytes_y)
 
+    storage_yd = _CudaStorage(
+        lib=lib,
+        device_index=device_index,
+        dev_ptr=int(y_dev),
+        nbytes=int(nbytes_y),
+        dtype=dt,
+    )
+
     xs_ptrs_dev = 0
     try:
         xs_dev_ptrs = [int(t.data) for t in tensors]
@@ -305,8 +315,15 @@ def stack_forward(
             debug_verify_ptrs=bool(debug_verify_ptrs),
         )
 
-        out = Tensor._from_devptr(
-            int(y_dev),
+        # out = Tensor._from_devptr(
+        #     int(y_dev),
+        #     shape=out_shape,
+        #     dtype=dt,
+        #     device=dev,
+        #     requires_grad=False,
+        # )
+        out = Tensor._from_storage(
+            storage_yd,
             shape=out_shape,
             dtype=dt,
             device=dev,
@@ -315,7 +332,8 @@ def stack_forward(
         return out
 
     except Exception:
-        cuda_free(lib, y_dev)
+        # cuda_free(lib, y_dev)
+        storage_yd.decref()
         raise
 
     finally:
@@ -382,6 +400,7 @@ def stack_backward(
     The underlying kernel overwrites each `dx` buffer (no accumulation). If your
     autograd requires accumulation, accumulate at a higher level.
     """
+    device_index: int = grad_out.device.index
     _require_cuda(grad_out, "grad_out")
     dt = _require_f32_f64(grad_out, "grad_out")
 
@@ -403,9 +422,19 @@ def stack_backward(
     # allocate each dx
     nbytes_dx = int(_prod(x_shape) * np.dtype(dt).itemsize)
     dx_devs: List[DevPtr] = []
+    storage_dx_devs: List[_CudaStorage] = []
     try:
         for _ in range(int(K)):
             dx_devs.append(cuda_malloc(lib, nbytes_dx))
+            storage_dx_devs.append(
+                _CudaStorage(
+                    lib=lib,
+                    device_index=device_index,
+                    dev_ptr=int(dx_devs[-1]),
+                    nbytes=int(nbytes_dx),
+                    dtype=dt,
+                )
+            )
 
         # IMPORTANT: default sync=False to avoid sync-storms.
         dxs_ptrs_dev = _stack_bwd(
@@ -420,8 +449,15 @@ def stack_backward(
         )
 
         grads: List[Tensor] = [
-            Tensor._from_devptr(
-                int(dx_devs[i]),
+            # Tensor._from_devptr(
+            #     int(dx_devs[i]),
+            #     shape=x_shape,
+            #     dtype=dt,
+            #     device=grad_out.device,
+            #     requires_grad=False,
+            # )
+            Tensor._from_storage(
+                storage_dx_devs[i],
                 shape=x_shape,
                 dtype=dt,
                 device=grad_out.device,
@@ -433,8 +469,10 @@ def stack_backward(
 
     except Exception:
         # if failure, free allocated dx buffers
-        for p in dx_devs:
-            cuda_free(lib, int(p))
+        # for p in dx_devs:
+        #     cuda_free(lib, int(p))
+        for p in storage_dx_devs:
+            p.decref()
         raise
 
     finally:
