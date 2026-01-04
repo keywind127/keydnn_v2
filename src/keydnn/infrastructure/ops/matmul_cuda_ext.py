@@ -152,7 +152,8 @@ def matmul2d_forward(
 
     except Exception:
         # Only free if we failed before handing ownership to Tensor
-        cuda_free(lib, c_dev)
+        # cuda_free(lib, c_dev)
+        storage.decref()
         raise
 
 

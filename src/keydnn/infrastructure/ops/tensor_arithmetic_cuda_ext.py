@@ -274,13 +274,6 @@ def neg(x: Tensor, *, device: int = 0) -> Tensor:
 
     try:
         _neg_cuda(lib, x_dev=int(x.data), y_dev=int(y_dev), n=int(n), dtype=dt)
-        # return Tensor._from_devptr(
-        #     int(y_dev),
-        #     shape=tuple(x.shape),
-        #     dtype=dt,
-        #     device=x.device,
-        #     requires_grad=False,
-        # )
         return Tensor._from_storage(
             storage_yd,
             shape=tuple(x.shape),
@@ -289,7 +282,6 @@ def neg(x: Tensor, *, device: int = 0) -> Tensor:
             requires_grad=False,
         )
     except Exception:
-        # cuda_free(lib, y_dev)
         storage_yd.decref()
         raise
 
@@ -351,13 +343,6 @@ def add(a: Tensor, b: Tensor, *, device: int = 0) -> Tensor:
             n=int(n),
             dtype=dt,
         )
-        # return Tensor._from_devptr(
-        #     int(y_dev),
-        #     shape=tuple(a.shape),
-        #     dtype=dt,
-        #     device=a.device,
-        #     requires_grad=False,
-        # )
         return Tensor._from_storage(
             storage_yd,
             shape=tuple(a.shape),
@@ -366,7 +351,6 @@ def add(a: Tensor, b: Tensor, *, device: int = 0) -> Tensor:
             requires_grad=False,
         )
     except Exception:
-        # cuda_free(lib, y_dev)
         storage_yd.decref()
         raise
 
@@ -416,13 +400,6 @@ def sub(a: Tensor, b: Tensor, *, device: int = 0) -> Tensor:
             n=int(n),
             dtype=dt,
         )
-        # return Tensor._from_devptr(
-        #     int(y_dev),
-        #     shape=tuple(a.shape),
-        #     dtype=dt,
-        #     device=a.device,
-        #     requires_grad=False,
-        # )
         return Tensor._from_storage(
             storage_yd,
             shape=tuple(a.shape),
@@ -431,7 +408,6 @@ def sub(a: Tensor, b: Tensor, *, device: int = 0) -> Tensor:
             requires_grad=False,
         )
     except Exception:
-        # cuda_free(lib, y_dev)
         storage_yd.decref()
         raise
 
@@ -481,13 +457,6 @@ def div(a: Tensor, b: Tensor, *, device: int = 0) -> Tensor:
             n=int(n),
             dtype=dt,
         )
-        # return Tensor._from_devptr(
-        #     int(y_dev),
-        #     shape=tuple(a.shape),
-        #     dtype=dt,
-        #     device=a.device,
-        #     requires_grad=False,
-        # )
         return Tensor._from_storage(
             storage_yd,
             shape=tuple(a.shape),
@@ -496,7 +465,6 @@ def div(a: Tensor, b: Tensor, *, device: int = 0) -> Tensor:
             requires_grad=False,
         )
     except Exception:
-        # cuda_free(lib, y_dev)
         storage_yd.decref()
         raise
 
@@ -550,13 +518,6 @@ def gt(a: Tensor, b: Tensor, *, device: int = 0) -> Tensor:
             n=int(n),
             dtype=dt_in,
         )
-        # return Tensor._from_devptr(
-        #     int(y_dev),
-        #     shape=tuple(a.shape),
-        #     dtype=out_dt,
-        #     device=a.device,
-        #     requires_grad=False,
-        # )
         return Tensor._from_storage(
             storage_yd,
             shape=tuple(a.shape),
@@ -565,7 +526,6 @@ def gt(a: Tensor, b: Tensor, *, device: int = 0) -> Tensor:
             requires_grad=False,
         )
     except Exception:
-        # cuda_free(lib, y_dev)
         storage_yd.decref()
         raise
 
@@ -606,13 +566,6 @@ def add_scalar(a: Tensor, alpha: float, *, device: int = 0) -> Tensor:
             n=int(n),
             dtype=dt,
         )
-        # return Tensor._from_devptr(
-        #     int(y_dev),
-        #     shape=tuple(a.shape),
-        #     dtype=dt,
-        #     device=a.device,
-        #     requires_grad=False,
-        # )
         return Tensor._from_storage(
             storage_yd,
             shape=tuple(a.shape),
@@ -621,7 +574,6 @@ def add_scalar(a: Tensor, alpha: float, *, device: int = 0) -> Tensor:
             requires_grad=False,
         )
     except Exception:
-        # cuda_free(lib, y_dev)
         storage_yd.decref()
         raise
 
@@ -662,13 +614,6 @@ def sub_scalar(a: Tensor, alpha: float, *, device: int = 0) -> Tensor:
             n=int(n),
             dtype=dt,
         )
-        # return Tensor._from_devptr(
-        #     int(y_dev),
-        #     shape=tuple(a.shape),
-        #     dtype=dt,
-        #     device=a.device,
-        #     requires_grad=False,
-        # )
         return Tensor._from_storage(
             storage_yd,
             shape=tuple(a.shape),
@@ -677,7 +622,6 @@ def sub_scalar(a: Tensor, alpha: float, *, device: int = 0) -> Tensor:
             requires_grad=False,
         )
     except Exception:
-        # cuda_free(lib, y_dev)
         storage_yd.decref()
         raise
 
@@ -718,13 +662,6 @@ def div_scalar(a: Tensor, alpha: float, *, device: int = 0) -> Tensor:
             n=int(n),
             dtype=dt,
         )
-        # return Tensor._from_devptr(
-        #     int(y_dev),
-        #     shape=tuple(a.shape),
-        #     dtype=dt,
-        #     device=a.device,
-        #     requires_grad=False,
-        # )
         return Tensor._from_storage(
             storage_yd,
             shape=tuple(a.shape),
@@ -733,7 +670,6 @@ def div_scalar(a: Tensor, alpha: float, *, device: int = 0) -> Tensor:
             requires_grad=False,
         )
     except Exception:
-        # cuda_free(lib, y_dev)
         storage_yd.decref()
         raise
 

@@ -220,13 +220,6 @@ def _cmp_binary_out_of_place(
             n=int(n),
             dtype=dt_in,
         )
-        # return Tensor._from_devptr(
-        #     int(y_dev),
-        #     shape=tuple(a.shape),
-        #     dtype=out_dt,
-        #     device=a.device,
-        #     requires_grad=False,
-        # )
         return Tensor._from_storage(
             storage_yd,
             shape=tuple(a.shape),
@@ -235,7 +228,6 @@ def _cmp_binary_out_of_place(
             requires_grad=False,
         )
     except Exception:
-        # cuda_free(lib, y_dev)
         storage_yd.decref()
         raise
 
@@ -280,13 +272,6 @@ def _cmp_scalar_out_of_place(
             n=int(n),
             dtype=dt_in,
         )
-        # return Tensor._from_devptr(
-        #     int(y_dev),
-        #     shape=tuple(a.shape),
-        #     dtype=out_dt,
-        #     device=a.device,
-        #     requires_grad=False,
-        # )
         return Tensor._from_storage(
             storage_yd,
             shape=tuple(a.shape),
@@ -295,7 +280,6 @@ def _cmp_scalar_out_of_place(
             requires_grad=False,
         )
     except Exception:
-        # cuda_free(lib, y_dev)
         storage_yd.decref()
         raise
 

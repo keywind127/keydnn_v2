@@ -207,6 +207,7 @@ def sum(self: ITensor, axis: Optional[int] = None, keepdims: bool = False) -> "I
                 A single-element tuple containing the gradient with respect
                 to the input tensor.
             """
+            device_index: int = grad_out.device.index
             if not grad_out.device.is_cuda():
                 raise RuntimeError("grad_out must be CUDA for CUDA Tensor.sum backward")
 
@@ -245,9 +246,19 @@ def sum(self: ITensor, axis: Optional[int] = None, keepdims: bool = False) -> "I
                 nbytes = int(n) * int(np.dtype(dtype).itemsize)
                 go_dev = int(cuda_malloc(lib, int(nbytes)))
 
+                from ....tensor._cuda_storage import _CudaStorage
+
+                storage_gd = _CudaStorage(
+                    lib=lib,
+                    device_index=device_index,
+                    dev_ptr=int(go_dev),
+                    nbytes=int(nbytes),
+                    dtype=np.dtype(dtype),
+                )
+
                 # Prefer dedicated wrapper if present; else bind DLL symbol.
                 try:
-                    from ..native_cuda.python.ops import memcpy_ctypes as mc  # type: ignore
+                    from ....native_cuda.python.ops import memcpy_ctypes as mc
 
                     if hasattr(mc, "cuda_memcpy_d2d"):
                         mc.cuda_memcpy_d2d(
@@ -286,9 +297,8 @@ def sum(self: ITensor, axis: Optional[int] = None, keepdims: bool = False) -> "I
                             f"keydnn_cuda_memcpy_d2d failed with status={st}"
                         )
 
-                # Wrap as a 1D CUDA Tensor (Tensor takes ownership of go_dev)
-                go = Tensor._from_devptr(
-                    int(go_dev),
+                go = Tensor._from_storage(
+                    storage_gd,
                     shape=squeezed_shape,
                     dtype=np.dtype(dtype),
                     device=self.device,

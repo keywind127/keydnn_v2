@@ -315,13 +315,6 @@ def stack_forward(
             debug_verify_ptrs=bool(debug_verify_ptrs),
         )
 
-        # out = Tensor._from_devptr(
-        #     int(y_dev),
-        #     shape=out_shape,
-        #     dtype=dt,
-        #     device=dev,
-        #     requires_grad=False,
-        # )
         out = Tensor._from_storage(
             storage_yd,
             shape=out_shape,
@@ -332,7 +325,6 @@ def stack_forward(
         return out
 
     except Exception:
-        # cuda_free(lib, y_dev)
         storage_yd.decref()
         raise
 
@@ -449,13 +441,6 @@ def stack_backward(
         )
 
         grads: List[Tensor] = [
-            # Tensor._from_devptr(
-            #     int(dx_devs[i]),
-            #     shape=x_shape,
-            #     dtype=dt,
-            #     device=grad_out.device,
-            #     requires_grad=False,
-            # )
             Tensor._from_storage(
                 storage_dx_devs[i],
                 shape=x_shape,
@@ -468,9 +453,6 @@ def stack_backward(
         return grads
 
     except Exception:
-        # if failure, free allocated dx buffers
-        # for p in dx_devs:
-        #     cuda_free(lib, int(p))
         for p in storage_dx_devs:
             p.decref()
         raise

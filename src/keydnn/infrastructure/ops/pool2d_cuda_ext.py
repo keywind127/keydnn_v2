@@ -165,13 +165,6 @@ def maxpool2d_forward(
                 sync=True,
             )
 
-            # y = Tensor._from_devptr(
-            #     int(y_dev),
-            #     shape=(N, C, H_out, W_out),
-            #     dtype=dt,
-            #     device=x.device,
-            #     requires_grad=False,
-            # )
             y = Tensor._from_storage(
                 storage_yd,
                 shape=(N, C, H_out, W_out),
@@ -179,18 +172,14 @@ def maxpool2d_forward(
                 device=x.device,
                 requires_grad=False,
             )
-            # return y, int(argmax_idx_dev)
             return y, storage_aid
 
         except Exception:
-            # cuda_free(lib, y_dev)
-            # cuda_free(lib, argmax_idx_dev)
             storage_yd.decref()
             storage_aid.decref()
             raise
 
     finally:
-        # cuda_free(lib, x_pad_dev)
         storage_xpd.decref()
 
 
@@ -291,14 +280,6 @@ def maxpool2d_backward(
             sync=True,
         )
 
-        # return Tensor._from_devptr(
-        #     int(grad_x_dev),
-        #     shape=(N, C, H, W),
-        #     dtype=dt,
-        #     device=grad_out.device,
-        #     requires_grad=False,
-        # )
-
         return Tensor._from_storage(
             storage_gxd,
             shape=(N, C, H, W),
@@ -308,12 +289,10 @@ def maxpool2d_backward(
         )
 
     except Exception:
-        # cuda_free(lib, grad_x_dev)
         storage_gxd.decref()
         raise
 
     finally:
-        # cuda_free(lib, grad_x_pad_dev)
         storage_gxpd.decref()
 
 
@@ -417,14 +396,6 @@ def avgpool2d_forward(
                 sync=True,
             )
 
-            # return Tensor._from_devptr(
-            #     int(y_dev),
-            #     shape=(N, C, H_out, W_out),
-            #     dtype=dt,
-            #     device=x.device,
-            #     requires_grad=False,
-            # )
-
             return Tensor._from_storage(
                 storage_yd,
                 shape=(N, C, H_out, W_out),
@@ -434,12 +405,10 @@ def avgpool2d_forward(
             )
 
         except Exception:
-            # cuda_free(lib, y_dev)
             storage_yd.decref()
             raise
 
     finally:
-        # cuda_free(lib, x_pad_dev)
         storage_xpd.decref()
 
 
@@ -536,14 +505,6 @@ def avgpool2d_backward(
             sync=True,
         )
 
-        # return Tensor._from_devptr(
-        #     int(grad_x_dev),
-        #     shape=(N, C, H, W),
-        #     dtype=dt,
-        #     device=grad_out.device,
-        #     requires_grad=False,
-        # )
-
         return Tensor._from_storage(
             storage_gxd,
             shape=(N, C, H, W),
@@ -553,12 +514,10 @@ def avgpool2d_backward(
         )
 
     except Exception:
-        # cuda_free(lib, grad_x_dev)
         storage_gxd.decref()
         raise
 
     finally:
-        # cuda_free(lib, grad_x_pad_dev)
         storage_gxpd.decref()
 
 
@@ -599,14 +558,6 @@ def global_avgpool2d_forward(x: Tensor, *, device: int = 0) -> Tensor:
             sync=True,
         )
 
-        # return Tensor._from_devptr(
-        #     int(y_dev),
-        #     shape=(N, C, 1, 1),
-        #     dtype=dt,
-        #     device=x.device,
-        #     requires_grad=False,
-        # )
-
         return Tensor._from_storage(
             storage_yd,
             shape=(N, C, 1, 1),
@@ -615,7 +566,6 @@ def global_avgpool2d_forward(x: Tensor, *, device: int = 0) -> Tensor:
             requires_grad=False,
         )
     except Exception:
-        # cuda_free(lib, y_dev)
         storage_yd.decref()
         raise
 
@@ -658,14 +608,6 @@ def global_avgpool2d_backward(grad_out: Tensor, *, x_shape, device: int = 0) -> 
             sync=True,
         )
 
-        # return Tensor._from_devptr(
-        #     int(gx_dev),
-        #     shape=(N, C, H, W),
-        #     dtype=dt,
-        #     device=grad_out.device,
-        #     requires_grad=False,
-        # )
-
         return Tensor._from_storage(
             storage_gx,
             shape=(N, C, H, W),
@@ -675,6 +617,5 @@ def global_avgpool2d_backward(grad_out: Tensor, *, x_shape, device: int = 0) -> 
         )
 
     except Exception:
-        # cuda_free(lib, gx_dev)
         storage_gx.decref()
         raise

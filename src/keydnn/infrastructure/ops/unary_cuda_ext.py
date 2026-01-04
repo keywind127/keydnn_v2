@@ -119,15 +119,6 @@ def exp_forward(x: Tensor, *, device: int = 0, sync: bool = True) -> Tensor:
             dtype=np.dtype(dt),
             sync=bool(sync),
         )
-
-        # return Tensor._from_devptr(
-        #     int(y_dev),
-        #     shape=tuple(int(d) for d in x.shape),
-        #     dtype=dt,
-        #     device=x.device,
-        #     requires_grad=False,
-        # )
-
         return Tensor._from_storage(
             storage_yd,
             shape=tuple(int(d) for d in x.shape),
@@ -137,7 +128,6 @@ def exp_forward(x: Tensor, *, device: int = 0, sync: bool = True) -> Tensor:
         )
 
     except Exception:
-        # cuda_free(lib, y_dev)
         storage_yd.decref()
         raise
 
