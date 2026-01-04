@@ -226,8 +226,8 @@ def maxpool2d_backward(
     nbytes_gx = int(N * C * H * W * np.dtype(dt).itemsize)
     grad_x_dev = cuda_malloc(lib, nbytes_gx)
 
-    assert grad_x_dev is not 0
-    assert grad_x_pad_dev is not 0
+    assert grad_x_dev != 0
+    assert grad_x_pad_dev != 0
 
     from ..tensor._cuda_storage import _CudaStorage
 
@@ -335,7 +335,7 @@ def avgpool2d_forward(
     nbytes_x_pad = int(N * C * H_pad * W_pad * np.dtype(dt).itemsize)
     x_pad_dev = cuda_malloc(lib, nbytes_x_pad)
 
-    assert x_pad_dev is not 0
+    assert x_pad_dev != 0
 
     from ..tensor._cuda_storage import _CudaStorage
 
@@ -367,7 +367,7 @@ def avgpool2d_forward(
         nbytes_y = int(N * C * H_out * W_out * np.dtype(dt).itemsize)
         y_dev = cuda_malloc(lib, nbytes_y)
 
-        assert y_dev is not 0
+        assert y_dev != 0
 
         storage_yd = _CudaStorage(
             lib=lib,
