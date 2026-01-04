@@ -550,8 +550,8 @@ class SoftmaxFn(Function):
         RuntimeError
             If the operation is not supported on the tensor's device.
         """
-        if not x.device.is_cpu():
-            x._raise_device_not_supported("softmax")
+        # if not x.device.is_cpu():
+        #     x._raise_device_not_supported("softmax")
 
         # Normalize axis
         ndim = len(x.shape)
