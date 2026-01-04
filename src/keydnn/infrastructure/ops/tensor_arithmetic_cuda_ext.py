@@ -65,6 +65,7 @@ from typing import Tuple
 import numpy as np
 
 from ..tensor._tensor import Tensor
+from ..tensor._cuda_storage import _CudaStorage
 from ..native_cuda.python.ops.tensor_arithmetic_ctypes import (
     neg_cuda as _neg_cuda,
     add_cuda as _add_cuda,
@@ -249,6 +250,7 @@ def neg(x: Tensor, *, device: int = 0) -> Tensor:
     Tensor
         New CUDA tensor containing the result.
     """
+    device_index: int = x.device.index
     _require_cuda(x, "x")
     dt = _require_f32_f64(x, "x")
 
@@ -262,17 +264,33 @@ def neg(x: Tensor, *, device: int = 0) -> Tensor:
     nbytes = int(n * np.dtype(dt).itemsize)
     y_dev = cuda_malloc(lib, nbytes)
 
+    storage_yd = _CudaStorage(
+        lib=lib,
+        device_index=device_index,
+        dev_ptr=int(y_dev),
+        nbytes=int(nbytes),
+        dtype=dt,
+    )
+
     try:
         _neg_cuda(lib, x_dev=int(x.data), y_dev=int(y_dev), n=int(n), dtype=dt)
-        return Tensor._from_devptr(
-            int(y_dev),
+        # return Tensor._from_devptr(
+        #     int(y_dev),
+        #     shape=tuple(x.shape),
+        #     dtype=dt,
+        #     device=x.device,
+        #     requires_grad=False,
+        # )
+        return Tensor._from_storage(
+            storage_yd,
             shape=tuple(x.shape),
             dtype=dt,
             device=x.device,
             requires_grad=False,
         )
     except Exception:
-        cuda_free(lib, y_dev)
+        # cuda_free(lib, y_dev)
+        storage_yd.decref()
         raise
 
 
@@ -294,6 +312,7 @@ def add(a: Tensor, b: Tensor, *, device: int = 0) -> Tensor:
     Tensor
         New CUDA tensor containing the result.
     """
+    device_index: int = a.device.index
     _require_cuda(a, "a")
     _require_cuda(b, "b")
     _require_same_device(a, b)
@@ -314,6 +333,14 @@ def add(a: Tensor, b: Tensor, *, device: int = 0) -> Tensor:
 
     nbytes = int(n * np.dtype(dt).itemsize)
     y_dev = cuda_malloc(lib, nbytes)
+
+    storage_yd = _CudaStorage(
+        lib=lib,
+        device_index=device_index,
+        dev_ptr=int(y_dev),
+        nbytes=int(nbytes),
+        dtype=dt,
+    )
 
     try:
         _add_cuda(
@@ -324,15 +351,23 @@ def add(a: Tensor, b: Tensor, *, device: int = 0) -> Tensor:
             n=int(n),
             dtype=dt,
         )
-        return Tensor._from_devptr(
-            int(y_dev),
+        # return Tensor._from_devptr(
+        #     int(y_dev),
+        #     shape=tuple(a.shape),
+        #     dtype=dt,
+        #     device=a.device,
+        #     requires_grad=False,
+        # )
+        return Tensor._from_storage(
+            storage_yd,
             shape=tuple(a.shape),
             dtype=dt,
             device=a.device,
             requires_grad=False,
         )
     except Exception:
-        cuda_free(lib, y_dev)
+        # cuda_free(lib, y_dev)
+        storage_yd.decref()
         raise
 
 
@@ -342,6 +377,7 @@ def sub(a: Tensor, b: Tensor, *, device: int = 0) -> Tensor:
 
     Computes `y = a - b`.
     """
+    device_index: int = a.device.index
     _require_cuda(a, "a")
     _require_cuda(b, "b")
     _require_same_device(a, b)
@@ -362,6 +398,14 @@ def sub(a: Tensor, b: Tensor, *, device: int = 0) -> Tensor:
 
     nbytes = int(n * np.dtype(dt).itemsize)
     y_dev = cuda_malloc(lib, nbytes)
+
+    storage_yd = _CudaStorage(
+        lib=lib,
+        device_index=device_index,
+        dev_ptr=int(y_dev),
+        nbytes=int(nbytes),
+        dtype=dt,
+    )
 
     try:
         _sub_cuda(
@@ -372,15 +416,23 @@ def sub(a: Tensor, b: Tensor, *, device: int = 0) -> Tensor:
             n=int(n),
             dtype=dt,
         )
-        return Tensor._from_devptr(
-            int(y_dev),
+        # return Tensor._from_devptr(
+        #     int(y_dev),
+        #     shape=tuple(a.shape),
+        #     dtype=dt,
+        #     device=a.device,
+        #     requires_grad=False,
+        # )
+        return Tensor._from_storage(
+            storage_yd,
             shape=tuple(a.shape),
             dtype=dt,
             device=a.device,
             requires_grad=False,
         )
     except Exception:
-        cuda_free(lib, y_dev)
+        # cuda_free(lib, y_dev)
+        storage_yd.decref()
         raise
 
 
@@ -390,6 +442,7 @@ def div(a: Tensor, b: Tensor, *, device: int = 0) -> Tensor:
 
     Computes `y = a / b`.
     """
+    device_index: int = a.device.index
     _require_cuda(a, "a")
     _require_cuda(b, "b")
     _require_same_device(a, b)
@@ -411,6 +464,14 @@ def div(a: Tensor, b: Tensor, *, device: int = 0) -> Tensor:
     nbytes = int(n * np.dtype(dt).itemsize)
     y_dev = cuda_malloc(lib, nbytes)
 
+    storage_yd = _CudaStorage(
+        lib=lib,
+        device_index=device_index,
+        dev_ptr=int(y_dev),
+        nbytes=int(nbytes),
+        dtype=dt,
+    )
+
     try:
         _div_cuda(
             lib,
@@ -420,15 +481,23 @@ def div(a: Tensor, b: Tensor, *, device: int = 0) -> Tensor:
             n=int(n),
             dtype=dt,
         )
-        return Tensor._from_devptr(
-            int(y_dev),
+        # return Tensor._from_devptr(
+        #     int(y_dev),
+        #     shape=tuple(a.shape),
+        #     dtype=dt,
+        #     device=a.device,
+        #     requires_grad=False,
+        # )
+        return Tensor._from_storage(
+            storage_yd,
             shape=tuple(a.shape),
             dtype=dt,
             device=a.device,
             requires_grad=False,
         )
     except Exception:
-        cuda_free(lib, y_dev)
+        # cuda_free(lib, y_dev)
+        storage_yd.decref()
         raise
 
 
@@ -442,6 +511,7 @@ def gt(a: Tensor, b: Tensor, *, device: int = 0) -> Tensor:
     -----
     The output dtype is always float32, regardless of input dtype.
     """
+    device_index: int = a.device.index
     _require_cuda(a, "a")
     _require_cuda(b, "b")
     _require_same_device(a, b)
@@ -463,6 +533,14 @@ def gt(a: Tensor, b: Tensor, *, device: int = 0) -> Tensor:
 
     y_dev = cuda_malloc(lib, int(n * np.dtype(out_dt).itemsize))
 
+    storage_yd = _CudaStorage(
+        lib=lib,
+        device_index=device_index,
+        dev_ptr=int(y_dev),
+        nbytes=int(n * np.dtype(out_dt).itemsize),
+        dtype=out_dt,
+    )
+
     try:
         _gt_cuda(
             lib,
@@ -472,15 +550,23 @@ def gt(a: Tensor, b: Tensor, *, device: int = 0) -> Tensor:
             n=int(n),
             dtype=dt_in,
         )
-        return Tensor._from_devptr(
-            int(y_dev),
+        # return Tensor._from_devptr(
+        #     int(y_dev),
+        #     shape=tuple(a.shape),
+        #     dtype=out_dt,
+        #     device=a.device,
+        #     requires_grad=False,
+        # )
+        return Tensor._from_storage(
+            storage_yd,
             shape=tuple(a.shape),
             dtype=out_dt,
             device=a.device,
             requires_grad=False,
         )
     except Exception:
-        cuda_free(lib, y_dev)
+        # cuda_free(lib, y_dev)
+        storage_yd.decref()
         raise
 
 
@@ -490,6 +576,7 @@ def add_scalar(a: Tensor, alpha: float, *, device: int = 0) -> Tensor:
 
     Computes `y = a + alpha`.
     """
+    device_index: int = a.device.index
     _require_cuda(a, "a")
     dt = _require_f32_f64(a, "a")
 
@@ -501,6 +588,14 @@ def add_scalar(a: Tensor, alpha: float, *, device: int = 0) -> Tensor:
     cuda_set_device(lib, int(device))
 
     y_dev = cuda_malloc(lib, int(n * np.dtype(dt).itemsize))
+
+    storage_yd = _CudaStorage(
+        lib=lib,
+        device_index=device_index,
+        dev_ptr=int(y_dev),
+        nbytes=int(n * np.dtype(dt).itemsize),
+        dtype=dt,
+    )
 
     try:
         _add_scalar_cuda(
@@ -511,15 +606,23 @@ def add_scalar(a: Tensor, alpha: float, *, device: int = 0) -> Tensor:
             n=int(n),
             dtype=dt,
         )
-        return Tensor._from_devptr(
-            int(y_dev),
+        # return Tensor._from_devptr(
+        #     int(y_dev),
+        #     shape=tuple(a.shape),
+        #     dtype=dt,
+        #     device=a.device,
+        #     requires_grad=False,
+        # )
+        return Tensor._from_storage(
+            storage_yd,
             shape=tuple(a.shape),
             dtype=dt,
             device=a.device,
             requires_grad=False,
         )
     except Exception:
-        cuda_free(lib, y_dev)
+        # cuda_free(lib, y_dev)
+        storage_yd.decref()
         raise
 
 
@@ -529,6 +632,7 @@ def sub_scalar(a: Tensor, alpha: float, *, device: int = 0) -> Tensor:
 
     Computes `y = a - alpha`.
     """
+    device_index: int = a.device.index
     _require_cuda(a, "a")
     dt = _require_f32_f64(a, "a")
 
@@ -540,6 +644,14 @@ def sub_scalar(a: Tensor, alpha: float, *, device: int = 0) -> Tensor:
     cuda_set_device(lib, int(device))
 
     y_dev = cuda_malloc(lib, int(n * np.dtype(dt).itemsize))
+
+    storage_yd = _CudaStorage(
+        lib=lib,
+        device_index=device_index,
+        dev_ptr=int(y_dev),
+        nbytes=int(n * np.dtype(dt).itemsize),
+        dtype=dt,
+    )
 
     try:
         _sub_scalar_cuda(
@@ -550,15 +662,23 @@ def sub_scalar(a: Tensor, alpha: float, *, device: int = 0) -> Tensor:
             n=int(n),
             dtype=dt,
         )
-        return Tensor._from_devptr(
-            int(y_dev),
+        # return Tensor._from_devptr(
+        #     int(y_dev),
+        #     shape=tuple(a.shape),
+        #     dtype=dt,
+        #     device=a.device,
+        #     requires_grad=False,
+        # )
+        return Tensor._from_storage(
+            storage_yd,
             shape=tuple(a.shape),
             dtype=dt,
             device=a.device,
             requires_grad=False,
         )
     except Exception:
-        cuda_free(lib, y_dev)
+        # cuda_free(lib, y_dev)
+        storage_yd.decref()
         raise
 
 
@@ -568,6 +688,7 @@ def div_scalar(a: Tensor, alpha: float, *, device: int = 0) -> Tensor:
 
     Computes `y = a / alpha`.
     """
+    device_index: int = a.device.index
     _require_cuda(a, "a")
     dt = _require_f32_f64(a, "a")
 
@@ -580,6 +701,14 @@ def div_scalar(a: Tensor, alpha: float, *, device: int = 0) -> Tensor:
 
     y_dev = cuda_malloc(lib, int(n * np.dtype(dt).itemsize))
 
+    storage_yd = _CudaStorage(
+        lib=lib,
+        device_index=device_index,
+        dev_ptr=int(y_dev),
+        nbytes=int(n * np.dtype(dt).itemsize),
+        dtype=dt,
+    )
+
     try:
         _div_scalar_cuda(
             lib,
@@ -589,15 +718,23 @@ def div_scalar(a: Tensor, alpha: float, *, device: int = 0) -> Tensor:
             n=int(n),
             dtype=dt,
         )
-        return Tensor._from_devptr(
-            int(y_dev),
+        # return Tensor._from_devptr(
+        #     int(y_dev),
+        #     shape=tuple(a.shape),
+        #     dtype=dt,
+        #     device=a.device,
+        #     requires_grad=False,
+        # )
+        return Tensor._from_storage(
+            storage_yd,
             shape=tuple(a.shape),
             dtype=dt,
             device=a.device,
             requires_grad=False,
         )
     except Exception:
-        cuda_free(lib, y_dev)
+        # cuda_free(lib, y_dev)
+        storage_yd.decref()
         raise
 
 

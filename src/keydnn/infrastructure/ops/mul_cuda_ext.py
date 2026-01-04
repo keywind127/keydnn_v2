@@ -235,6 +235,16 @@ def mul_forward(a: Tensor, b: Tensor, *, device: int = 0, sync: bool = True) -> 
     nbytes_y = int(numel * np.dtype(dt).itemsize)
     y_dev = cuda_malloc(lib, nbytes_y)
 
+    from ..tensor._cuda_storage import _CudaStorage
+
+    storage = _CudaStorage(
+        lib=lib,
+        device_index=a.device.index,
+        dev_ptr=int(y_dev),
+        nbytes=nbytes_y,
+        dtype=dt,
+    )
+
     try:
         _mul_ctypes(
             lib,
@@ -247,8 +257,8 @@ def mul_forward(a: Tensor, b: Tensor, *, device: int = 0, sync: bool = True) -> 
 
         _ = bool(sync)
 
-        return Tensor._from_devptr(
-            int(y_dev),
+        return Tensor._from_storage(
+            storage,
             shape=tuple(int(d) for d in a.shape),
             dtype=dt,
             device=a.device,
@@ -312,6 +322,16 @@ def mul_scalar_forward(
     nbytes_y = int(numel * np.dtype(dt).itemsize)
     y_dev = cuda_malloc(lib, nbytes_y)
 
+    from ..tensor._cuda_storage import _CudaStorage
+
+    storage = _CudaStorage(
+        lib=lib,
+        device_index=a.device.index,
+        dev_ptr=int(y_dev),
+        nbytes=nbytes_y,
+        dtype=dt,
+    )
+
     try:
         _mul_scalar_ctypes(
             lib,
@@ -324,8 +344,8 @@ def mul_scalar_forward(
 
         _ = bool(sync)
 
-        return Tensor._from_devptr(
-            int(y_dev),
+        return Tensor._from_storage(
+            storage,
             shape=tuple(int(d) for d in a.shape),
             dtype=dt,
             device=a.device,

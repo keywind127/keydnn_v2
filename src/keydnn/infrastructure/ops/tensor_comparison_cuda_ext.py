@@ -57,6 +57,7 @@ from typing import Callable, Tuple
 import numpy as np
 
 from ..tensor._tensor import Tensor
+from ..tensor._cuda_storage import _CudaStorage
 from ..native_cuda.python.ops.tensor_comparison_ctypes import (
     # elementwise
     gt_cuda as _gt_cuda,
@@ -186,6 +187,7 @@ def _cmp_binary_out_of_place(
     """
     Shared implementation for elementwise (binary) comparisons producing float32 masks.
     """
+    device_index: int = a.device.index
     _require_cuda(a, "a")
     _require_cuda(b, "b")
     _require_same_device(a, b)
@@ -201,6 +203,14 @@ def _cmp_binary_out_of_place(
     cuda_set_device(lib, int(device))
     y_dev = int(cuda_malloc(lib, int(n * np.dtype(out_dt).itemsize)))
 
+    storage_yd = _CudaStorage(
+        lib=lib,
+        device_index=device_index,
+        dev_ptr=y_dev,
+        nbytes=int(n * np.dtype(out_dt).itemsize),
+        dtype=out_dt,
+    )
+
     try:
         op(
             lib,
@@ -210,15 +220,23 @@ def _cmp_binary_out_of_place(
             n=int(n),
             dtype=dt_in,
         )
-        return Tensor._from_devptr(
-            int(y_dev),
+        # return Tensor._from_devptr(
+        #     int(y_dev),
+        #     shape=tuple(a.shape),
+        #     dtype=out_dt,
+        #     device=a.device,
+        #     requires_grad=False,
+        # )
+        return Tensor._from_storage(
+            storage_yd,
             shape=tuple(a.shape),
             dtype=out_dt,
             device=a.device,
             requires_grad=False,
         )
     except Exception:
-        cuda_free(lib, y_dev)
+        # cuda_free(lib, y_dev)
+        storage_yd.decref()
         raise
 
 
@@ -232,6 +250,7 @@ def _cmp_scalar_out_of_place(
     """
     Shared implementation for scalar comparisons producing float32 masks.
     """
+    device_index: int = a.device.index
     _require_cuda(a, "a")
     dt_in = _require_f32_f64(a, "a")
 
@@ -244,6 +263,14 @@ def _cmp_scalar_out_of_place(
     cuda_set_device(lib, int(device))
     y_dev = int(cuda_malloc(lib, int(n * np.dtype(out_dt).itemsize)))
 
+    storage_yd = _CudaStorage(
+        lib=lib,
+        device_index=device_index,
+        dev_ptr=y_dev,
+        nbytes=int(n * np.dtype(out_dt).itemsize),
+        dtype=out_dt,
+    )
+
     try:
         op(
             lib,
@@ -253,15 +280,23 @@ def _cmp_scalar_out_of_place(
             n=int(n),
             dtype=dt_in,
         )
-        return Tensor._from_devptr(
-            int(y_dev),
+        # return Tensor._from_devptr(
+        #     int(y_dev),
+        #     shape=tuple(a.shape),
+        #     dtype=out_dt,
+        #     device=a.device,
+        #     requires_grad=False,
+        # )
+        return Tensor._from_storage(
+            storage_yd,
             shape=tuple(a.shape),
             dtype=out_dt,
             device=a.device,
             requires_grad=False,
         )
     except Exception:
-        cuda_free(lib, y_dev)
+        # cuda_free(lib, y_dev)
+        storage_yd.decref()
         raise
 
 

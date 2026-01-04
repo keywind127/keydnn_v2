@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from ...domain.device._device import Device
 from ..tensor._tensor import Tensor
 from .pool2d_cuda import _load_cuda_lib, cuda_set_device, cuda_malloc, cuda_free
 from .memcpy_cuda import memcpy_htod as _memcpy_htod
@@ -49,7 +50,7 @@ def _require_cuda(x: Tensor, name: str) -> None:
 def copy_host_to_cuda(
     x_host: np.ndarray,
     *,
-    device_tensor: "object",
+    device_tensor: Device,
     device: int = 0,
     sync: bool = True,
 ) -> Tensor:
@@ -98,6 +99,16 @@ def copy_host_to_cuda(
     else:
         dev_ptr = int(cuda_malloc(lib, nbytes))
 
+        from ..tensor._cuda_storage import _CudaStorage
+
+        storage = _CudaStorage(
+            lib=lib,
+            device_index=device_tensor.index,
+            dev_ptr=int(dev_ptr),
+            nbytes=int(nbytes),
+            dtype=x_c.dtype,
+        )
+
     try:
         if nbytes != 0:
             _memcpy_htod(
@@ -106,6 +117,13 @@ def copy_host_to_cuda(
                 src_host=x_c,
                 nbytes=nbytes,
                 sync=bool(sync),
+            )
+            return Tensor._from_storage(
+                storage,
+                shape=tuple(int(d) for d in x_c.shape),
+                dtype=x_c.dtype,
+                device=device_tensor,  # type: ignore[arg-type]
+                requires_grad=False,
             )
 
         return Tensor._from_devptr(
@@ -228,6 +246,16 @@ def copy_cuda_to_cuda(x: Tensor, *, device: int = 0, sync: bool = True) -> Tenso
     else:
         dev_ptr = int(cuda_malloc(lib, nbytes))
 
+        from ..tensor._cuda_storage import _CudaStorage
+
+        storage = _CudaStorage(
+            lib=lib,
+            device_index=x.device.index,
+            dev_ptr=int(dev_ptr),
+            nbytes=nbytes,
+            dtype=dt,
+        )
+
     try:
         if nbytes != 0:
             _memcpy_dtod(
@@ -236,6 +264,13 @@ def copy_cuda_to_cuda(x: Tensor, *, device: int = 0, sync: bool = True) -> Tenso
                 src_dev=int(x.data),
                 nbytes=int(nbytes),
                 sync=bool(sync),
+            )
+            return Tensor._from_storage(
+                storage,
+                shape=shape,
+                dtype=dt,
+                device=x.device,
+                requires_grad=False,
             )
 
         return Tensor._from_devptr(

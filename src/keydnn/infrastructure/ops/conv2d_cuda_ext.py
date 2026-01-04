@@ -242,6 +242,16 @@ def _from_numpy_to_cuda_tensor(
         )
 
     dev_ptr = int(cuda_malloc(lib, nbytes))
+
+    from ..tensor._cuda_storage import _CudaStorage
+
+    storage = _CudaStorage(
+        lib=lib,
+        device_index=device_index,
+        dev_ptr=dev_ptr,
+        nbytes=nbytes,
+        dtype=dt,
+    )
     if dev_ptr == 0:
         raise RuntimeError("cuda_malloc returned null device pointer (0)")
 
@@ -256,8 +266,8 @@ def _from_numpy_to_cuda_tensor(
             pass
         raise
 
-    return Tensor._from_devptr(
-        dev_ptr=int(dev_ptr),
+    return Tensor._from_storage(
+        storage,
         shape=tuple(int(d) for d in arr_c.shape),
         device=device,
         requires_grad=requires_grad,

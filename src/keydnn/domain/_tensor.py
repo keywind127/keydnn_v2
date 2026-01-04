@@ -1350,3 +1350,18 @@ class ITensor(Protocol):
         - No broadcasting is performed.
         """
         ...
+
+    def _cuda_ensure_storage(self: ITensor) -> None:
+        """
+        If this CUDA tensor has a devptr but no storage, attach a BORROWED storage wrapper.
+        This does NOT free the pointer; it only standardizes representation so view ops
+        can share something.
+        """
+        ...
+
+    def free_(self) -> None:
+        """
+        Explicitly release CUDA storage now.
+        Safe to call multiple times.
+        """
+        ...

@@ -163,6 +163,16 @@ def broadcast_to_forward(
     nbytes_y = int(max(out_numel, 1) * np.dtype(dt).itemsize)
     y_dev = cuda_malloc(lib, nbytes_y)
 
+    from ..tensor._cuda_storage import _CudaStorage
+
+    storage = _CudaStorage(
+        lib=lib,
+        device_index=x.device.index,
+        dev_ptr=y_dev,
+        nbytes=nbytes_y,
+        dtype=dt,
+    )
+
     try:
         # If out_numel==0, calling the kernel should be a no-op anyway,
         # but it's safe to skip to avoid touching pointers.
@@ -178,13 +188,14 @@ def broadcast_to_forward(
 
         _ = bool(sync)
 
-        return Tensor._from_devptr(
-            int(y_dev),
+        return Tensor._from_storage(
+            storage,
             shape=out_shape,
             dtype=dt,
             device=x.device,
             requires_grad=False,
         )
+    
     except Exception:
         cuda_free(lib, y_dev)
         raise

@@ -350,6 +350,16 @@ def zeros_like(x: Tensor, *, device: int = 0, sync: bool = True) -> Tensor:
     nbytes = int(n * np.dtype(dt).itemsize)
     y_dev = int(cuda_malloc(lib, int(nbytes))) if nbytes != 0 else 0
 
+    from ..tensor._cuda_storage import _CudaStorage
+
+    storage = _CudaStorage(
+        lib=lib,
+        device_index=x.device.index,
+        dev_ptr=int(y_dev),
+        nbytes=nbytes,
+        dtype=dt,
+    )
+
     try:
         zeros_cuda(
             lib,
@@ -358,8 +368,8 @@ def zeros_like(x: Tensor, *, device: int = 0, sync: bool = True) -> Tensor:
             dtype=dt,
             sync=bool(sync),
         )
-        return Tensor._from_devptr(
-            int(y_dev),
+        return Tensor._from_storage(
+            storage,
             shape=tuple(int(d) for d in x.shape),
             dtype=dt,
             device=x.device,
@@ -408,6 +418,16 @@ def ones_like(x: Tensor, *, device: int = 0, sync: bool = True) -> Tensor:
     nbytes = int(n * np.dtype(dt).itemsize)
     y_dev = int(cuda_malloc(lib, int(nbytes))) if nbytes != 0 else 0
 
+    from ..tensor._cuda_storage import _CudaStorage
+
+    storage = _CudaStorage(
+        lib=lib,
+        device_index=x.device.index,
+        dev_ptr=int(y_dev),
+        nbytes=nbytes,
+        dtype=dt,
+    )
+
     try:
         ones_cuda(
             lib,
@@ -416,8 +436,8 @@ def ones_like(x: Tensor, *, device: int = 0, sync: bool = True) -> Tensor:
             dtype=dt,
             sync=bool(sync),
         )
-        return Tensor._from_devptr(
-            int(y_dev),
+        return Tensor._from_storage(
+            storage,
             shape=tuple(int(d) for d in x.shape),
             dtype=dt,
             device=x.device,
@@ -468,6 +488,16 @@ def full_like(x: Tensor, value: float, *, device: int = 0, sync: bool = True) ->
     nbytes = int(n * np.dtype(dt).itemsize)
     y_dev = int(cuda_malloc(lib, int(nbytes))) if nbytes != 0 else 0
 
+    from ..tensor._cuda_storage import _CudaStorage
+
+    storage = _CudaStorage(
+        lib=lib,
+        device_index=x.device.index,
+        dev_ptr=int(y_dev),
+        nbytes=nbytes,
+        dtype=dt,
+    )
+
     try:
         fill_cuda(
             lib,
@@ -477,8 +507,8 @@ def full_like(x: Tensor, value: float, *, device: int = 0, sync: bool = True) ->
             dtype=dt,
             sync=bool(sync),
         )
-        return Tensor._from_devptr(
-            int(y_dev),
+        return Tensor._from_storage(
+            storage,
             shape=tuple(int(d) for d in x.shape),
             dtype=dt,
             device=x.device,
@@ -542,10 +572,20 @@ def zeros(
     nbytes = int(n * np.dtype(dt).itemsize)
     y_dev = int(cuda_malloc(lib, int(nbytes))) if nbytes != 0 else 0
 
+    from ..tensor._cuda_storage import _CudaStorage
+
+    storage = _CudaStorage(
+        lib=lib,
+        device_index=int(device),
+        dev_ptr=int(y_dev),
+        nbytes=nbytes,
+        dtype=dt,
+    )
+
     try:
         zeros_cuda(lib, y_dev=int(y_dev), numel=int(n), dtype=dt, sync=bool(sync))
-        return Tensor._from_devptr(
-            int(y_dev),
+        return Tensor._from_storage(
+            storage,
             shape=shp,
             dtype=dt,
             device=device_obj,
@@ -608,10 +648,20 @@ def ones(
     nbytes = int(n * np.dtype(dt).itemsize)
     y_dev = int(cuda_malloc(lib, int(nbytes))) if nbytes != 0 else 0
 
+    from ..tensor._cuda_storage import _CudaStorage
+
+    storage = _CudaStorage(
+        lib=lib,
+        device_index=int(device),
+        dev_ptr=int(y_dev),
+        nbytes=int(nbytes),
+        dtype=dt,
+    )
+
     try:
         ones_cuda(lib, y_dev=int(y_dev), numel=int(n), dtype=dt, sync=bool(sync))
-        return Tensor._from_devptr(
-            int(y_dev),
+        return Tensor._from_storage(
+            storage,
             shape=shp,
             dtype=dt,
             device=device_obj,

@@ -121,6 +121,7 @@ class MaxPool2dFn(Function):
             y, argmax_idx = cuda_ext.maxpool2d_forward(
                 x, kernel_size=k, stride=s, padding=p
             )
+            # argmax_idx = argmax_idx.dev_ptr
 
         ctx.save_for_backward(x)
         ctx.saved_meta["x_shape"] = x.shape
@@ -168,7 +169,7 @@ class MaxPool2dFn(Function):
         else:
             gx = cuda_ext.maxpool2d_backward(
                 grad_out,
-                argmax_idx=ctx.saved_meta["argmax_idx"],
+                argmax_idx=ctx.saved_meta["argmax_idx"].dev_ptr,
                 x_shape=ctx.saved_meta["x_shape"],
                 kernel_size=ctx.saved_meta["kernel_size"],
                 stride=ctx.saved_meta["stride"],

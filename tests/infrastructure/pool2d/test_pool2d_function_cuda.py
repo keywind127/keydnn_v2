@@ -104,11 +104,13 @@ class _CudaAllocs:
     def free_all(self) -> None:
         # free in reverse order
         for p in reversed(self._ptrs):
-            try:
-                cuda_free(self.lib, int(p))
-            except Exception:
-                # best-effort cleanup during tests
-                pass
+            # try:
+            #     cuda_free(self.lib, int(p))
+            # except Exception:
+            #     # best-effort cleanup during tests
+            #     pass
+            # cuda_free(self.lib, int(p))
+            ...  # deprecated as we now rely on storage to free the memory
         self._ptrs.clear()
 
 
@@ -167,8 +169,8 @@ class TestPool2dFunctionCuda(unittest.TestCase):
         self.device = Device(f"cuda:{device_index}")
         self.allocs = _CudaAllocs(device_index=device_index)
 
-    def tearDown(self) -> None:
-        self.allocs.free_all()
+    # def tearDown(self) -> None:
+    #     self.allocs.free_all()
 
     def test_maxpool2d_fn_backward_matches_cpu(self):
         x_np = np.random.randn(1, 2, 5, 6).astype(np.float32)
@@ -193,7 +195,7 @@ class TestPool2dFunctionCuda(unittest.TestCase):
         self.allocs.track(int(grad_x.data))
 
         # Track argmax pointer (CUDA ext allocates it and returns DevPtr int)
-        self.allocs.track(int(ctx.saved_meta["argmax_idx"]))
+        self.allocs.track(int(ctx.saved_meta["argmax_idx"].dev_ptr))
 
         # CPU reference
         y_ref, argmax_idx_cpu = maxpool2d_forward_cpu(
@@ -211,6 +213,7 @@ class TestPool2dFunctionCuda(unittest.TestCase):
         )
 
         grad_x_host = cuda_tensor_to_numpy(grad_x, self.allocs)
+        # print(grad_x_host, grad_x_ref)
         self.assertTrue(np.allclose(grad_x_host, grad_x_ref, atol=1e-5, rtol=1e-5))
 
     def test_avgpool2d_fn_backward_matches_cpu(self):

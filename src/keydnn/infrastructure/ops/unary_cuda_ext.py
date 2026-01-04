@@ -86,6 +86,9 @@ def exp_forward(x: Tensor, *, device: int = 0, sync: bool = True) -> Tensor:
     ValueError
         If `x` has numel <= 0.
     """
+    from ..tensor._cuda_storage import _CudaStorage
+
+    device_index: int = x.device.index
     _require_cuda(x, "x")
     dt = _require_f32_f64(x, "x")
 
@@ -99,6 +102,14 @@ def exp_forward(x: Tensor, *, device: int = 0, sync: bool = True) -> Tensor:
     nbytes_y = int(numel * np.dtype(dt).itemsize)
     y_dev = cuda_malloc(lib, nbytes_y)
 
+    storage_yd = _CudaStorage(
+        lib=lib,
+        device_index=device_index,
+        dev_ptr=int(y_dev),
+        nbytes=int(nbytes_y),
+        dtype=dt,
+    )
+
     try:
         _exp_devptr(
             lib,
@@ -109,8 +120,16 @@ def exp_forward(x: Tensor, *, device: int = 0, sync: bool = True) -> Tensor:
             sync=bool(sync),
         )
 
-        return Tensor._from_devptr(
-            int(y_dev),
+        # return Tensor._from_devptr(
+        #     int(y_dev),
+        #     shape=tuple(int(d) for d in x.shape),
+        #     dtype=dt,
+        #     device=x.device,
+        #     requires_grad=False,
+        # )
+
+        return Tensor._from_storage(
+            storage_yd,
             shape=tuple(int(d) for d in x.shape),
             dtype=dt,
             device=x.device,
@@ -118,7 +137,8 @@ def exp_forward(x: Tensor, *, device: int = 0, sync: bool = True) -> Tensor:
         )
 
     except Exception:
-        cuda_free(lib, y_dev)
+        # cuda_free(lib, y_dev)
+        storage_yd.decref()
         raise
 
 

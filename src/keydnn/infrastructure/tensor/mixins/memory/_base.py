@@ -553,81 +553,175 @@ class TensorMixinMemory(ABC):
 
         self._raise_device_not_supported("to")
 
+    def _cuda_ensure_storage(self: ITensor) -> None:
+        """
+        Ensure that a CUDA tensor has an attached `_CudaStorage` wrapper.
+
+        This helper normalizes legacy CUDA tensors that are backed only by a raw
+        device pointer (`dev_ptr`) into a storage-backed representation by attaching
+        a **borrowed** `_CudaStorage` object.
+
+        Behavior
+        --------
+        - If the tensor is not on a CUDA device, this function is a no-op.
+        - If the tensor already has `_storage`, this function is a no-op.
+        - If the tensor has no valid device pointer (`dev_ptr == 0`) or represents
+        a zero-sized tensor, this function is a no-op.
+        - Otherwise, a `_CudaStorage` wrapper is created around the existing
+        device pointer and attached to the tensor.
+
+        Ownership semantics
+        -------------------
+        - The attached storage is **borrowed**:
+            - It does NOT own the underlying device memory.
+            - Its finalizer is explicitly detached to prevent automatic freeing.
+        - Calling `free_()` on the tensor will **not** free the device pointer
+        when the storage was created by this function.
+
+        Purpose
+        -------
+        This method exists to support a gradual migration from raw `dev_ptr`-based
+        CUDA tensors to storage-backed tensors. It allows view-like operations,
+        gradient detachment, and other internal helpers to rely on a uniform
+        storage abstraction without changing ownership semantics.
+
+        Notes
+        -----
+        - This method does not allocate or free device memory.
+        - The calculated `nbytes` is derived from `numel * dtype.itemsize` and is
+        used for metadata and validation only.
+        - New code should prefer constructing CUDA tensors via `_from_storage`
+        rather than relying on this normalization step.
+        """
+        if not self.device.is_cuda():
+            return
+        if getattr(self, "_storage", None) is not None:
+            return
+        dp = int(getattr(self, "_data", 0) or 0)
+        if dp == 0 or self.numel() == 0:
+            return
+
+        # borrowed storage: finalizer disabled
+        lib = self._get_cuda_lib()
+        dev_index = int(self.device.index or 0)
+        nbytes = int(self.numel()) * int(self.dtype.itemsize)
+
+        from ..._cuda_storage import _CudaStorage
+
+        st = _CudaStorage(
+            lib=lib,
+            device_index=dev_index,
+            dev_ptr=dp,
+            nbytes=nbytes,
+            dtype=self.dtype,
+        )
+        # IMPORTANT: disable finalizer so it's borrowed
+        if getattr(st, "_finalizer", None) is not None:
+            st._finalizer.detach()
+            st._finalizer = None
+
+        self._storage = st
+
     def _ensure_cuda_alloc(self: ITensor, *, dtype) -> None:
         """
-        Ensure that a CUDA tensor has an allocated device buffer.
+        Ensure that this CUDA tensor owns an allocated device buffer of the
+        required size and dtype.
 
-        This helper allocates device memory sized to:
+        This method guarantees that the tensor is backed by an **owned**
+        `_CudaStorage` instance whose allocation matches the tensor's shape
+        and the requested dtype.
 
-            numel(self.shape) * dtype.itemsize
+        Behavior
+        --------
+        - If the tensor is not on a CUDA device, a `RuntimeError` is raised.
+        - If the tensor has zero elements (`numel == 0`):
+            - Any existing storage is released.
+            - No new allocation is performed.
+        - If existing storage matches the required size and dtype:
+            - The allocation is reused.
+        - Otherwise:
+            - Any existing storage is released.
+            - New device memory is allocated via `cuda_malloc`.
+            - A new `_CudaStorage` object is attached to the tensor.
 
-        and stores the resulting device pointer on the tensor instance. Memory
-        contents are left uninitialized.
+        Ownership semantics
+        -------------------
+        - Storage created by this method is **owned** by the tensor.
+        - The underlying device memory will be freed automatically when the
+        storage reference count drops to zero.
+        - Any previously attached storage is properly decremented before
+        replacement to avoid leaks.
 
         Parameters
         ----------
-        dtype
-            Desired NumPy-compatible dtype for the device allocation.
+        dtype : np.dtype or compatible
+            Element dtype for the allocation. This determines both the size of
+            the allocation and the dtype metadata used for kernel dispatch.
 
         Raises
         ------
         RuntimeError
             If called on a non-CUDA tensor.
+        RuntimeError
+            If `cuda_malloc` fails or returns a null device pointer.
 
         Notes
         -----
-        - Zero-sized tensors do not allocate device memory; their device pointer
-          is represented as `0`.
-        - This method is designed to be idempotent for an already-allocated tensor
-          when the allocation size matches the required size.
-        - If a re-allocation is required (dtype/size mismatch), the old buffer
-          should be freed (TODO: wire/verify `cuda_free` usage to avoid leaks).
+        - This method explicitly sets the active CUDA device before allocation
+        to ensure correctness on multi-device systems.
+        - The legacy `_data` field is updated to mirror the allocated device
+        pointer during the migration period; new code should rely on `_storage`
+        instead.
+        - This method performs allocation only; it does not initialize memory
+        contents.
         """
         import numpy as np
+        from typing import Optional
         from ....native_cuda.python.avgpool2d_ctypes import cuda_set_device, cuda_malloc
-
-        # If you have cuda_free available somewhere, import it too:
-        # from ..native_cuda.python.avgpool2d_ctypes import cuda_free
+        from ..._cuda_storage import _CudaStorage
 
         if not self.device.is_cuda():
-            raise RuntimeError("_ensure_cuda_alloc is only valid for CUDA tensors.")
+            raise RuntimeError(...)
 
         dtype = np.dtype(dtype)
         numel = self._numel_from_shape()
-
-        # zero-sized: represent as null pointer
         if numel == 0:
-            self._data = 0
+            # release any previous storage
+            old: Optional[_CudaStorage] = getattr(self, "_storage", None)
+            if old is not None:
+                old.decref()
+            self._storage = None
             self._dtype = dtype
             return
 
-        # Compute required size
         required_nbytes = int(numel) * int(dtype.itemsize)
 
-        # If already allocated, only accept it if compatible
-        cur_ptr = int(getattr(self, "_data", 0) or 0)
-        cur_dtype = getattr(self, "_dtype", None)
-        if cur_ptr != 0 and cur_dtype is not None:
-            cur_dtype = np.dtype(cur_dtype)
-            cur_nbytes = int(numel) * int(cur_dtype.itemsize)
-
-            # Same shape implied; if size matches, keep existing buffer
-            if cur_nbytes == required_nbytes:
-                # Keep current allocation, just update dtype metadata if needed
+        st: Optional[_CudaStorage] = getattr(self, "_storage", None)
+        if st is not None:
+            if int(st.nbytes) == required_nbytes and np.dtype(st.dtype) == dtype:
                 self._dtype = dtype
                 return
-
-            # Otherwise, we need to reallocate (shape same but dtype size differs).
-            # TODO: free old device pointer to avoid leaks once cuda_free is wired.
-            # cuda_free(lib, cur_ptr)
-            # self._data = 0
+            # Need re-alloc: drop old storage ref
+            st.decref()
+            self._storage = None
 
         lib = self._get_cuda_lib()
-        cuda_set_device(lib, int(self.device.index or 0))
+        dev_index = int(self.device.index or 0)
+        cuda_set_device(lib, dev_index)
 
-        dev_ptr = cuda_malloc(lib, required_nbytes)
-        self._data = int(dev_ptr)
+        dev_ptr = int(cuda_malloc(lib, required_nbytes))
+        if dev_ptr == 0:
+            raise RuntimeError("cuda_malloc returned 0")
+
+        self._storage = _CudaStorage(
+            lib=lib,
+            device_index=dev_index,
+            dev_ptr=dev_ptr,
+            nbytes=required_nbytes,
+            dtype=dtype,
+        )
         self._dtype = dtype
+        self._data = int(dev_ptr)  # legacy mirror during migration
 
     def reshape(self: ITensor, new_shape: tuple[int, ...]) -> "ITensor":
         """
@@ -749,11 +843,12 @@ class TensorMixinMemory(ABC):
                     "CUDA reshape requires allocated device buffer (data == 0)."
                 )
 
-            # Create an alias tensor that shares the same devptr.
-            # Prefer your existing internal constructor used in tests.
-            if hasattr(Tensor, "_from_devptr"):
-                out = Tensor._from_devptr(
-                    dev_ptr=int(self.data),
+            st = getattr(self, "_storage", None)
+
+            # Case A: storage-backed tensor (new ownership model)
+            if st is not None:
+                out = Tensor._from_storage(
+                    st,
                     shape=new_shape_resolved,
                     device=self.device,
                     requires_grad=req,
@@ -761,9 +856,14 @@ class TensorMixinMemory(ABC):
                     dtype=np.dtype(self.dtype),
                 )
             else:
-                # Fallback: if you do not have _from_devptr, you need an equivalent API.
-                raise RuntimeError(
-                    "CUDA reshape requires Tensor._from_devptr (or equivalent)"
+                # Case B: borrowed/raw-devptr tensor (legacy compatibility)
+                out = Tensor._from_devptr(
+                    dev_ptr=int(self.data),
+                    shape=new_shape_resolved,
+                    device=self.device,
+                    requires_grad=req,
+                    ctx=None,
+                    dtype=np.dtype(self.dtype),
                 )
 
             if req:
@@ -781,9 +881,11 @@ class TensorMixinMemory(ABC):
                             "grad_out has no allocated devptr (data == 0)"
                         )
 
-                    if hasattr(Tensor, "_from_devptr"):
-                        grad_parent = Tensor._from_devptr(
-                            dev_ptr=int(grad_out.data),
+                    st_go = getattr(grad_out, "_storage", None)
+
+                    if st_go is not None:
+                        grad_parent = Tensor._from_storage(
+                            st_go,
                             shape=self.shape,
                             device=self.device,
                             requires_grad=False,
@@ -791,8 +893,13 @@ class TensorMixinMemory(ABC):
                             dtype=np.dtype(self.dtype),
                         )
                     else:
-                        raise RuntimeError(
-                            "CUDA reshape backward requires Tensor._from_devptr (or equivalent)"
+                        grad_parent = Tensor._from_devptr(
+                            dev_ptr=int(grad_out.data),
+                            shape=self.shape,
+                            device=self.device,
+                            requires_grad=False,
+                            ctx=None,
+                            dtype=np.dtype(self.dtype),
                         )
                     return (grad_parent,)
 

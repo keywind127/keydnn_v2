@@ -90,6 +90,9 @@ def transpose2d_forward(x: Tensor, *, device: int = 0, sync: bool = True) -> Ten
     - The ops-layer `transpose2d_cuda` may internally fallback to a correctness
       path using memcpy+NumPy transpose if the native kernel reports failure.
     """
+    from ..tensor._cuda_storage import _CudaStorage
+
+    device_index: int = x.device.index
     _require_cuda(x, "x")
     dt = _require_f32_f64(x, "x")
     rows, cols = _require_2d(x, "x")
@@ -99,6 +102,14 @@ def transpose2d_forward(x: Tensor, *, device: int = 0, sync: bool = True) -> Ten
 
     nbytes_y = int(rows * cols * np.dtype(dt).itemsize)
     y_dev = cuda_malloc(lib, nbytes_y)
+
+    storage_yd = _CudaStorage(
+        lib=lib,
+        device_index=device_index,
+        dev_ptr=int(y_dev),
+        nbytes=int(nbytes_y),
+        dtype=dt,
+    )
 
     try:
         _transpose2d_devptr(
@@ -111,8 +122,16 @@ def transpose2d_forward(x: Tensor, *, device: int = 0, sync: bool = True) -> Ten
             sync=bool(sync),
         )
 
-        return Tensor._from_devptr(
-            int(y_dev),
+        # return Tensor._from_devptr(
+        #     int(y_dev),
+        #     shape=(cols, rows),
+        #     dtype=dt,
+        #     device=x.device,
+        #     requires_grad=False,
+        # )
+        
+        return Tensor._from_storage(
+            storage_yd,
             shape=(cols, rows),
             dtype=dt,
             device=x.device,
@@ -120,7 +139,8 @@ def transpose2d_forward(x: Tensor, *, device: int = 0, sync: bool = True) -> Ten
         )
 
     except Exception:
-        cuda_free(lib, y_dev)
+        # cuda_free(lib, y_dev)
+        storage_yd.decref()
         raise
 
 
