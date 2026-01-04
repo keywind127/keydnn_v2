@@ -43,6 +43,47 @@ from ..tensor._tensor import Tensor
 from ..module._serialization_core import register_module
 
 
+def _ema_update_inplace(
+    running: Tensor,
+    batch_stat: Tensor,
+    *,
+    momentum: float,
+) -> None:
+    """
+    In-place exponential moving average (EMA) update for running statistics.
+
+    Performs:
+        running = (1 - momentum) * running + momentum * batch_stat
+
+    This function updates `running` **in-place** and is intended for use with
+    non-trainable buffers (e.g. BatchNorm running_mean / running_var).
+
+    Parameters
+    ----------
+    running : Tensor
+        The running statistic buffer to be updated in-place.
+        Must have requires_grad=False and no active autograd context.
+    batch_stat : Tensor
+        The current batch statistic (e.g. mean or variance).
+        Must be shape-compatible with `running`.
+    momentum : float
+        Exponential moving average factor.
+
+    Notes
+    -----
+    - This function performs no tensor allocation when `add_` supports `alpha`.
+    - Autograd history is intentionally not tracked.
+    """
+    mom = float(momentum)
+
+    # running *= (1 - momentum)
+    running *= 1.0 - mom
+
+    # running += momentum * batch_stat
+    tmp = batch_stat * mom
+    running += tmp
+
+
 @register_module()
 class BatchNorm1d(Module):
     """
@@ -122,31 +163,28 @@ class BatchNorm1d(Module):
         self.affine = bool(affine)
         self.training = True
 
-        # buffers (no NumPy here)
-        self.running_mean = Tensor.full(
-            (self.num_features,), 0.0, device=self.device, requires_grad=False
+        self.running_mean = Tensor.zeros(
+            shape=(self.num_features,), device=self.device, requires_grad=False
         )
-        self.running_var = Tensor.full(
-            (self.num_features,), 1.0, device=self.device, requires_grad=False
+        self.running_var = Tensor.ones(
+            shape=(self.num_features,), device=self.device, requires_grad=False
         )
 
         # affine params
         if self.affine:
             self.gamma = Parameter(
-                (self.num_features,), self.device, requires_grad=True
+                (self.num_features,),
+                self.device,
+                requires_grad=True,
             )
-            self.beta = Parameter((self.num_features,), self.device, requires_grad=True)
+            self.beta = Parameter(
+                (self.num_features,),
+                self.device,
+                requires_grad=True,
+            )
 
-            self.gamma.copy_from(
-                Tensor.full(
-                    (self.num_features,), 1.0, device=self.device, requires_grad=False
-                )
-            )
-            self.beta.copy_from(
-                Tensor.full(
-                    (self.num_features,), 0.0, device=self.device, requires_grad=False
-                )
-            )
+            self.gamma.copy_from(self.running_var)
+            self.beta.copy_from(self.running_mean)
         else:
             self.gamma = None
             self.beta = None
@@ -201,20 +239,31 @@ class BatchNorm1d(Module):
 
             # Update running stats WITHOUT graph history
             mean_det = Tensor(
-                shape=mean.shape, device=self.device, requires_grad=False, ctx=None
+                shape=mean.shape,
+                device=self.device,
+                requires_grad=False,
+                ctx=None,
             )
             var_det = Tensor(
-                shape=var.shape, device=self.device, requires_grad=False, ctx=None
+                shape=var.shape,
+                device=self.device,
+                requires_grad=False,
+                ctx=None,
             )
             mean_det.copy_from(mean)
             var_det.copy_from(var)
 
-            new_rm = (
-                1.0 - self.momentum
-            ) * self.running_mean + self.momentum * mean_det
-            new_rv = (1.0 - self.momentum) * self.running_var + self.momentum * var_det
-            self.running_mean.copy_from(new_rm)
-            self.running_var.copy_from(new_rv)
+            _ema_update_inplace(
+                self.running_mean,
+                mean_det,
+                momentum=self.momentum,
+            )
+            _ema_update_inplace(
+                self.running_var,
+                var_det,
+                momentum=self.momentum,
+            )
+
         else:
             mean = self.running_mean
             var = self.running_var
@@ -284,7 +333,10 @@ class BatchNorm1d(Module):
                 )
 
                 dx_t = Tensor(
-                    shape=x.shape, device=self.device, requires_grad=False, ctx=None
+                    shape=x.shape,
+                    device=self.device,
+                    requires_grad=False,
+                    ctx=None,
                 )
                 dx_t.copy_from(dx)
 
@@ -301,7 +353,10 @@ class BatchNorm1d(Module):
                     ctx=None,
                 )
                 dbeta_t = Tensor(
-                    shape=dbeta.shape, device=self.device, requires_grad=False, ctx=None
+                    shape=dbeta.shape,
+                    device=self.device,
+                    requires_grad=False,
+                    ctx=None,
                 )
                 dgamma_t.copy_from(dgamma)
                 dbeta_t.copy_from(dbeta)
@@ -435,30 +490,27 @@ class BatchNorm2d(Module):
         self.affine = bool(affine)
         self.training = True
 
-        self.running_mean = Tensor.full(
-            (self.num_features,), 0.0, device=self.device, requires_grad=False
+        self.running_mean = Tensor.zeros(
+            shape=(self.num_features,), device=self.device, requires_grad=False
         )
-        self.running_var = Tensor.full(
-            (self.num_features,), 1.0, device=self.device, requires_grad=False
+        self.running_var = Tensor.ones(
+            shape=(self.num_features,), device=self.device, requires_grad=False
         )
 
         if self.affine:
             self.gamma = Parameter(
-                shape=(self.num_features,), device=self.device, requires_grad=True
+                (self.num_features,),
+                self.device,
+                requires_grad=True,
             )
             self.beta = Parameter(
-                shape=(self.num_features,), device=self.device, requires_grad=True
+                (self.num_features,),
+                self.device,
+                requires_grad=True,
             )
-            self.gamma.copy_from(
-                Tensor.full(
-                    (self.num_features,), 1.0, device=self.device, requires_grad=False
-                )
-            )
-            self.beta.copy_from(
-                Tensor.full(
-                    (self.num_features,), 0.0, device=self.device, requires_grad=False
-                )
-            )
+
+            self.gamma.copy_from(self.running_var)
+            self.beta.copy_from(self.running_mean)
         else:
             self.gamma = None
             self.beta = None
@@ -511,14 +563,17 @@ class BatchNorm2d(Module):
             # (C,) -> (1,C,1,1) -> (N,C,H,W)
             return t_c.reshape((1, C, 1, 1)).broadcast_to(x.shape)
 
+        def _sum_nhw_to_c(t: Tensor) -> Tensor:
+            # (N,C,H,W) -> (1,C,1,1) by sum_to_shape -> (C,)
+            return t.sum_to_shape((1, C, 1, 1)).reshape((C,))
+
         if self.training:
             # mean over (N,H,W) per channel:
-            mean = x.sum(axis=0).sum(axis=1).sum(axis=1) * (1.0 / m)  # (C,)
+            mean = _sum_nhw_to_c(x) * (1.0 / m)
             mean_bc = _bc_c_to_nchw(mean)
             x_centered = x - mean_bc
-            var = (x_centered * x_centered).sum(axis=0).sum(axis=1).sum(axis=1) * (
-                1.0 / m
-            )  # (C,)
+
+            var = _sum_nhw_to_c(x_centered * x_centered) * (1.0 / m)
 
             mean_det = Tensor(
                 shape=mean.shape, device=self.device, requires_grad=False, ctx=None
@@ -529,12 +584,17 @@ class BatchNorm2d(Module):
             mean_det.copy_from(mean)
             var_det.copy_from(var)
 
-            new_rm = (
-                1.0 - self.momentum
-            ) * self.running_mean + self.momentum * mean_det
-            new_rv = (1.0 - self.momentum) * self.running_var + self.momentum * var_det
-            self.running_mean.copy_from(new_rm)
-            self.running_var.copy_from(new_rv)
+            _ema_update_inplace(
+                self.running_mean,
+                mean_det,
+                momentum=self.momentum,
+            )
+            _ema_update_inplace(
+                self.running_var,
+                var_det,
+                momentum=self.momentum,
+            )
+
         else:
             mean = self.running_mean
             var = self.running_var
@@ -591,11 +651,8 @@ class BatchNorm2d(Module):
                 else:
                     dxhat = g
 
-                # sum over (N,H,W): do it via chaining sums
-                sum_dxhat = dxhat.sum(axis=0).sum(axis=1).sum(axis=1)  # (C,)
-                sum_dxhat_xhat = (
-                    (dxhat * x_hat).sum(axis=0).sum(axis=1).sum(axis=1)
-                )  # (C,)
+                sum_dxhat = _sum_nhw_to_c(dxhat)  # (C,)
+                sum_dxhat_xhat = _sum_nhw_to_c(dxhat * x_hat)  # (C,)
 
                 sum_dxhat_bc = _bc_c_to_nchw(sum_dxhat)
                 sum_dxhat_xhat_bc = _bc_c_to_nchw(sum_dxhat_xhat)
@@ -614,8 +671,8 @@ class BatchNorm2d(Module):
                 if not self.affine:
                     return (dx_t,)
 
-                dgamma = (g * x_hat).sum(axis=0).sum(axis=1).sum(axis=1)  # (C,)
-                dbeta = g.sum(axis=0).sum(axis=1).sum(axis=1)  # (C,)
+                dgamma = _sum_nhw_to_c(g * x_hat)  # (C,)
+                dbeta = _sum_nhw_to_c(g)  # (C,)
 
                 dgamma_t = Tensor(
                     shape=dgamma.shape,
