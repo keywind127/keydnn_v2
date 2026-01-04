@@ -283,7 +283,7 @@ class Tensor(
             return self._data
 
         if d.is_cuda():
-            st = getattr(self, "_storage", None)
+            st: Optional[_CudaStorage] = getattr(self, "_storage", None)
             if st is not None:
                 return int(st.dev_ptr)
             # fallback for older code/tests that set _data directly

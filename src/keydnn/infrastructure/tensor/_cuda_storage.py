@@ -76,7 +76,7 @@ a clean transition away from raw device-pointer-based designs.
 """
 
 from __future__ import annotations
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import threading
 import weakref
 
@@ -134,7 +134,7 @@ class _CudaStorage:
     dtype: np.dtype
 
     _refcnt: int = 1
-    _lock: threading.Lock = threading.Lock()
+    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     # A finalizer that will free dev_ptr if it is still owned at GC-time.
     _finalizer: weakref.finalize | None = None

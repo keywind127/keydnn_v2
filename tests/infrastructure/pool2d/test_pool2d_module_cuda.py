@@ -40,12 +40,12 @@ def _maybe_free_cuda_tensor(t: Tensor, lib, cuda_free_fn) -> None:
         return
 
     if dev_ptr != 0:
-        try:
-            cuda_free_fn(lib, dev_ptr)
-        except Exception:
-            # Don't fail tests due to cleanup issues.
-            pass
-
+        # try:
+        #     cuda_free_fn(lib, dev_ptr)
+        # except Exception:
+        #     # Don't fail tests due to cleanup issues.
+        #     pass
+        ... # no need to free as cuda allocation and deallocation are managed by CudaStorage
 
 class _CudaTestBase(unittest.TestCase):
     """

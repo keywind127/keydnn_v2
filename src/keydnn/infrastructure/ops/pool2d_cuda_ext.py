@@ -19,6 +19,7 @@ from __future__ import annotations
 from typing import Optional, Tuple
 import numpy as np
 
+from ..tensor._cuda_storage import _CudaStorage
 from ..tensor._tensor import Tensor
 from .pool2d_cpu import _pair, _out_hw
 from .pool2d_cuda import (
@@ -59,7 +60,7 @@ def maxpool2d_forward(
     stride: Optional[int | Tuple[int, int]] = None,
     padding: int | Tuple[int, int] = 0,
     device: int = 0,
-) -> tuple[Tensor, object]:
+) -> tuple[Tensor, _CudaStorage]:
     """
     MaxPool2D forward (CUDA, NCHW).
 
@@ -69,6 +70,8 @@ def maxpool2d_forward(
         y : Tensor on CUDA
         argmax_idx_dev : DevPtr (int) for int64 indices on CUDA
     """
+    # raise Exception()
+    device_index = int(getattr(x.device, "index", 0) or 0)
     _require_cuda(x, "x")
     dt = _require_f32_f64(x, "x")
 
@@ -91,6 +94,16 @@ def maxpool2d_forward(
     # Allocate x_pad and pad with -inf
     nbytes_x_pad = int(N * C * H_pad * W_pad * np.dtype(dt).itemsize)
     x_pad_dev = cuda_malloc(lib, nbytes_x_pad)
+
+    from ..tensor._cuda_storage import _CudaStorage
+
+    storage_xpd = _CudaStorage(
+        lib=lib,
+        device_index=device_index,
+        dev_ptr=int(x_pad_dev),
+        nbytes=int(nbytes_x_pad),
+        dtype=dt,
+    )
 
     try:
         pad2d_cuda(
@@ -116,6 +129,22 @@ def maxpool2d_forward(
         y_dev = cuda_malloc(lib, nbytes_y)
         argmax_idx_dev = cuda_malloc(lib, nbytes_idx)
 
+        storage_yd = _CudaStorage(
+            lib=lib,
+            device_index=device_index,
+            dev_ptr=int(y_dev),
+            nbytes=int(nbytes_y),
+            dtype=dt,
+        )
+
+        storage_aid = _CudaStorage(
+            lib=lib,
+            device_index=device_index,
+            dev_ptr=int(argmax_idx_dev),
+            nbytes=int(nbytes_idx),
+            dtype=dt,
+        )
+
         try:
             maxpool2d_forward_cuda(
                 lib,
@@ -136,22 +165,33 @@ def maxpool2d_forward(
                 sync=True,
             )
 
-            y = Tensor._from_devptr(
-                int(y_dev),
+            # y = Tensor._from_devptr(
+            #     int(y_dev),
+            #     shape=(N, C, H_out, W_out),
+            #     dtype=dt,
+            #     device=x.device,
+            #     requires_grad=False,
+            # )
+            y = Tensor._from_storage(
+                storage_yd,
                 shape=(N, C, H_out, W_out),
                 dtype=dt,
                 device=x.device,
                 requires_grad=False,
             )
-            return y, int(argmax_idx_dev)
+            # return y, int(argmax_idx_dev)
+            return y, storage_aid
 
         except Exception:
-            cuda_free(lib, y_dev)
-            cuda_free(lib, argmax_idx_dev)
+            # cuda_free(lib, y_dev)
+            # cuda_free(lib, argmax_idx_dev)
+            storage_yd.decref()
+            storage_aid.decref()
             raise
 
     finally:
-        cuda_free(lib, x_pad_dev)
+        # cuda_free(lib, x_pad_dev)
+        storage_xpd.decref()
 
 
 def maxpool2d_backward(
@@ -171,6 +211,7 @@ def maxpool2d_backward(
     -----
     - Uses CUDA backward into grad_x_pad then crops back to (N,C,H,W) on device.
     """
+    device_index = int(getattr(grad_out.device, "index", 0) or 0)
     _require_cuda(grad_out, "grad_out")
     dt = _require_f32_f64(grad_out, "grad_out")
 
@@ -195,6 +236,27 @@ def maxpool2d_backward(
     # grad_x (cropped)
     nbytes_gx = int(N * C * H * W * np.dtype(dt).itemsize)
     grad_x_dev = cuda_malloc(lib, nbytes_gx)
+
+    assert grad_x_dev is not 0
+    assert grad_x_pad_dev is not 0
+
+    from ..tensor._cuda_storage import _CudaStorage
+
+    storage_gxpd = _CudaStorage(
+        lib=lib,
+        device_index=device_index,
+        dev_ptr=int(grad_x_pad_dev),
+        nbytes=nbytes_gx_pad,
+        dtype=dt,
+    )
+
+    storage_gxd = _CudaStorage(
+        lib=lib,
+        device_index=device_index,
+        dev_ptr=int(grad_x_dev),
+        nbytes=nbytes_gx,
+        dtype=dt,
+    )
 
     try:
         maxpool2d_backward_cuda(
@@ -229,8 +291,16 @@ def maxpool2d_backward(
             sync=True,
         )
 
-        return Tensor._from_devptr(
-            int(grad_x_dev),
+        # return Tensor._from_devptr(
+        #     int(grad_x_dev),
+        #     shape=(N, C, H, W),
+        #     dtype=dt,
+        #     device=grad_out.device,
+        #     requires_grad=False,
+        # )
+
+        return Tensor._from_storage(
+            storage_gxd,
             shape=(N, C, H, W),
             dtype=dt,
             device=grad_out.device,
@@ -238,11 +308,13 @@ def maxpool2d_backward(
         )
 
     except Exception:
-        cuda_free(lib, grad_x_dev)
+        # cuda_free(lib, grad_x_dev)
+        storage_gxd.decref()
         raise
 
     finally:
-        cuda_free(lib, grad_x_pad_dev)
+        # cuda_free(lib, grad_x_pad_dev)
+        storage_gxpd.decref()
 
 
 def avgpool2d_forward(
@@ -260,6 +332,8 @@ def avgpool2d_forward(
     -----
     - Pads with 0 on device (same semantics as CPU reference).
     """
+    device_index = int(getattr(x.device, "index", 0) or 0)
+
     _require_cuda(x, "x")
     dt = _require_f32_f64(x, "x")
 
@@ -282,6 +356,18 @@ def avgpool2d_forward(
     nbytes_x_pad = int(N * C * H_pad * W_pad * np.dtype(dt).itemsize)
     x_pad_dev = cuda_malloc(lib, nbytes_x_pad)
 
+    assert x_pad_dev is not 0
+
+    from ..tensor._cuda_storage import _CudaStorage
+
+    storage_xpd = _CudaStorage(
+        lib=lib,
+        device_index=device_index,
+        dev_ptr=int(x_pad_dev),
+        nbytes=nbytes_x_pad,
+        dtype=dt,
+    )
+
     try:
         pad2d_cuda(
             lib,
@@ -295,12 +381,22 @@ def avgpool2d_forward(
             p_w=p_w,
             pad_value=0.0,
             dtype=dt,
-            device=device,
+            device=device_index,
             sync=True,
         )
 
         nbytes_y = int(N * C * H_out * W_out * np.dtype(dt).itemsize)
         y_dev = cuda_malloc(lib, nbytes_y)
+
+        assert y_dev is not 0
+
+        storage_yd = _CudaStorage(
+            lib=lib,
+            device_index=device_index,
+            dev_ptr=int(y_dev),
+            nbytes=nbytes_y,
+            dtype=dt,
+        )
 
         try:
             avgpool2d_forward_cuda(
@@ -321,8 +417,16 @@ def avgpool2d_forward(
                 sync=True,
             )
 
-            return Tensor._from_devptr(
-                int(y_dev),
+            # return Tensor._from_devptr(
+            #     int(y_dev),
+            #     shape=(N, C, H_out, W_out),
+            #     dtype=dt,
+            #     device=x.device,
+            #     requires_grad=False,
+            # )
+
+            return Tensor._from_storage(
+                storage_yd,
                 shape=(N, C, H_out, W_out),
                 dtype=dt,
                 device=x.device,
@@ -330,11 +434,13 @@ def avgpool2d_forward(
             )
 
         except Exception:
-            cuda_free(lib, y_dev)
+            # cuda_free(lib, y_dev)
+            storage_yd.decref()
             raise
 
     finally:
-        cuda_free(lib, x_pad_dev)
+        # cuda_free(lib, x_pad_dev)
+        storage_xpd.decref()
 
 
 def avgpool2d_backward(
@@ -353,6 +459,7 @@ def avgpool2d_backward(
     -----
     - Accumulates into grad_x_pad then crops to (N,C,H,W) on device.
     """
+    device_index = int(getattr(grad_out.device, "index", 0) or 0)
     _require_cuda(grad_out, "grad_out")
     dt = _require_f32_f64(grad_out, "grad_out")
 
@@ -374,6 +481,24 @@ def avgpool2d_backward(
 
     nbytes_gx = int(N * C * H * W * np.dtype(dt).itemsize)
     grad_x_dev = cuda_malloc(lib, nbytes_gx)
+
+    from ..tensor._cuda_storage import _CudaStorage
+
+    storage_gxpd = _CudaStorage(
+        lib=lib,
+        device_index=device_index,
+        dev_ptr=int(grad_x_pad_dev),
+        nbytes=int(nbytes_gx_pad),
+        dtype=dt,
+    )
+
+    storage_gxd = _CudaStorage(
+        lib=lib,
+        device_index=device_index,
+        dev_ptr=int(grad_x_dev),
+        nbytes=int(nbytes_gx),
+        dtype=dt,
+    )
 
     try:
         avgpool2d_backward_cuda(
@@ -411,8 +536,16 @@ def avgpool2d_backward(
             sync=True,
         )
 
-        return Tensor._from_devptr(
-            int(grad_x_dev),
+        # return Tensor._from_devptr(
+        #     int(grad_x_dev),
+        #     shape=(N, C, H, W),
+        #     dtype=dt,
+        #     device=grad_out.device,
+        #     requires_grad=False,
+        # )
+
+        return Tensor._from_storage(
+            storage_gxd,
             shape=(N, C, H, W),
             dtype=dt,
             device=grad_out.device,
@@ -420,15 +553,18 @@ def avgpool2d_backward(
         )
 
     except Exception:
-        cuda_free(lib, grad_x_dev)
+        # cuda_free(lib, grad_x_dev)
+        storage_gxd.decref()
         raise
 
     finally:
-        cuda_free(lib, grad_x_pad_dev)
+        # cuda_free(lib, grad_x_pad_dev)
+        storage_gxpd.decref()
 
 
 def global_avgpool2d_forward(x: Tensor, *, device: int = 0) -> Tensor:
     """GlobalAvgPool2D forward (CUDA)."""
+    device_index = int(getattr(x.device, "index", 0) or 0)
     _require_cuda(x, "x")
     dt = _require_f32_f64(x, "x")
 
@@ -439,6 +575,16 @@ def global_avgpool2d_forward(x: Tensor, *, device: int = 0) -> Tensor:
 
     nbytes_y = int(N * C * 1 * 1 * np.dtype(dt).itemsize)
     y_dev = cuda_malloc(lib, nbytes_y)
+
+    from ..tensor._cuda_storage import _CudaStorage
+
+    storage_yd = _CudaStorage(
+        lib=lib,
+        device_index=device_index,
+        dev_ptr=int(y_dev),
+        nbytes=int(nbytes_y),
+        dtype=dt,
+    )
 
     try:
         global_avgpool2d_forward_cuda(
@@ -453,20 +599,30 @@ def global_avgpool2d_forward(x: Tensor, *, device: int = 0) -> Tensor:
             sync=True,
         )
 
-        return Tensor._from_devptr(
-            int(y_dev),
+        # return Tensor._from_devptr(
+        #     int(y_dev),
+        #     shape=(N, C, 1, 1),
+        #     dtype=dt,
+        #     device=x.device,
+        #     requires_grad=False,
+        # )
+
+        return Tensor._from_storage(
+            storage_yd,
             shape=(N, C, 1, 1),
             dtype=dt,
             device=x.device,
             requires_grad=False,
         )
     except Exception:
-        cuda_free(lib, y_dev)
+        # cuda_free(lib, y_dev)
+        storage_yd.decref()
         raise
 
 
 def global_avgpool2d_backward(grad_out: Tensor, *, x_shape, device: int = 0) -> Tensor:
     """GlobalAvgPool2D backward (CUDA)."""
+    device_index = int(getattr(grad_out.device, "index", 0) or 0)
     _require_cuda(grad_out, "grad_out")
     dt = _require_f32_f64(grad_out, "grad_out")
 
@@ -478,6 +634,16 @@ def global_avgpool2d_backward(grad_out: Tensor, *, x_shape, device: int = 0) -> 
     nbytes_gx = int(N * C * H * W * np.dtype(dt).itemsize)
     gx_dev = cuda_malloc(lib, nbytes_gx)
     cuda_memset(lib, gx_dev, 0, nbytes_gx)
+
+    from ..tensor._cuda_storage import _CudaStorage
+
+    storage_gx = _CudaStorage(
+        lib=lib,
+        device_index=device_index,
+        dev_ptr=int(gx_dev),
+        nbytes=int(nbytes_gx),
+        dtype=dt,
+    )
 
     try:
         global_avgpool2d_backward_cuda(
@@ -492,13 +658,23 @@ def global_avgpool2d_backward(grad_out: Tensor, *, x_shape, device: int = 0) -> 
             sync=True,
         )
 
-        return Tensor._from_devptr(
-            int(gx_dev),
+        # return Tensor._from_devptr(
+        #     int(gx_dev),
+        #     shape=(N, C, H, W),
+        #     dtype=dt,
+        #     device=grad_out.device,
+        #     requires_grad=False,
+        # )
+
+        return Tensor._from_storage(
+            storage_gx,
             shape=(N, C, H, W),
             dtype=dt,
             device=grad_out.device,
             requires_grad=False,
         )
+
     except Exception:
-        cuda_free(lib, gx_dev)
+        # cuda_free(lib, gx_dev)
+        storage_gx.decref()
         raise
