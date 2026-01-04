@@ -144,13 +144,6 @@ def sum_all_forward(x: Tensor, *, device: int = 0, sync: bool = True) -> Tensor:
             dtype=np.dtype(dt),
             sync=bool(sync),
         )
-        # return Tensor._from_devptr(
-        #     int(y_dev),
-        #     shape=(),
-        #     dtype=dt,
-        #     device=x.device,
-        #     requires_grad=False,
-        # )
         return Tensor._from_storage(
             storage_yd,
             shape=(),
@@ -159,7 +152,6 @@ def sum_all_forward(x: Tensor, *, device: int = 0, sync: bool = True) -> Tensor:
             requires_grad=False,
         )
     except Exception:
-        # cuda_free(lib, y_dev)
         storage_yd.decref()
         raise
 
@@ -215,13 +207,6 @@ def mean_all_forward(x: Tensor, *, device: int = 0, sync: bool = True) -> Tensor
             dtype=np.dtype(dt),
             sync=bool(sync),
         )
-        # return Tensor._from_devptr(
-        #     int(y_dev),
-        #     shape=(),
-        #     dtype=dt,
-        #     device=x.device,
-        #     requires_grad=False,
-        # )
         return Tensor._from_storage(
             storage_yd,
             shape=(),
@@ -230,7 +215,6 @@ def mean_all_forward(x: Tensor, *, device: int = 0, sync: bool = True) -> Tensor
             requires_grad=False,
         )
     except Exception:
-        # cuda_free(lib, y_dev)
         storage_yd.decref()
         raise
 
@@ -300,13 +284,6 @@ def sum_axis2d_forward(
             dtype=np.dtype(dt),
             sync=bool(sync),
         )
-        # return Tensor._from_devptr(
-        #     int(y_dev),
-        #     shape=out_shape,
-        #     dtype=dt,
-        #     device=x.device,
-        #     requires_grad=False,
-        # )
         return Tensor._from_storage(
             storage_yd,
             shape=out_shape,
@@ -315,7 +292,6 @@ def sum_axis2d_forward(
             requires_grad=False,
         )
     except Exception:
-        # cuda_free(lib, y_dev)
         storage_yd.decref()
         raise
 
@@ -397,13 +373,6 @@ def sum_axis2d_backward(
             dtype=np.dtype(dt),
             sync=bool(sync),
         )
-        # return Tensor._from_devptr(
-        #     int(gx_dev),
-        #     shape=(rows_i, cols_i),
-        #     dtype=dt,
-        #     device=grad_out.device,
-        #     requires_grad=False,
-        # )
         return Tensor._from_storage(
             storage_gd,
             shape=(rows_i, cols_i),
@@ -412,7 +381,6 @@ def sum_axis2d_backward(
             requires_grad=False,
         )
     except Exception:
-        # cuda_free(lib, gx_dev)
         storage_gd.decref()
         raise
 
@@ -483,13 +451,6 @@ def sum_backward_fill_forward(
             dtype=np.dtype(dt),
             sync=bool(sync),
         )
-        # return Tensor._from_devptr(
-        #     int(gx_dev),
-        #     shape=(n,),
-        #     dtype=dt,
-        #     device=grad_out_scalar.device,
-        #     requires_grad=False,
-        # )
         return Tensor._from_storage(
             storage_gd,
             shape=(n,),
@@ -498,7 +459,6 @@ def sum_backward_fill_forward(
             requires_grad=False,
         )
     except Exception:
-        # cuda_free(lib, gx_dev)
         storage_gd.decref()
         raise
 
@@ -564,13 +524,6 @@ def mean_backward_fill_forward(
             dtype=np.dtype(dt),
             sync=bool(sync),
         )
-        # return Tensor._from_devptr(
-        #     int(gx_dev),
-        #     shape=(n,),
-        #     dtype=dt,
-        #     device=grad_out_scalar.device,
-        #     requires_grad=False,
-        # )
         return Tensor._from_storage(
             storage_gd,
             shape=(n,),
@@ -579,7 +532,6 @@ def mean_backward_fill_forward(
             requires_grad=False,
         )
     except Exception:
-        # cuda_free(lib, gx_dev)
         storage_gd.decref()
         raise
 
@@ -646,13 +598,6 @@ def max_axis2d_forward(
             sync=bool(sync),
         )
 
-        # y = Tensor._from_devptr(
-        #     int(y_dev),
-        #     shape=y_shape,
-        #     dtype=dt,
-        #     device=x.device,
-        #     requires_grad=False,
-        # )
         y = Tensor._from_storage(
             storage_yd,
             shape=y_shape,
@@ -660,13 +605,6 @@ def max_axis2d_forward(
             device=x.device,
             requires_grad=False,
         )
-        # idx = Tensor._from_devptr(
-        #     int(idx_dev),
-        #     shape=idx_shape,
-        #     dtype=np.dtype(np.int64),
-        #     device=x.device,
-        #     requires_grad=False,
-        # )
         idx = Tensor._from_storage(
             storage_id,
             shape=idx_shape,
@@ -677,8 +615,6 @@ def max_axis2d_forward(
         return y, idx
 
     except Exception:
-        # cuda_free(lib, y_dev)
-        # cuda_free(lib, idx_dev)
         storage_yd.decref()
         storage_id.decref()
         raise
@@ -748,13 +684,6 @@ def max_axis2d_backward(
             zero_grad_x=bool(zero_grad_x),
             sync=bool(sync),
         )
-        # return Tensor._from_devptr(
-        #     int(gx_dev),
-        #     shape=(rows_i, cols_i),
-        #     dtype=dt,
-        #     device=grad_out.device,
-        #     requires_grad=False,
-        # )
         return Tensor._from_storage(
             storage_gd,
             shape=(rows_i, cols_i),
@@ -763,7 +692,6 @@ def max_axis2d_backward(
             requires_grad=False,
         )
     except Exception:
-        # cuda_free(lib, gx_dev)
         storage_gd.decref()
         raise
 
@@ -851,13 +779,6 @@ def sum_to_shape_forward(
             sync=bool(sync),
         )
 
-        # return Tensor._from_devptr(
-        #     int(y_dev),
-        #     shape=out_shape_t,  # keep original (rank-dropped) shape
-        #     dtype=dt,
-        #     device=x.device,
-        #     requires_grad=False,
-        # )
         return Tensor._from_storage(
             storage_yd,
             shape=out_shape_t,
@@ -866,7 +787,6 @@ def sum_to_shape_forward(
             requires_grad=False,
         )
     except Exception:
-        # cuda_free(lib, y_dev)
         storage_yd.decref()
         raise
 
