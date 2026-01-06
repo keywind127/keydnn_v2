@@ -1,18 +1,28 @@
 """
-Dense (Keras-style) layer with lazy in_features inference.
+Dense (Keras-style) layer with lazy input-dimension inference.
 
-`Dense` behaves like a Keras Dense layer and like PyTorch's LazyLinear:
-users specify only `out_features`, and `in_features` is inferred from the
-first input `x` at runtime (x.shape[1]).
+This module defines a `Dense` layer that combines the ergonomics of Keras'
+`Dense` with the lazy parameter initialization behavior of PyTorch's
+`LazyLinear`.
 
-Once built, this module delegates computation to the existing `Linear`
-implementation (CPU/CUDA supported there).
+Users specify only `out_features` at construction time. The corresponding
+`in_features` dimension is inferred from the first input tensor passed to
+`forward` (specifically `x.shape[1]`).
 
-Notes
------
-- Input must be 2D: (batch, in_features), consistent with `Linear`.
-- If `device` is not provided, `Dense` adopts the first input's device.
-- If `device` is provided, forward enforces x.device matches it (no implicit moves).
+Once built, this module delegates all numerical computation, autograd logic,
+and device-specific behavior to the existing `Linear` implementation, which
+supports both CPU and CUDA backends.
+
+Design Notes
+------------
+- Inputs must be 2D tensors of shape `(batch, in_features)`, consistent with
+  the `Linear` module contract.
+- If `device` is not provided at construction time, the layer adopts the device
+  of the first input tensor.
+- If `device` *is* provided, `forward` enforces that all inputs already reside
+  on that device (no implicit device transfers are performed).
+- Parameter materialization occurs exactly once, either during the first
+  forward pass or eagerly during deserialization if `in_features` is known.
 """
 
 from __future__ import annotations
@@ -32,14 +42,20 @@ class Dense(Module):
     """
     Keras-style Dense layer with lazy input-dimension inference.
 
+    This layer delays parameter creation until the first forward pass, at which
+    point the input feature dimension is inferred from the input tensor.
+    Internally, it constructs and delegates execution to a fully-initialized
+    `Linear` submodule.
+
     Parameters
     ----------
     out_features : int
-        Number of output features per example.
+        Number of output features per input example.
     bias : bool, optional
         If True, include a learnable bias term. Defaults to True.
     device : Optional[Device], optional
-        Desired device placement. If None, adopts the first input's device.
+        Desired device placement for parameters and computation. If None, the
+        device is inferred from the first input tensor.
     """
 
     def __init__(
@@ -48,6 +64,18 @@ class Dense(Module):
         bias: bool = True,
         device: Optional[Device] = None,
     ) -> None:
+        """
+        Initialize a lazy Dense layer.
+
+        At construction time, only the output dimensionality is fixed.
+        The input dimensionality and parameters are initialized later when
+        sufficient runtime information is available.
+
+        Raises
+        ------
+        ValueError
+            If `out_features` is not a positive integer.
+        """
         super().__init__()
         if out_features <= 0:
             raise ValueError("out_features must be a positive integer")
@@ -62,13 +90,41 @@ class Dense(Module):
 
     @property
     def is_built(self) -> bool:
+        """
+        Return whether this layer has been materialized.
+
+        A Dense layer is considered *built* once its internal `Linear`
+        submodule has been constructed and parameters have been allocated.
+
+        Returns
+        -------
+        bool
+            True if parameters have been initialized, False otherwise.
+        """
         return self._linear is not None
 
     def _build(self, in_features: int, *, device: Device) -> None:
         """
-        Materialize parameters by constructing an internal `Linear`.
-        This is called exactly once (first forward), or during from_config
-        when in_features is known.
+        Materialize parameters by constructing the internal `Linear` submodule.
+
+        This method is invoked exactly once during the layer's lifetime,
+        either on the first forward pass or during deserialization when
+        `in_features` is known ahead of time.
+
+        Parameters
+        ----------
+        in_features : int
+            Number of input features inferred from the input tensor.
+        device : Device
+            Device on which parameters should be allocated.
+
+        Raises
+        ------
+        ValueError
+            If `in_features` is not a positive integer.
+        RuntimeError
+            If the layer has already been built with a conflicting
+            `in_features` value.
         """
         if in_features <= 0:
             raise ValueError("in_features must be a positive integer")
@@ -85,17 +141,42 @@ class Dense(Module):
         self.in_features = int(in_features)
         self.device = device
 
-        # Delegate all math/autograd/device paths to your proven Linear
+        # Delegate all math/autograd/device paths to the Linear implementation
         self._linear = Linear(
             in_features=self.in_features,
             out_features=self.out_features,
             bias=self._use_bias,
             device=self.device,
         )
-        # Register as submodule so state/serialization can see it
+        # Register as submodule so state tracking and serialization can see it
         self.register_module("linear", self._linear)
 
     def forward(self, x: Tensor) -> Tensor:
+        """
+        Apply the Dense transformation to the input tensor.
+
+        On the first invocation, this method infers the input feature dimension
+        from `x`, constructs the internal `Linear` submodule, and then delegates
+        execution to it.
+
+        Parameters
+        ----------
+        x : Tensor
+            Input tensor of shape `(batch, in_features)`.
+
+        Returns
+        -------
+        Tensor
+            Output tensor of shape `(batch, out_features)`.
+
+        Raises
+        ------
+        ValueError
+            If the input tensor is not 2-dimensional.
+        RuntimeError
+            If a device mismatch is detected between the input tensor and
+            the layer's configured device.
+        """
         # Validate 2D input (same contract as Linear)
         x_shape = x.shape
         if len(x_shape) != 2:
@@ -112,7 +193,8 @@ class Dense(Module):
             # enforce device match (no implicit moves)
             if str(x.device) != str(self.device):
                 raise RuntimeError(
-                    f"Dense.forward device mismatch: x.device={x.device} vs layer.device={self.device}"
+                    f"Dense.forward device mismatch: "
+                    f"x.device={x.device} vs layer.device={self.device}"
                 )
             # build if needed
             self._build(inferred_in, device=self.device)
@@ -125,10 +207,16 @@ class Dense(Module):
     # -------------------------------------------------------------------------
     def get_config(self) -> Dict[str, Any]:
         """
-        Return JSON-serializable constructor configuration.
+        Return a JSON-serializable configuration dictionary.
 
-        For lazy modules, we store `in_features` if the module has been built.
-        This allows reconstructing the module structure deterministically.
+        For lazy modules, this includes `in_features` if the layer has already
+        been built. This enables deterministic reconstruction of the module
+        structure during deserialization.
+
+        Returns
+        -------
+        Dict[str, Any]
+            Constructor configuration suitable for JSON serialization.
         """
         return {
             "out_features": int(self.out_features),
@@ -141,6 +229,23 @@ class Dense(Module):
 
     @classmethod
     def from_config(cls, cfg: Dict[str, Any]) -> "Dense":
+        """
+        Reconstruct a Dense layer from a serialized configuration.
+
+        If `in_features` is present in the configuration, the layer is eagerly
+        built so that its structure matches the saved state. Parameter values
+        are typically restored separately from a checkpoint.
+
+        Parameters
+        ----------
+        cfg : Dict[str, Any]
+            Configuration dictionary produced by `get_config`.
+
+        Returns
+        -------
+        Dense
+            Reconstructed Dense module.
+        """
         dev = cfg.get("device", None)
         device = Device(str(dev)) if dev is not None else None
 
