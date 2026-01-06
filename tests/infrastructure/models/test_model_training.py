@@ -9,7 +9,7 @@ class TestSequentialXORTraining(unittest.TestCase):
         # Only skip when components truly cannot be imported.
         try:
             from src.keydnn.infrastructure._models import Sequential
-            from src.keydnn.infrastructure._linear import Linear
+            from src.keydnn.infrastructure.fully_connected._linear import Linear
             from src.keydnn.infrastructure._activations import Sigmoid
             from src.keydnn.infrastructure.tensor._tensor import Tensor
             from src.keydnn.domain.device._device import Device

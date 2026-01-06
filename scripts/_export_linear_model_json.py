@@ -25,7 +25,7 @@ import numpy as np
 
 from keydnn.infrastructure.tensor._tensor import Tensor
 from keydnn.infrastructure._models import Sequential
-from keydnn.infrastructure._linear import Linear
+from keydnn.infrastructure.fully_connected._linear import Linear
 
 
 def main() -> None:

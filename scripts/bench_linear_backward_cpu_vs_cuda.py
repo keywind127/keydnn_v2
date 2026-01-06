@@ -40,7 +40,7 @@ if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
 from keydnn.domain.device._device import Device
-from keydnn.infrastructure._linear import Linear
+from keydnn.infrastructure.fully_connected._linear import Linear
 from keydnn.infrastructure.tensor._tensor import Tensor
 
 # CUDA utils (try-import; match your other bench scripts style)

@@ -52,7 +52,7 @@ if SRC_DIR not in sys.path:
 
 from keydnn.domain.device._device import Device
 from keydnn.infrastructure.tensor._tensor import Tensor
-from keydnn.infrastructure._linear import Linear  # adjust if your path differs
+from keydnn.infrastructure.fully_connected._linear import Linear  # adjust if your path differs
 
 
 # -------------------------

@@ -50,13 +50,13 @@ from __future__ import annotations
 
 from typing import Optional, Any, Dict
 
-from .tensor._tensor_context import Context
+from ..tensor._tensor_context import Context
 
-from .module._serialization_core import register_module
-from ._module import Module
-from ._parameter import Parameter
-from .tensor._tensor import Tensor
-from ..domain.device._device import Device
+from ..module._serialization_core import register_module
+from .._module import Module
+from .._parameter import Parameter
+from ..tensor._tensor import Tensor
+from ...domain.device._device import Device
 
 
 import numpy as np
@@ -114,19 +114,19 @@ def _load_param_tensor_from_numpy(t, arr: np.ndarray) -> None:
     # Locate a cudaMemcpyHtoD wrapper (be resilient to module moves)
     def _import_cudaMemcpyHtoD():
         try:
-            from .native_cuda.python.maxpool2d_ctypes import cudaMemcpyHtoD  # type: ignore
+            from ..native_cuda.python.maxpool2d_ctypes import cudaMemcpyHtoD  # type: ignore
 
             return cudaMemcpyHtoD
         except Exception:
             pass
         try:
-            from .native_cuda.python.global_avgpool2d_ctypes import cudaMemcpyHtoD  # type: ignore
+            from ..native_cuda.python.global_avgpool2d_ctypes import cudaMemcpyHtoD  # type: ignore
 
             return cudaMemcpyHtoD
         except Exception:
             pass
         try:
-            from .native_cuda.python.avgpool2d_ctypes import cudaMemcpyHtoD  # type: ignore
+            from ..native_cuda.python.avgpool2d_ctypes import cudaMemcpyHtoD  # type: ignore
 
             return cudaMemcpyHtoD
         except Exception:
@@ -142,7 +142,7 @@ def _load_param_tensor_from_numpy(t, arr: np.ndarray) -> None:
     if hasattr(t, "_get_cuda_lib") and callable(getattr(t, "_get_cuda_lib")):
         lib = t._get_cuda_lib()
     else:
-        from .tensor._tensor import Tensor as _Tensor
+        from ..tensor._tensor import Tensor as _Tensor
 
         lib = _Tensor._get_cuda_lib()
 
@@ -381,7 +381,7 @@ class Linear(Module):
                 batch = x_shape[0]
                 # b2d = Tensor.stack([self.bias] * int(batch), axis=0)  # (batch, out)
                 # y = y + b2d
-                from .ops.bias_add_cuda_ext import bias_add_inplace
+                from ..ops.bias_add_cuda_ext import bias_add_inplace
 
                 bias_add_inplace(y, self.bias, device=0, sync=False)
 

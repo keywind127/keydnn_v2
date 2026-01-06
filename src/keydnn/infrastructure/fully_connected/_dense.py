@@ -30,7 +30,7 @@ from __future__ import annotations
 from typing import Optional, Any, Dict
 
 from .._module import Module
-from .._linear import Linear
+from ._linear import Linear
 from ..module._serialization_core import register_module
 from ...domain.device._device import Device
 
@@ -264,3 +264,11 @@ class Dense(Module):
             m._build(int(in_features), device=build_dev)
 
         return m
+
+
+LazyLinear = Dense
+
+__all__ = [
+    Dense.__name__,
+    "LazyLinear",
+]

@@ -25,7 +25,7 @@ def _cuda_available() -> bool:
 
 def main() -> None:
     from keydnn.infrastructure._models import Sequential
-    from keydnn.infrastructure._linear import Linear
+    from keydnn.infrastructure.fully_connected._linear import Linear
     from keydnn.infrastructure._activations import Sigmoid
     from keydnn.infrastructure.tensor._tensor import Tensor
     from keydnn.domain.device._device import Device
