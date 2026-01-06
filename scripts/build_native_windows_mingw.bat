@@ -75,6 +75,14 @@ set "COMMON_FLAGS=-O3 -std=c++17 -shared"
 set "SRC1=%SRC_DIR%\keydnn_maxpool2d.cpp"
 set "SRC2=%SRC_DIR%\keydnn_avgpool2d.cpp"
 set "SRC3=%SRC_DIR%\keydnn_conv2d.cpp"
+set "SRC4=%SRC_DIR%\keydnn_conv2d_transpose.cpp"
+
+for %%F in ("%SRC1%" "%SRC2%" "%SRC3%" "%SRC4%") do (
+  if not exist "%%~F" (
+    echo [KeyDNN] ERROR: source file not found: %%~F
+    exit /b 1
+  )
+)
 
 REM -------------------------
 REM 1) Baseline build (no OpenMP)
@@ -88,6 +96,7 @@ echo   ^> %OUT_LIB_BASE%
   "%SRC1%" ^
   "%SRC2%" ^
   "%SRC3%" ^
+  "%SRC4%" ^
   -o "%OUT_LIB_BASE%" || goto :fail_base
 
 REM -------------------------
@@ -102,6 +111,7 @@ echo   ^> %OUT_LIB_OMP%
   "%SRC1%" ^
   "%SRC2%" ^
   "%SRC3%" ^
+  "%SRC4%" ^
   -o "%OUT_LIB_OMP%" || goto :fail_omp
 
 REM -------------------------

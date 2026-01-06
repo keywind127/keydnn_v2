@@ -79,7 +79,16 @@ SOURCES=(
   "$SRC_DIR/keydnn_maxpool2d.cpp"
   "$SRC_DIR/keydnn_avgpool2d.cpp"
   "$SRC_DIR/keydnn_conv2d.cpp"
+  "$SRC_DIR/keydnn_conv2d_transpose.cpp"
 )
+
+# Optional: fail fast if any source is missing
+for f in "${SOURCES[@]}"; do
+  if [[ ! -f "$f" ]]; then
+    echo "[KeyDNN] ERROR: source file not found: $f" >&2
+    exit 1
+  fi
+done
 
 # -------------------------
 # 1) Baseline build (no OpenMP)
