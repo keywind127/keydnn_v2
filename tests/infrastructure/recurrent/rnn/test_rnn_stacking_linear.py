@@ -4,7 +4,7 @@ import numpy as np
 from src.keydnn.domain.device._device import Device
 from src.keydnn.infrastructure.tensor._tensor import Tensor
 from src.keydnn.infrastructure.recurrent._rnn_module import RNN
-from src.keydnn.infrastructure._linear import (
+from src.keydnn.infrastructure.fully_connected._linear import (
     Linear,
 )
 

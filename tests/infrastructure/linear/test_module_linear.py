@@ -5,7 +5,7 @@ import numpy as np
 
 from src.keydnn.domain.device._device import Device
 from src.keydnn.infrastructure._module import Module
-from src.keydnn.infrastructure._linear import Linear
+from src.keydnn.infrastructure.fully_connected._linear import Linear
 from src.keydnn.infrastructure._parameter import Parameter
 from src.keydnn.infrastructure.tensor._tensor import Tensor
 

@@ -7,7 +7,7 @@ from src.keydnn.domain.device._device import Device
 from src.keydnn.infrastructure.layers._dropout import Dropout
 from src.keydnn.infrastructure.tensor._tensor import Tensor
 
-from src.keydnn.infrastructure._linear import Linear
+from src.keydnn.infrastructure.fully_connected._linear import Linear
 from src.keydnn.infrastructure.recurrent._rnn_module import RNNCell
 from src.keydnn.infrastructure.convolution._conv2d_module import Conv2d
 

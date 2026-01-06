@@ -11,7 +11,7 @@ import numpy as np
 from src.keydnn.domain.device._device import Device
 from src.keydnn.infrastructure.tensor._tensor import Tensor
 from src.keydnn.infrastructure._models import Sequential
-from src.keydnn.infrastructure._linear import Linear
+from src.keydnn.infrastructure.fully_connected._linear import Linear
 
 
 def _cuda_available() -> bool:
