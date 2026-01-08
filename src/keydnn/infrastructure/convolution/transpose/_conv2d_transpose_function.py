@@ -8,8 +8,10 @@ KeyDNN’s autograd engine.
 Responsibilities and boundaries
 --------------------------------
 - `Conv2dTransposeFn` contains **no NumPy code** and performs no direct array ops.
-- All Tensor ↔ NumPy bridging and CPU kernel execution are delegated to
-  boundary helpers in `conv2d_transpose_cpu_ext`.
+- All Tensor ↔ NumPy bridging and backend kernel execution are delegated to
+  boundary helpers in:
+  - `conv2d_transpose_cpu_ext` (CPU)
+  - `conv2d_transpose_cuda_ext` (CUDA)
 - This keeps autograd logic (graph wiring, saved tensors, gradient routing)
   separated from backend-specific implementations.
 
@@ -24,8 +26,8 @@ Layout and semantics
 Autograd behavior
 -----------------
 - During `forward`, required tensors and metadata are saved into `Context`.
-- During `backward`, gradients are computed via the CPU boundary helper and
-  conditionally returned based on each input’s `requires_grad` flag.
+- During `backward`, gradients are computed via the appropriate backend boundary
+  helper and conditionally returned based on each input’s `requires_grad` flag.
 """
 
 from __future__ import annotations
@@ -41,15 +43,44 @@ from ...ops.conv2d_transpose_cpu_ext import (
     conv2d_transpose_forward_cpu_tensor,
     conv2d_transpose_backward_cpu_tensor,
 )
+from ...ops.conv2d_transpose_cuda_ext import (
+    conv2d_transpose_forward_cuda_tensor,
+    conv2d_transpose_backward_cuda_tensor,
+)
+
+
+def _cuda_device_index(dev: object) -> int:
+    """
+    Best-effort: extract CUDA device index from a Device-like object.
+
+    Prefers `dev.index` when present; otherwise parses string forms like "cuda:0".
+    """
+    idx = getattr(dev, "index", None)
+    if idx is not None:
+        try:
+            return int(idx)
+        except Exception:
+            pass
+
+    s = str(dev)
+    if "cuda" not in s:
+        return 0
+    if ":" in s:
+        tail = s.split(":", 1)[1].strip()
+        try:
+            return int(tail)
+        except Exception:
+            return 0
+    return 0
 
 
 class Conv2dTransposeFn(Function):
     """
-    Autograd-enabled 2D transposed convolution primitive (NCHW, IOHW, CPU-only).
+    Autograd-enabled 2D transposed convolution primitive (NCHW, IOHW).
 
     `Conv2dTransposeFn` is a pure autograd wrapper:
     - it wires forward/backward into KeyDNN's autograd engine,
-    - it delegates all numeric compute to CPU backend boundary helpers.
+    - it delegates all numeric compute to backend boundary helpers (CPU/CUDA).
     """
 
     @staticmethod
@@ -91,8 +122,8 @@ class Conv2dTransposeFn(Function):
 
         Notes
         -----
-        - CPU-only for now. CUDA dispatch should be added when a CUDA backend exists.
         - No implicit cross-device copy is performed.
+        - Backend dispatch is selected by `x.device` (CPU vs CUDA).
         """
         stride2 = _pair(stride)
         padding2 = _pair(padding)
@@ -114,25 +145,33 @@ class Conv2dTransposeFn(Function):
             bias is not None and bias.requires_grad
         )
 
+        # Dispatch by device
         if x.device.is_cuda():
-            # Not implemented yet; avoid silent CPU fallback / cross-device copy.
-            raise RuntimeError(
-                "conv2d_transpose is not available on CUDA yet. "
-                "Move tensors to CPU or implement CUDA backend dispatch."
+            device_index = _cuda_device_index(x.device)
+            y = conv2d_transpose_forward_cuda_tensor(
+                x,
+                weight,
+                bias,
+                stride=stride2,
+                padding=padding2,
+                output_padding=outpad2,
+                out_requires_grad=out_req,
+                device_index=int(device_index),
+                sync=True,
             )
-        if not x.device.is_cpu():
+        elif x.device.is_cpu():
+            y = conv2d_transpose_forward_cpu_tensor(
+                x,
+                weight,
+                bias,
+                stride=stride2,
+                padding=padding2,
+                output_padding=outpad2,
+                out_requires_grad=out_req,
+            )
+        else:
             x._raise_device_not_supported("conv2d_transpose_forward")
             raise RuntimeError("Unreachable")
-
-        y = conv2d_transpose_forward_cpu_tensor(
-            x,
-            weight,
-            bias,
-            stride=stride2,
-            padding=padding2,
-            output_padding=outpad2,
-            out_requires_grad=out_req,
-        )
 
         # Save tensors + meta for backward
         ctx.save_for_backward(x, weight)
@@ -143,6 +182,7 @@ class Conv2dTransposeFn(Function):
         ctx.saved_meta["stride"] = stride2
         ctx.saved_meta["padding"] = padding2
         ctx.saved_meta["output_padding"] = outpad2
+        ctx.saved_meta["is_cuda"] = bool(x.device.is_cuda())
 
         return y
 
@@ -176,6 +216,7 @@ class Conv2dTransposeFn(Function):
         stride: Tuple[int, int] = ctx.saved_meta["stride"]
         padding: Tuple[int, int] = ctx.saved_meta["padding"]
         output_padding: Tuple[int, int] = ctx.saved_meta["output_padding"]
+        is_cuda: bool = bool(ctx.saved_meta.get("is_cuda", False))
 
         x = ctx.saved_tensors[0]
         weight = ctx.saved_tensors[1]
@@ -188,23 +229,29 @@ class Conv2dTransposeFn(Function):
                 f"got grad_out={grad_out.device} x={x.device}"
             )
 
-        if x.device.is_cuda():
-            raise RuntimeError(
-                "conv2d_transpose backward is not available on CUDA yet."
+        if is_cuda:
+            device_index = _cuda_device_index(x.device)
+            gx, gw, gb = conv2d_transpose_backward_cuda_tensor(
+                x,
+                weight,
+                bias,
+                grad_out,
+                stride=stride,
+                padding=padding,
+                output_padding=output_padding,
+                device_index=int(device_index),
+                sync=True,
             )
-        if not x.device.is_cpu():
-            x._raise_device_not_supported("conv2d_transpose_backward")
-            raise RuntimeError("Unreachable")
-
-        gx, gw, gb = conv2d_transpose_backward_cpu_tensor(
-            x,
-            weight,
-            bias,
-            grad_out,
-            stride=stride,
-            padding=padding,
-            output_padding=output_padding,
-        )
+        else:
+            gx, gw, gb = conv2d_transpose_backward_cpu_tensor(
+                x,
+                weight,
+                bias,
+                grad_out,
+                stride=stride,
+                padding=padding,
+                output_padding=output_padding,
+            )
 
         grad_x = gx if x.requires_grad else None
         grad_w = gw if weight.requires_grad else None
