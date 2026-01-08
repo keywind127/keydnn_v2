@@ -76,3 +76,7 @@ class TestWeightInitializerRegistry(unittest.TestCase):
         self.assertTrue(called["ok"])
         self.assertEqual(t.data.shape, (3, 5))
         self.assertTrue((t.data == 0).all())
+
+
+if __name__ == "__main__":
+    unittest.main()

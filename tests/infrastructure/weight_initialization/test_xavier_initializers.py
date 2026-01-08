@@ -130,3 +130,7 @@ class TestXavierInitializers(unittest.TestCase):
         self._assert_mean_std_close(
             t.data, expected_std=expected_std, atol_mean=5e-3, rtol_std=0.10
         )
+
+
+if __name__ == "__main__":
+    unittest.main()
