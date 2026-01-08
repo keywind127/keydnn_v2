@@ -86,6 +86,7 @@
   <ItemGroup>
     <CudaCompile Include="kernel.cu" />
     <CudaCompile Include="keydnn_avgpool2d_cuda.cu" />
+    <CudaCompile Include="keydnn_conv2d_transpose_cuda.cu" />
     <CudaCompile Include="keydnn_cuda_broadcast_to.cu" />
     <CudaCompile Include="keydnn_cuda_conv2d.cu" />
     <CudaCompile Include="keydnn_cuda_exp.cu" />
