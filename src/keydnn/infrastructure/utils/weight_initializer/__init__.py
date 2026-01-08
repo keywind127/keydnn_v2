@@ -26,6 +26,7 @@ Notes
 
 from ._xavier import *
 from ._kaiming import *
+from ._constants import *
 from ._base import WeightInitializer
 
 __all__ = [
