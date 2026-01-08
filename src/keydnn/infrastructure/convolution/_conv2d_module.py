@@ -4,7 +4,7 @@ Conv2D module implementation for KeyDNN.
 This module defines a trainable 2D convolution layer (`Conv2d`) built on top of
 the KeyDNN autograd system. It serves as the high-level, user-facing abstraction
 that owns convolution parameters (weights and optional bias) and delegates
-numerical computation to the lower-level `Conv2dFn` and CPU convolution kernels.
+numerical computation to the lower-level `Conv2dFn` and convolution backends.
 
 Design overview
 ---------------
@@ -15,13 +15,17 @@ Design overview
 - Parameters are stored as `Parameter` objects, which are Tensor subclasses
   capable of accumulating gradients during backpropagation.
 
-Current limitations
--------------------
-- CPU-only implementation (NumPy backend).
+Backend support
+---------------
+- Backend availability depends on the installed ops implementations
+  (CPU and optional CUDA).
 - Supports only standard dense convolutions (no groups or dilation).
 - Assumes NCHW tensor layout.
-- Performance is not optimized; this implementation prioritizes correctness
-  and architectural clarity.
+
+Performance notes
+-----------------
+This implementation prioritizes correctness and architectural clarity over
+raw performance.
 
 Intended usage
 --------------
@@ -31,28 +35,25 @@ networks.
 
 Example
 -------
->>> conv = Conv2d(in_channels=3, out_channels=16, kernel_size=3, padding=1, device=cpu)
+>>> conv = Conv2d(in_channels=3, out_channels=16, kernel_size=3, padding=1)
 >>> y = conv(x)
 """
 
 from __future__ import annotations
-
 from typing import Optional, Tuple, Any, Dict
 
-from ..tensor._tensor_context import Context
+import numpy as np
 
-from ..module._serialization_core import register_module
 from ...domain.device._device import Device
-from ._conv2d_function import Conv2dFn
+
+from ..tensor._tensor_context import Context
+from ..module._serialization_core import register_module
 from ..tensor._tensor import Tensor
 from .._parameter import Parameter
+from ..ops.conv2d_cpu import _pair
 from .._module import Module
 
-from ..ops.conv2d_cpu import _pair
-from ..ops._initializers_cpu import (
-    kaiming_normal_conv2d_weight,
-    param_zeros,
-)
+from ._conv2d_function import Conv2dFn
 
 
 @register_module()
@@ -80,11 +81,14 @@ class Conv2d(Module):
     bias : bool, optional
         Whether to include a learnable bias term. Defaults to True.
     device : Device, optional
-        Device on which parameters will be allocated.
+        Device on which parameters will be allocated. Defaults to CPU.
     dtype : Any, optional
-        Data type used to initialize parameters. Kept for backward compatibility.
-        This module does not interpret dtype directly; the CPU initializer
-        boundary normalizes it.
+        Data type used to initialize parameters. Defaults to float32 if not
+        provided.
+    initializer : str, optional
+        Name of the weight initializer applied to the convolution kernel.
+        Defaults to ``"kaiming"``. The bias parameter, if present, is
+        initialized using the ``"zeros"`` initializer.
 
     Attributes
     ----------
@@ -100,10 +104,10 @@ class Conv2d(Module):
 
     Notes
     -----
-    - Weight parameters are initialized using He (Kaiming) initialization,
-      which is suitable for ReLU-like nonlinearities.
-    - This module does not perform any computation directly; it delegates
-      forward and backward logic to `Conv2dFn`.
+    - Weight initialization is performed via the `Parameter` initializer
+      registry, not inside this module.
+    - This module does not perform any numerical computation directly; it
+      delegates forward and backward logic to `Conv2dFn`.
     """
 
     def __init__(
@@ -115,8 +119,9 @@ class Conv2d(Module):
         stride: int | Tuple[int, int] = 1,
         padding: int | Tuple[int, int] = 0,
         bias: bool = True,
-        device=None,
-        dtype: Any = None,
+        device: Optional[Device] = None,
+        dtype: Optional[Any] = None,
+        initializer: str = "kaiming",
     ):
         """
         Initialize a Conv2d layer and its parameters.
@@ -124,6 +129,14 @@ class Conv2d(Module):
         This constructor allocates and initializes the convolution kernel
         weights and optional bias parameter, and stores convolution
         hyperparameters for use during the forward pass.
+
+        Notes
+        -----
+        - If ``device`` is not provided, parameters are allocated on CPU.
+        - If ``dtype`` is not provided, parameters default to float32.
+        - The convolution kernel is initialized using the specified
+          ``initializer``.
+        - The bias parameter, if enabled, is initialized to zeros.
         """
         super().__init__()
 
@@ -134,22 +147,28 @@ class Conv2d(Module):
         self.stride = _pair(stride)
         self.padding = _pair(padding)
 
-        # He (Kaiming) initialization is performed in the CPU initializer boundary.
-        self.weight: Parameter = kaiming_normal_conv2d_weight(
-            out_channels=self.out_channels,
-            in_channels=self.in_channels,
-            k_h=k_h,
-            k_w=k_w,
+        if device is None:
+            device = Device("cpu")
+        if dtype is None:
+            dtype = np.float32
+
+        # Weight layout: (C_out, C_in, K_h, K_w)
+        self.weight = Parameter(
+            shape=(self.out_channels, self.in_channels, int(k_h), int(k_w)),
             device=device,
             dtype=dtype,
+            requires_grad=True,
+            initializer=initializer,
         )
         self.register_parameter("weight", self.weight)
 
         if bias:
-            self.bias: Optional[Parameter] = param_zeros(
-                (self.out_channels,),
+            self.bias = Parameter(
+                shape=(self.out_channels,),
                 device=device,
                 dtype=dtype,
+                requires_grad=True,
+                initializer="zeros",
             )
             self.register_parameter("bias", self.bias)
         else:
@@ -196,7 +215,6 @@ class Conv2d(Module):
             padding=self.padding,
         )
 
-        # Preserve autograd attachment semantics
         if Tensor._result_requires_grad(*parents):
             out.requires_grad = True
             out._set_ctx(ctx)
@@ -204,7 +222,7 @@ class Conv2d(Module):
         return out
 
     # -------------------------------------------------------------------------
-    # ADD-ON ONLY: JSON serialization hooks (do not change existing logic above)
+    # JSON serialization hooks
     # -------------------------------------------------------------------------
     def get_config(self) -> Dict[str, Any]:
         """
@@ -213,8 +231,8 @@ class Conv2d(Module):
         Notes
         -----
         This configuration captures constructor-level hyperparameters only.
-        Trainable parameters (weights/bias) are serialized separately by the
-        checkpoint/state_dict mechanism.
+        Trainable parameters (weights and bias) are serialized separately by
+        the checkpoint/state_dict mechanism.
         """
         k_h, k_w = self.kernel_size
         s_h, s_w = self.stride
@@ -229,7 +247,7 @@ class Conv2d(Module):
             "bias": bool(self.bias is not None),
             # Serialize device via parameter (authoritative source)
             "device": str(self.weight.device),
-            # Keep dtype JSON-safe without importing NumPy here
+            # Serialize dtype in a JSON-safe form (currently fixed to float32)
             "dtype": "float32",
         }
 
@@ -245,7 +263,6 @@ class Conv2d(Module):
         """
         device_cfg = cfg.get("device", None)
 
-        # Accept None | "cpu" | "cuda:0" | Device-like
         if device_cfg is None:
             device = None
         elif isinstance(device_cfg, str):

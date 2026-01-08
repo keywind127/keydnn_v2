@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from typing import Optional
 
+from .utils.weight_initializer import WeightInitializer
 from ..domain._parameter import IParameter
 from .tensor._tensor import Tensor
 
@@ -33,7 +34,7 @@ class Parameter(Tensor, IParameter):
 
     - `requires_grad`: controls whether gradients should be accumulated
     - `grad`: stores the accumulated gradient tensor (or None)
-    - gradient utility methods used by autograd and optimizers
+    - gradient-related utility methods used by autograd and optimizers
 
     Parameters
     ----------
@@ -46,18 +47,24 @@ class Parameter(Tensor, IParameter):
 
     Notes
     -----
-    - While `Tensor` may also expose `requires_grad`/`grad`, `Parameter` exists
+    - While `Tensor` may also expose `requires_grad` / `grad`, `Parameter` exists
       to make trainable state explicit and to serve as the primary object type
       returned by `Module.parameters()`.
     - This class is intentionally minimal and can be extended later with
-      optimizer state hooks if needed.
+      optimizer-state hooks if needed.
     """
 
-    def __init__(self, *args, requires_grad: bool = True, **kwargs) -> None:
+    def __init__(
+        self,
+        *args,
+        requires_grad: bool = True,
+        initializer: Optional[str] = None,
+        **kwargs,
+    ) -> None:
         """
         Initialize a trainable parameter.
 
-        This constructor forwards all tensor construction arguments to `Tensor`
+        This constructor forwards all tensor-construction arguments to `Tensor`
         and then configures parameter-specific training state.
 
         Parameters
@@ -66,13 +73,37 @@ class Parameter(Tensor, IParameter):
             Positional arguments forwarded to the `Tensor` constructor.
         requires_grad : bool, optional
             Whether this parameter should accumulate gradients.
+        initializer : str, optional
+            Name of the weight initializer to apply to this parameter.
+            If provided, the initializer is applied immediately after
+            tensor construction.
         **kwargs
             Keyword arguments forwarded to the `Tensor` constructor.
         """
-        # Forward all construction args to Tensor (shape/device/data/etc.)
+        # Forward all construction args to Tensor (shape, device, data, etc.)
         super().__init__(*args, **kwargs)
+
         self._requires_grad: bool = bool(requires_grad)
         self._grad: Optional[Tensor] = None
+
+        if initializer:
+            assert isinstance(initializer, str)
+            self._initializer = WeightInitializer(initializer)
+            self._initializer(self)
+
+    @property
+    def initializer(self) -> WeightInitializer:
+        """
+        Return the weight initializer associated with this parameter.
+
+        Raises
+        ------
+        ValueError
+            If no initializer has been defined for this parameter.
+        """
+        if not hasattr(self, "_initializer"):
+            raise ValueError("Initializer has not been defined.")
+        return self._initializer
 
     @property
     def requires_grad(self) -> bool:
@@ -122,7 +153,6 @@ class Parameter(Tensor, IParameter):
         """
         self._grad = None
 
-    # ---- Optional helpers for autograd/optimizers (safe to keep minimal) ----
     def set_grad(self, grad: Optional[Tensor]) -> None:
         """
         Overwrite the stored gradient (used by autograd).
