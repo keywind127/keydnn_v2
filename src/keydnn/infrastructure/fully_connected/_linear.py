@@ -62,93 +62,6 @@ from ...domain.device._device import Device
 import numpy as np
 
 
-def _load_param_tensor_from_numpy(t, arr: np.ndarray) -> None:
-    """
-    Load a NumPy array into an existing Tensor `t` using public, device-aware APIs.
-
-    - CPU tensors: use from_numpy / copy_from_numpy.
-    - CUDA tensors: allocate device buffer (if needed) then HtoD memcpy into `t.data`.
-      This avoids relying on Tensor.copy_from(cpu_tensor), since your copy_from enforces
-      same-device copies only.
-    """
-    import numpy as np
-
-    arr = np.asarray(arr, dtype=np.float32)
-    if not arr.flags["C_CONTIGUOUS"]:
-        arr = np.ascontiguousarray(arr)
-
-    # -----------------------------
-    # CPU path
-    # -----------------------------
-    if hasattr(t, "device") and getattr(t.device, "is_cpu", lambda: False)():
-        if hasattr(t, "from_numpy") and callable(getattr(t, "from_numpy")):
-            t.from_numpy(arr)
-            return
-        if hasattr(t, "copy_from_numpy") and callable(getattr(t, "copy_from_numpy")):
-            t.copy_from_numpy(arr)
-            return
-        raise AssertionError(
-            "CPU tensor cannot be loaded from NumPy via public APIs. "
-            "Implement Tensor.from_numpy()/copy_from_numpy()."
-        )
-
-    # -----------------------------
-    # CUDA path
-    # -----------------------------
-    if not (hasattr(t, "device") and getattr(t.device, "is_cuda", lambda: False)()):
-        raise AssertionError(
-            f"Unsupported device for parameter init: {getattr(t, 'device', None)}"
-        )
-
-    # Ensure device allocation exists
-    if hasattr(t, "_ensure_cuda_alloc") and callable(getattr(t, "_ensure_cuda_alloc")):
-        t._ensure_cuda_alloc(dtype=np.dtype(arr.dtype))
-
-    dst = int(getattr(t, "data", 0))
-    if dst == 0:
-        raise RuntimeError(
-            "CUDA parameter tensor has no allocated device buffer (t.data == 0) "
-            "after _ensure_cuda_alloc()."
-        )
-
-    # Locate a cudaMemcpyHtoD wrapper (be resilient to module moves)
-    def _import_cudaMemcpyHtoD():
-        try:
-            from ..native_cuda.python.maxpool2d_ctypes import cudaMemcpyHtoD  # type: ignore
-
-            return cudaMemcpyHtoD
-        except Exception:
-            pass
-        try:
-            from ..native_cuda.python.global_avgpool2d_ctypes import cudaMemcpyHtoD  # type: ignore
-
-            return cudaMemcpyHtoD
-        except Exception:
-            pass
-        try:
-            from ..native_cuda.python.avgpool2d_ctypes import cudaMemcpyHtoD  # type: ignore
-
-            return cudaMemcpyHtoD
-        except Exception:
-            pass
-        raise ImportError(
-            "Could not import cudaMemcpyHtoD from known native_cuda ctypes modules. "
-            "Expose a cudaMemcpyHtoD wrapper (recommended), or add its module path here."
-        )
-
-    cudaMemcpyHtoD = _import_cudaMemcpyHtoD()
-
-    # Get CUDA native lib handle (Tensor caches it via _get_cuda_lib)
-    if hasattr(t, "_get_cuda_lib") and callable(getattr(t, "_get_cuda_lib")):
-        lib = t._get_cuda_lib()
-    else:
-        from ..tensor._tensor import Tensor as _Tensor
-
-        lib = _Tensor._get_cuda_lib()
-
-    cudaMemcpyHtoD(lib, dst, arr, int(arr.nbytes))
-
-
 @register_module()
 class Linear(Module):
     """
@@ -199,13 +112,15 @@ class Linear(Module):
         out_features: int,
         bias: bool = True,
         device: Optional[Device] = None,
+        dtype: Optional[Any] = None,
+        initializer: str = "xavier_uniform",
     ) -> None:
         """
         Initialize a Linear layer and register its parameters.
 
         This constructor validates sizes, allocates `Parameter` storage for weights
-        (and optional bias), registers parameters for state management, and then
-        initializes parameter values via `_reset_parameters()`.
+        (and optional bias), registers parameters for state management, and
+        initializes parameter values via the `Parameter(initializer=...)` mechanism.
 
         Parameters
         ----------
@@ -217,6 +132,12 @@ class Linear(Module):
             If True, include a learnable bias term. Defaults to True.
         device : Optional[Device], optional
             Device placement. Defaults to CPU if not provided.
+        dtype : Any, optional
+            Data type used to initialize parameters. Defaults to float32 if not provided.
+        initializer : str, optional
+            Name of the weight initializer applied to the weight matrix. Defaults to
+            ``"xavier_uniform"``. If bias is enabled, the bias vector is initialized
+            using the ``"zeros"`` initializer.
 
         Raises
         ------
@@ -230,12 +151,15 @@ class Linear(Module):
         self.in_features = int(in_features)
         self.out_features = int(out_features)
         self.device = device if device is not None else Device("cpu")
+        self.dtype = dtype if dtype is not None else np.float32
 
-        # Allocate parameters (storage + metadata)
+        # Allocate and initialize parameters
         self.weight = Parameter(
             shape=(self.out_features, self.in_features),
             device=self.device,
+            dtype=self.dtype,
             requires_grad=True,
+            initializer=initializer,
         )
         self.register_parameter("weight", self.weight)
 
@@ -243,32 +167,13 @@ class Linear(Module):
             self.bias = Parameter(
                 shape=(self.out_features,),
                 device=self.device,
+                dtype=self.dtype,
                 requires_grad=True,
+                initializer="zeros",
             )
             self.register_parameter("bias", self.bias)
         else:
             self.bias = None
-
-        # Initialize values
-        self._reset_parameters()
-
-    def _reset_parameters(self) -> None:
-        import math
-        import numpy as np
-
-        k = 1.0 / math.sqrt(float(self.in_features))
-        rng = np.random.default_rng()
-
-        w_np = rng.uniform(-k, k, size=(self.out_features, self.in_features)).astype(
-            np.float32, copy=False
-        )
-        _load_param_tensor_from_numpy(self.weight, w_np)
-
-        if self.bias is not None:
-            b_np = rng.uniform(-k, k, size=(self.out_features,)).astype(
-                np.float32, copy=False
-            )
-            _load_param_tensor_from_numpy(self.bias, b_np)
 
     def forward(self, x: Tensor) -> Tensor:
         """
@@ -437,32 +342,6 @@ class Linear(Module):
                     grad_w = grad_out.T @ x  # (out_features, in_features)
                     grad_w.requires_grad = False
                     grad_w._set_ctx(None)
-
-                # dB = sum(dY, axis=0)  (fallback: do reduction on host then H2D copy)
-                # if self.bias is not None and self.bias.requires_grad:
-                #     # NOTE:
-                #     # Your current Tensor.sum CUDA only supports axis=None.
-                #     # Until a sum-axis kernel exists, we do a correctness-first fallback:
-                #     #   1) DtoH grad_out
-                #     #   2) host reduction
-                #     #   3) HtoD into a CUDA tensor grad_b
-                #     go_np = grad_out.to_numpy()  # (batch, out_features) on host
-                #     gb_np = go_np.sum(axis=0).astype(np.float32, copy=False)  # (out,)
-
-                #     grad_b = Tensor(
-                #         shape=(int(self.out_features),),
-                #         device=self.device,
-                #         requires_grad=False,
-                #         ctx=None,
-                #         dtype=np.dtype(gb_np.dtype),
-                #     )
-                #     grad_b._ensure_cuda_alloc(dtype=np.dtype(gb_np.dtype))
-
-                #     # HtoD copy
-                #     from .native_cuda.python import maxpool2d_ctypes as m
-
-                #     lib = grad_b._get_cuda_lib()
-                #     m.cudaMemcpyHtoD(lib, int(grad_b.data), gb_np, int(gb_np.nbytes))
 
                 # dB = sum(dY, axis=0)  (CUDA axis reduction; stays on device)
                 if self.bias is not None and self.bias.requires_grad:
