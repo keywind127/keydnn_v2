@@ -25,7 +25,7 @@ Notes
   return tensors with `ctx=None` and do not attach computation graphs.
 """
 
-from typing import Tuple, Union, Type
+from typing import Tuple, Union, Type, Any
 from abc import ABC
 
 from .....domain._tensor import ITensor
@@ -60,6 +60,7 @@ class TensorMixinMemory(ABC):
         shape: tuple[int, ...],
         device: Device,
         requires_grad: bool = False,
+        dtype: Any = np.float32,
     ) -> "ITensor":
         """
         Create a tensor filled with zeros on the specified device.
@@ -77,6 +78,8 @@ class TensorMixinMemory(ABC):
             Target device placement (CPU or CUDA).
         requires_grad : bool, optional
             Whether the tensor should track gradients for autograd.
+        dtype : Any, optional
+            The data type of the target tensor.
 
         Returns
         -------
@@ -93,7 +96,6 @@ class TensorMixinMemory(ABC):
 
         Tensor = cls
 
-        dtype = np.float32
         out = Tensor(shape=shape, device=device, requires_grad=requires_grad)
 
         if device.is_cpu():
@@ -118,6 +120,7 @@ class TensorMixinMemory(ABC):
         shape: tuple[int, ...],
         device: Device,
         requires_grad: bool = False,
+        dtype: Any = np.float32,
     ) -> "ITensor":
         """
         Create a tensor filled with ones on the specified device.
@@ -135,6 +138,8 @@ class TensorMixinMemory(ABC):
             Target device placement (CPU or CUDA).
         requires_grad : bool, optional
             Whether the tensor should track gradients for autograd.
+        dtype : Any, optional
+            The data type of the target tensor.
 
         Returns
         -------
@@ -153,7 +158,6 @@ class TensorMixinMemory(ABC):
 
         Tensor = cls
 
-        dtype = np.float32
         out = Tensor(shape=shape, device=device, requires_grad=requires_grad)
 
         if device.is_cpu():
