@@ -3,6 +3,7 @@
 **KeyDNN** is a lightweight deep learning framework built from scratch in Python with a strong focus on **clean architecture**, **explicit interfaces**, and **a practical CPU/CUDA execution stack**.
 
 It is designed to be both:
+
 - a **learning-friendly** implementation of modern DL abstractions (Tensor, autograd, modules), and
 - a **performance-oriented sandbox** for building real backends (native CPU kernels, CUDA kernels, and vendor libraries).
 
@@ -11,7 +12,7 @@ It is designed to be both:
 - **CUDA Tensor backend** with device-pointer–backed storage and explicit memcpy boundaries (H2D / D2H / D2D)
 - **Vendor-accelerated kernels**
   - **cuBLAS** GEMM for `matmul`
-  - **cuDNN** acceleration for `conv2d`
+  - **cuDNN** acceleration for `conv2d` and `conv2d_transpose`
 - CUDA implementations for core ops: **pooling**, **reductions**, **elementwise arithmetic**, and **in-place scalar ops** (optimizer-friendly)
 - Extensive **unit tests** (CPU↔CUDA parity) and standalone **microbenchmarks** under `scripts/`
 
@@ -39,6 +40,7 @@ pip install -e .
 ```
 
 ### CUDA notes
+
 - CUDA execution requires a compatible NVIDIA GPU and a working CUDA runtime.
 - Some backends may rely on vendor libraries (e.g., cuBLAS / cuDNN) depending on your build configuration.
 - If CUDA native libraries are unavailable, CUDA tests are skipped and CUDA execution paths will raise or fall back where explicitly documented.
@@ -75,17 +77,18 @@ print(repr(y))
 
 ## Feature / Backend Support Matrix
 
-| Area | CPU | CUDA | Notes |
-|---|---:|---:|---|
-| Tensor core + autograd | ✅ | ✅ | reverse-mode AD with dynamic computation graphs |
-| Elementwise ops (add/sub/mul/div/neg/compare) | ✅ | ✅ | float32/float64 paths where supported |
-| In-place ops (optimizer hot paths) | ✅ | ✅ | avoids temporary tensor materialization on CUDA |
-| Reductions (sum/mean/max) | ✅ | ✅ | axis support varies by op; tested with parity checks |
-| Pooling (max/avg/global avg) | ✅ | ✅ | CUDA kernels + correctness tests |
-| Matmul / transpose | ✅ | ✅ | CUDA uses **cuBLAS** GEMM where available |
-| Conv2D | ✅ | ✅ | CUDA backend with **cuDNN** acceleration where available |
-| Indexing / slicing (`__getitem__`) | ✅ | ⚠️ | CUDA path may use a correctness-first CPU fallback |
-| RNN modules (RNN/LSTM/GRU) | ✅ | ⚠️ | implemented via Tensor ops; no fused CUDA RNN kernels yet |
+| Area                                          | CPU | CUDA | Notes                                                     |
+| --------------------------------------------- | --: | ---: | --------------------------------------------------------- |
+| Tensor core + autograd                        |  ✅ |   ✅ | reverse-mode AD with dynamic computation graphs           |
+| Elementwise ops (add/sub/mul/div/neg/compare) |  ✅ |   ✅ | float32/float64 paths where supported                     |
+| In-place ops (optimizer hot paths)            |  ✅ |   ✅ | avoids temporary tensor materialization on CUDA           |
+| Reductions (sum/mean/max)                     |  ✅ |   ✅ | axis support varies by op; tested with parity checks      |
+| Pooling (max/avg/global avg)                  |  ✅ |   ✅ | CUDA kernels + correctness tests                          |
+| Matmul / transpose                            |  ✅ |   ✅ | CUDA uses **cuBLAS** GEMM where available                 |
+| Conv2D                                        |  ✅ |   ✅ | CUDA backend with **cuDNN** acceleration where available  |
+| Conv2D Transpose                              |  ✅ |   ✅ | CUDA backend with **cuDNN** acceleration where available  |
+| Indexing / slicing (`__getitem__`)            |  ✅ |   ⚠️ | CUDA path may use a correctness-first CPU fallback        |
+| RNN modules (RNN/LSTM/GRU)                    |  ✅ |   ⚠️ | implemented via Tensor ops; no fused CUDA RNN kernels yet |
 
 ---
 
@@ -116,6 +119,8 @@ Provides concrete implementations of domain contracts:
   - Backend dispatch is explicit and validated (shape/device/dtype checks; no silent mixed-device execution)
 - `Context` — backward propagation context for dynamic computation graphs
 - `Parameter` — trainable tensor with gradient semantics
+  - supports `initializer=...` to apply `WeightInitializer` in-place at construction time
+- `WeightInitializer` — registry-based initializer dispatcher (Xavier/Kaiming/zeros/ones, activation-aware variants)
 - `Module` — base class for neural network layers
 - `Model` — top-level network abstraction with inference utilities
 - `Sequential` — ordered container for composing multi-layer models
@@ -129,6 +134,10 @@ Provides concrete implementations of domain contracts:
     - Single-threaded native C++ kernels
     - OpenMP-parallelized native kernels for compute-heavy workloads
   - Automatic dtype-aware dispatch with safe fallback
+- `Conv2dTranspose` — 2D transposed convolution layer (NCHW)
+  - CPU reference implementation + native CPU backend (where available)
+  - CUDA backend with **cuDNN** acceleration where available
+  - Tested via forward/backward parity checks and module/Fn unit tests
 - `RNNCell` — vanilla recurrent neural network cell (tanh activation)
   - NumPy-based forward and backward
   - Autograd-compatible via dynamic computation graphs
@@ -172,6 +181,8 @@ Provides concrete implementations of domain contracts:
     - Float32 / Float64 dtype-aware dispatch
     - Safe fallback to NumPy reference implementations
   - Autograd integration via `Conv2dFn` and pooling `Function`s
+- **Weight initialization framework** via `WeightInitializer` registry (Xavier/Kaiming + activation-aware variants, zeros/ones)
+  - `Parameter(initializer=...)` initializes tensors in-place at construction time (device/dtype preserved)
 
 Infrastructure code is free to evolve independently as long as it satisfies domain interfaces.
 
@@ -242,14 +253,15 @@ python scripts/bench_tensor_ops_cpu_vs_cuda.py --dtype float32 --sanity
 ### Linear Layer Backward (CPU vs CUDA)
 
 Benchmark configuration:
+
 - dtype: float32
 - warmup: 10 iterations
 - repeats: 50
 - sanity check: enabled
 
-| Batch | In | Out | Bias | CPU Backward | CUDA Backward | Speedup |
-|------:|---:|----:|:----:|-------------:|--------------:|--------:|
-| 1024  | 1024 | 1024 | Yes | 26.93 ms | 3.79 ms | **7.10×** |
+| Batch |   In |  Out | Bias | CPU Backward | CUDA Backward |   Speedup |
+| ----: | ---: | ---: | :--: | -----------: | ------------: | --------: |
+|  1024 | 1024 | 1024 | Yes  |     26.93 ms |       3.79 ms | **7.10×** |
 
 This benchmark isolates backward propagation cost for a single `Linear` layer.
 CUDA acceleration significantly reduces backward time for realistically sized dense layers.
@@ -257,6 +269,7 @@ CUDA acceleration significantly reduces backward time for realistically sized de
 ### Pool2D Forward (CPU vs CUDA)
 
 Benchmark configuration:
+
 - shape: N=8, C=32, H=W=64
 - kernel: 2×2, stride=2, padding=0
 - dtype: float32
@@ -264,10 +277,10 @@ Benchmark configuration:
 - repeats: 50
 - sanity check: enabled
 
-| Operation | CPU Time | CUDA Time | Speedup |
-|----------:|---------:|----------:|--------:|
-| MaxPool2D (forward) | 6.49 ms | 278.15 µs | **23.32×** |
-| AvgPool2D (forward) | 2.69 ms | 181.55 µs | **14.84×** |
+|           Operation | CPU Time | CUDA Time |    Speedup |
+| ------------------: | -------: | --------: | ---------: |
+| MaxPool2D (forward) |  6.49 ms | 278.15 µs | **23.32×** |
+| AvgPool2D (forward) |  2.69 ms | 181.55 µs | **14.84×** |
 
 These results show that eliminating Python loop overhead and dispatching to native CUDA
 kernels yields large speedups for spatial pooling on realistic CNN feature maps.
@@ -275,6 +288,7 @@ kernels yields large speedups for spatial pooling on realistic CNN feature maps.
 ### Tensor Elementwise Operations (CPU vs CUDA)
 
 Benchmark configuration:
+
 - shape: (512, 512)
 - dtype: float32
 - warmup: 50 iterations
@@ -282,20 +296,20 @@ Benchmark configuration:
 - CUDA synchronization: disabled (`--sync_each_iter=False`)
 - sanity check: enabled
 
-| Operation | CPU Median | CUDA Median | Speedup |
-|----------:|-----------:|------------:|--------:|
-| add | 723.8 µs | 126.4 µs | **5.73×** |
-| sub | 725.8 µs | 121.2 µs | **5.99×** |
-| mul | 759.9 µs | 138.4 µs | **5.49×** |
-| div | 729.6 µs | 128.1 µs | **5.70×** |
-| gt | 847.6 µs | 129.6 µs | **6.54×** |
-| neg | 679.2 µs | 114.4 µs | **5.93×** |
-| exp | 902.0 µs | 160.4 µs | **5.62×** |
-| add_scalar | 1.036 ms | 121.8 µs | **8.51×** |
-| mul_scalar | 1.048 ms | 133.2 µs | **7.87×** |
+|  Operation | CPU Median | CUDA Median |   Speedup |
+| ---------: | ---------: | ----------: | --------: |
+|        add |   723.8 µs |    126.4 µs | **5.73×** |
+|        sub |   725.8 µs |    121.2 µs | **5.99×** |
+|        mul |   759.9 µs |    138.4 µs | **5.49×** |
+|        div |   729.6 µs |    128.1 µs | **5.70×** |
+|         gt |   847.6 µs |    129.6 µs | **6.54×** |
+|        neg |   679.2 µs |    114.4 µs | **5.93×** |
+|        exp |   902.0 µs |    160.4 µs | **5.62×** |
+| add_scalar |   1.036 ms |    121.8 µs | **8.51×** |
+| mul_scalar |   1.048 ms |    133.2 µs | **7.87×** |
 
 > Note: CUDA timings may be optimistic without explicit synchronization, as kernel
-launches are asynchronous. Relative speedups remain representative for compute-heavy paths.
+> launches are asynchronous. Relative speedups remain representative for compute-heavy paths.
 
 These results highlight the benefit of CUDA in-place and scalar kernels, especially for
 optimizer hot paths that previously required temporary tensor materialization.
@@ -303,6 +317,7 @@ optimizer hot paths that previously required temporary tensor materialization.
 ### Conv2D Forward (CPU vs CUDA, cuDNN)
 
 Benchmark configuration:
+
 - N=8, Cin=64, Cout=128
 - spatial size: 112×112
 - kernel: 3×3, stride=1, padding=1
@@ -312,9 +327,9 @@ Benchmark configuration:
 - repeats: 50
 - sanity check: enabled
 
-| Configuration | CPU Time | CUDA Time | Speedup |
-|--------------:|---------:|----------:|--------:|
-| 8×64×112×112 → 128 (3×3) | 1.024 s | 64.51 ms | **15.88×** |
+|            Configuration | CPU Time | CUDA Time |    Speedup |
+| -----------------------: | -------: | --------: | ---------: |
+| 8×64×112×112 → 128 (3×3) |  1.024 s |  64.51 ms | **15.88×** |
 
 This benchmark uses the CUDA Conv2D backend with **cuDNN acceleration** and excludes
 host↔device transfer overhead, isolating kernel execution performance.
@@ -330,6 +345,7 @@ These benchmarks validate both correctness (sanity checks enabled) and the
 practical performance gains of the current CUDA execution stack.
 
 ### Notes on benchmarking methodology
+
 - Benchmarks typically use warmup iterations + repeated timings with median reporting
 - Some benchmarks optionally synchronize CUDA to produce accurate timing
 - Conv2D benchmarks may pre-pad inputs and pre-allocate outputs outside the timed region to isolate the core kernel path
@@ -566,6 +582,9 @@ The test suite is split into two categories:
 - Device abstraction (`cpu`, `cuda:<index>`)
 - Trainable `Parameter` class with gradient management
 - Module system with parameter registration
+- Weight initialization via `WeightInitializer` registry (Xavier/Kaiming/zeros/ones and activation-aware variants)
+- `Parameter(initializer=...)` for in-place initialization at construction time
+- 2D transposed convolution layer (`Conv2dTranspose`) with CPU/CUDA backends (cuDNN where available)
 - Fully connected `Linear` layer
 - `Flatten` layer for reshaping (N, C, H, W) → (N, C*H*W)
 - 2D convolution layer (`Conv2d`) with configurable kernel size, stride, padding, and optional bias
@@ -587,12 +606,14 @@ The test suite is split into two categories:
 - End-to-end model training via backpropagation and optimizers
 - Sequential model composition with parameter discovery
 - Recurrent neural networks:
+
   - `RNNCell`, `LSTMCell`, `GRUCell`
   - `RNN`, `LSTM`, `GRU` sequence modules
   - Time-major execution with Backpropagation Through Time (BPTT)
   - Keras-compatible `return_sequences` / `return_state` semantics
   - Generic `Bidirectional` wrapper supporting RNN, LSTM, and GRU
   - Gradient propagation across time and both directions
+
   ```python
   from keydnn.infrastructure.recurrent import LSTM, GRU, Bidirectional
 
@@ -611,6 +632,7 @@ The test suite is split into two categories:
 - BatchNorm2d
 - Flatten
 - Conv2d (2D convolution, NCHW)
+- Conv2dTranspose (2D transposed convolution, NCHW)
 - Recurrent:
   - RNNCell, LSTMCell, GRUCell
   - RNN, LSTM, GRU
@@ -654,6 +676,7 @@ KeyDNN is a **work in progress** and not intended for production use.
 APIs, internal design, and backend coverage may change as the framework evolves.
 
 The project prioritizes:
+
 - correctness (verified by tests),
 - clear architecture boundaries,
 - and incremental backend performance improvements (native CPU / CUDA).
