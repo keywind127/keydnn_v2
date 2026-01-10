@@ -240,7 +240,7 @@ def main() -> None:
     from keydnn.infrastructure._activations import Sigmoid
     from keydnn.infrastructure.tensor._tensor import Tensor
     from keydnn.domain.device._device import Device
-    from keydnn.infrastructure._optimizers import SGD
+    from keydnn.infrastructure.optimizers._sgd import SGD
 
     # IMPORTANT: ensure deterministic (and non-degenerate) init across runs.
     # Many initializers still use np.random.* global RNG.

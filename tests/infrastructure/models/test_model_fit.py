@@ -111,7 +111,7 @@ class _FitTrainOnBatchMixin:
         )
 
     def _optimizer(self, model):
-        from src.keydnn.infrastructure._optimizers import SGD
+        from src.keydnn.infrastructure.optimizers._sgd import SGD
 
         opt = SGD(model.parameters(), lr=1.0)
         self.assertTrue(hasattr(opt, "step"), "SGD must implement step().")

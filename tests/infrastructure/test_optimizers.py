@@ -1,10 +1,11 @@
 import unittest
 import numpy as np
 
+from src.keydnn.infrastructure.optimizers._sgd import SGD
 from src.keydnn.domain.device._device import Device
 from src.keydnn.infrastructure._parameter import Parameter
 from src.keydnn.infrastructure.tensor._tensor import Tensor
-from src.keydnn.infrastructure._optimizers import SGD, Adam
+from src.keydnn.infrastructure.optimizers._adam import Adam
 
 
 def _cpu() -> Device:
