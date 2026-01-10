@@ -13,7 +13,20 @@ remaining agnostic to training loops, optimizers, and execution engines.
 
 from __future__ import annotations
 
-from typing import Iterator, List, Optional, Tuple, Any
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Sequence,
+    Iterable,
+    Iterator,
+    List,
+    Mapping,
+    Optional,
+    Tuple,
+    Union,
+)
+from dataclasses import dataclass, field
 from pathlib import Path
 import json
 
@@ -28,6 +41,162 @@ from .module._serialization_weights import (
     extract_state_payload,
     load_state_payload_,
 )
+
+
+Number = Union[int, float]
+
+
+def _to_float_scalar(x: Any) -> float:
+    """
+    Best-effort conversion of a scalar-like tensor/ndarray/python number into float.
+    """
+    if isinstance(x, (int, float)):
+        return float(x)
+
+    # Common tensor conventions
+    item = getattr(x, "item", None)
+    if callable(item):
+        try:
+            return float(item())
+        except Exception:
+            pass
+
+    # KeyDNN Tensor convention: to_numpy()
+    to_numpy = getattr(x, "to_numpy", None)
+    if callable(to_numpy):
+        try:
+            import numpy as np
+
+            v = np.asarray(to_numpy())
+            return float(v.reshape(-1)[0])
+        except Exception:
+            pass
+
+    # Numpy scalar / array(1,)
+    try:
+        import numpy as np
+
+        if isinstance(x, np.ndarray):
+            return float(x.reshape(-1)[0])
+        if isinstance(x, np.generic):
+            return float(x)
+    except Exception:
+        pass
+
+    return float(x)
+
+
+def _batch_size_of(xb: Any) -> int:
+    """
+    Best-effort batch size inference (defaults to 1 if unknown).
+    """
+    shape = getattr(xb, "shape", None)
+    if shape is not None and isinstance(shape, tuple) and len(shape) >= 1:
+        n0 = shape[0]
+        if isinstance(n0, int) and n0 >= 1:
+            return n0
+    return 1
+
+
+def _iter_minibatches_xy(
+    x: Any,
+    y: Any,
+    *,
+    batch_size: int,
+    shuffle: bool = True,
+) -> Iterator[Tuple[Any, Any]]:
+    """
+    Generic mini-batcher for array-like datasets supporting __len__ and __getitem__.
+    Works for numpy arrays, python lists, and many tensor wrappers.
+
+    Notes
+    -----
+    - If `shuffle=True`, we shuffle indices, not the underlying storage.
+    - If x/y don't support len/getitem, this will raise TypeError.
+    """
+    n = len(x)
+    if len(y) != n:
+        raise ValueError(
+            f"x and y must have same length, got len(x)={n}, len(y)={len(y)}"
+        )
+
+    idxs = list(range(n))
+    if shuffle:
+        import random
+
+        random.shuffle(idxs)
+
+    for start in range(0, n, batch_size):
+        batch_ids = idxs[start : start + batch_size]
+
+        # Try to slice efficiently if supported
+        try:
+            xb = x[batch_ids]  # type: ignore[index]
+            yb = y[batch_ids]  # type: ignore[index]
+            yield xb, yb
+            continue
+        except Exception:
+            pass
+
+        # Fallback: gather
+        xb = [x[i] for i in batch_ids]
+        yb = [y[i] for i in batch_ids]
+        yield xb, yb
+
+
+def _call_metric(metric: Callable[..., Any], y_true: Any, y_pred: Any) -> Any:
+    """
+    Call a metric callable in a forgiving way.
+
+    Conventions supported
+    ---------------------
+    - metric(y_true, y_pred)   (Keras style)
+    - metric(y_pred, y_true)   (some libs do this)
+    """
+    try:
+        return metric(y_true, y_pred)
+    except TypeError:
+        return metric(y_pred, y_true)
+
+
+@dataclass
+class History:
+    """
+    Keras-like history object.
+
+    Attributes
+    ----------
+    history : dict[str, list[float]]
+        Mapping from metric name -> per-epoch values.
+    epoch : list[int]
+        Epoch indices (0-based) appended as training progresses.
+    """
+
+    history: Dict[str, List[float]] = field(default_factory=dict)
+    epoch: List[int] = field(default_factory=list)
+
+    def _ensure_key(self, k: str) -> None:
+        if k not in self.history:
+            self.history[k] = []
+
+    def append_epoch(self, epoch_idx: int, logs: Mapping[str, Number]) -> None:
+        """
+        Append aggregated epoch logs.
+        """
+        self.epoch.append(int(epoch_idx))
+        for k, v in logs.items():
+            self._ensure_key(k)
+            self.history[k].append(float(v))
+
+    def last(self) -> Dict[str, float]:
+        """
+        Return the latest epoch's logs.
+        """
+        out: Dict[str, float] = {}
+        for k, vs in self.history.items():
+            if vs:
+                out[k] = float(vs[-1])
+        return out
 
 
 class Model(Module):
@@ -158,6 +327,193 @@ class Model(Module):
             )
 
         return model
+
+    def train_on_batch(
+        self,
+        x_batch: Any,
+        y_batch: Any,
+        *,
+        loss: Callable[[Any, Any], Any],
+        optimizer: Any,
+        metrics: Optional[Sequence[Callable[..., Any]]] = None,
+        metric_names: Optional[Sequence[str]] = None,
+        zero_grad: bool = True,
+        backward: bool = True,
+        step: bool = True,
+    ) -> Dict[str, float]:
+        """
+        Train for a single batch (Keras-like).
+
+        Parameters
+        ----------
+        x_batch, y_batch
+            One mini-batch of inputs and targets.
+        loss
+            Callable: loss(y_pred, y_true) -> scalar tensor/number.
+        optimizer
+            Optimizer-like object. Expected (duck-typed) methods:
+                - zero_grad() (optional)
+                - step() (optional)
+        metrics
+            Optional list of metric callables. Expected signature:
+                metric(y_true, y_pred) -> scalar tensor/number
+            (Also supports metric(y_pred, y_true) as a fallback.)
+        metric_names
+            Optional names matching `metrics`. If omitted, names are inferred from
+            `metric.__name__` when available, else "metric_{i}".
+        zero_grad, backward, step
+            Control hooks for training steps.
+
+        Returns
+        -------
+        dict[str, float]
+            Batch logs, e.g. {"loss": 0.123, "accuracy": 0.98}
+        """
+        train_fn = getattr(self, "train", None)
+        if callable(train_fn):
+            train_fn()
+
+        if zero_grad:
+            # Prefer optimizer.zero_grad if available; fallback to model.zero_grad if present.
+            opt_zero = getattr(optimizer, "zero_grad", None)
+            if callable(opt_zero):
+                opt_zero()
+            else:
+                mdl_zero = getattr(self, "zero_grad", None)
+                if callable(mdl_zero):
+                    mdl_zero()
+
+        y_pred = self(x_batch)
+        loss_tensor = loss(y_pred, y_batch)
+        loss_value = _to_float_scalar(loss_tensor)
+
+        if backward:
+            # Loss object expected to have backward() (autograd convention)
+            bw = getattr(loss_tensor, "backward", None)
+            if not callable(bw):
+                raise TypeError(
+                    "Loss return value does not support backward(). "
+                    "Expected a scalar Tensor-like object."
+                )
+            bw()
+
+        if step:
+            opt_step = getattr(optimizer, "step", None)
+            if callable(opt_step):
+                opt_step()
+
+        logs: Dict[str, float] = {"loss": float(loss_value)}
+
+        if metrics:
+            if metric_names is not None and len(metric_names) != len(metrics):
+                raise ValueError("metric_names must have the same length as metrics")
+
+            for i, m in enumerate(metrics):
+                name = None
+                if metric_names is not None:
+                    name = metric_names[i]
+                else:
+                    name = getattr(m, "__name__", None) or f"metric_{i}"
+
+                mv = _call_metric(m, y_batch, y_pred)
+                logs[str(name)] = _to_float_scalar(mv)
+
+        return logs
+
+    def fit(
+        self,
+        x: Any,
+        y: Optional[Any] = None,
+        *,
+        loss: Callable[[Any, Any], Any],
+        optimizer: Any,
+        metrics: Optional[Sequence[Callable[..., Any]]] = None,
+        metric_names: Optional[Sequence[str]] = None,
+        batch_size: int = 32,
+        epochs: int = 1,
+        shuffle: bool = True,
+        verbose: int = 1,
+    ) -> History:
+        """
+        Keras-like training loop.
+
+        Supported input forms
+        ---------------------
+        1) (x, y) array-like datasets (must support len() and __getitem__)
+        2) x as an iterable yielding (x_batch, y_batch), with y=None
+
+        Returns
+        -------
+        History
+            Per-epoch aggregated metrics.
+        """
+        if epochs < 1:
+            raise ValueError("epochs must be >= 1")
+        if batch_size < 1:
+            raise ValueError("batch_size must be >= 1")
+
+        hist = History()
+
+        # Build epoch iterator
+        def _epoch_batches() -> Iterator[Tuple[Any, Any]]:
+            if y is None:
+                # Expect x yields (xb, yb)
+                if not isinstance(x, Iterable):
+                    raise TypeError(
+                        "If y is None, x must be an iterable of (x_batch, y_batch)"
+                    )
+                for b in x:  # type: ignore[assignment]
+                    if not (isinstance(b, tuple) and len(b) == 2):
+                        raise TypeError(
+                            "Iterable x must yield (x_batch, y_batch) tuples"
+                        )
+                    yield b[0], b[1]
+            else:
+                # x/y dataset
+                yield from _iter_minibatches_xy(
+                    x, y, batch_size=batch_size, shuffle=shuffle
+                )
+
+        for epoch_idx in range(epochs):
+            # Running sums for weighted average
+            sums: Dict[str, float] = {}
+            count: Dict[str, int] = {}
+            seen = 0
+
+            for xb, yb in _epoch_batches():
+                logs = self.train_on_batch(
+                    xb,
+                    yb,
+                    loss=loss,
+                    optimizer=optimizer,
+                    metrics=metrics,
+                    metric_names=metric_names,
+                )
+
+                bs = _batch_size_of(xb)
+                seen += bs
+
+                for k, v in logs.items():
+                    sums[k] = sums.get(k, 0.0) + float(v) * bs
+                    count[k] = count.get(k, 0) + bs
+
+            # Aggregate epoch means
+            epoch_logs: Dict[str, float] = {}
+            for k, s in sums.items():
+                denom = float(count.get(k, 0) or 1)
+                epoch_logs[k] = s / denom
+
+            hist.append_epoch(epoch_idx, epoch_logs)
+
+            if verbose:
+                # Simple Keras-ish line: "Epoch 1/5 - loss: ... - acc: ..."
+                parts = [f"Epoch {epoch_idx + 1}/{epochs}"]
+                for k, v in epoch_logs.items():
+                    parts.append(f"{k}: {v:.6f}")
+                parts.append(f"seen: {seen}")
+                print(" - ".join(parts))
+
+        return hist
 
 
 @register_module()
