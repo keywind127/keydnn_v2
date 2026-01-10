@@ -31,3 +31,5 @@ ARM64/
 git_log.txt
 _test.py
 test_deploy
+*.png
+*.puml

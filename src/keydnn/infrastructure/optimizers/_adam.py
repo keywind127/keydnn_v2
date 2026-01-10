@@ -1,23 +1,25 @@
 """
-Optimizer primitives for KeyDNN.
+Adam optimizer implementation.
 
-This module provides simple, CPU-only optimizers that update `Parameter`
-instances in-place using their accumulated gradients.
+This module provides a minimal, KeyDNN-native implementation of the Adam
+optimization algorithm. The optimizer updates `Parameter` instances in-place
+using their accumulated gradients and maintains per-parameter state for the
+first and second moments.
 
 Design notes
 ------------
-- Optimizers operate exclusively on `Parameter` / `Tensor` objects and read
-  gradients from `p.grad`.
+- Optimizers operate on `Parameter` objects and read gradients from `p.grad`.
 - Parameters with `grad is None` are skipped to support partial graphs and
   frozen weights.
-- Updates are applied by writing directly into parameter storage via
-  `copy_from`, keeping optimizers independent from the autograd execution
-  engine and graph construction details.
-- Optimizer math is expressed entirely in terms of Tensor operations;
-  backend-specific numerical implementations (e.g., NumPy) are encapsulated
-  within Tensor methods only.
-- Current implementations are CPU-only. CUDA support may be added once
-  device-aware Tensor kernels and gradient storage are available.
+- Updates are applied by writing directly into parameter storage, keeping the
+  optimizer independent from graph construction and autograd internals.
+- Optimizer math is expressed in terms of KeyDNN `Tensor` operations; any
+  backend-specific numeric details remain encapsulated in `Tensor`.
+- Current implementation is CPU-only. If a parameter or its gradient resides on
+  a non-CPU device, a device-not-supported error is raised.
+
+This module contains only Adam. Other optimizers (e.g., SGD) live in separate
+modules under the optimizers package.
 """
 
 from __future__ import annotations
@@ -25,152 +27,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable, Sequence, Tuple, Dict
 
-from .tensor._tensor import Tensor
-from ._parameter import Parameter
-
-
-@dataclass
-class SGD:
-    """
-    Stochastic Gradient Descent (SGD) optimizer.
-
-    This optimizer updates parameters in-place using their accumulated
-    gradients and a fixed learning rate.
-
-    Update rule
-    -----------
-    For each parameter ``p`` with gradient ``g``:
-
-    - If ``weight_decay > 0`` (classical L2 regularization):
-        ``g <- g + weight_decay * p``
-    - Parameter update:
-        ``p <- p - lr * g``
-
-    Parameters
-    ----------
-    params : Sequence[Parameter]
-        Parameters to be optimized.
-    lr : float, optional
-        Learning rate. Must be positive. Defaults to 1e-3.
-    weight_decay : float, optional
-        Classical L2 weight decay coefficient (coupled). Must be non-negative.
-        Defaults to 0.0.
-
-    Notes
-    -----
-    - Parameters with ``grad is None`` are skipped.
-    - Momentum, Nesterov, and other SGD variants are intentionally omitted
-      in this minimal implementation.
-    - This optimizer is CPU-only in the current KeyDNN implementation.
-    """
-
-    params: Sequence[Parameter]
-    lr: float = 1e-3
-    weight_decay: float = 0.0
-
-    def __init__(
-        self,
-        params: Iterable[Parameter],
-        *,
-        lr: float = 1e-3,
-        weight_decay: float = 0.0,
-    ) -> None:
-        """
-        Construct an SGD optimizer.
-
-        Parameters
-        ----------
-        params : Iterable[Parameter]
-            Iterable of parameters to optimize. The iterable is consumed and
-            stored internally.
-        lr : float, optional
-            Learning rate. Must be > 0. Defaults to 1e-3.
-        weight_decay : float, optional
-            Classical L2 regularization coefficient. Must be >= 0.
-            Defaults to 0.0.
-
-        Raises
-        ------
-        ValueError
-            If ``lr <= 0`` or ``weight_decay < 0``.
-        """
-        self.params = list(params)
-        self.lr = float(lr)
-        self.weight_decay = float(weight_decay)
-
-        if self.lr <= 0.0:
-            raise ValueError(f"lr must be > 0, got {self.lr}")
-        if self.weight_decay < 0.0:
-            raise ValueError(f"weight_decay must be >= 0, got {self.weight_decay}")
-
-    def zero_grad(self) -> None:
-        """
-        Clear gradients for all managed parameters.
-
-        Notes
-        -----
-        This calls ``zero_grad()`` on each parameter, which clears the stored
-        gradient tensor (if any). Training loops typically call `zero_grad()`
-        before computing a new backward pass to avoid gradient accumulation.
-        """
-        for p in self.params:
-            p.zero_grad()
-
-    def step(self) -> None:
-        """
-        Apply one SGD update step to all managed parameters.
-
-        Notes
-        -----
-        - Parameters with ``grad is None`` are skipped.
-        - This method is CPU-only and raises a device-not-supported error if
-          either a parameter or its gradient resides on a non-CPU device.
-        - Weight decay is implemented as classical L2 regularization
-          (coupled with the gradient), not as decoupled weight decay.
-        """
-        for p in self.params:
-            g = p.grad
-            if g is None:
-                continue
-
-            # if not p.device.is_cpu() or not g.device.is_cpu():
-            #     p._raise_device_not_supported("sgd_step")
-
-            # Optional L2 weight decay (decoupled is AdamW; this is classical)
-            if self.weight_decay != 0.0:
-                g = g + (self.weight_decay * p)
-
-            # # p <- p - lr * g
-            # updated = p - (self.lr * g)
-
-            # # Write back to parameter storage (CPU-only)
-            # p.copy_from(updated)
-
-            p -= self.lr * g
-
-        # import time
-
-        # t_math = 0.0
-        # t_copy = 0.0
-
-        # for p in self.params:
-        #     g = p.grad
-        #     if g is None:
-        #         continue
-
-        #     t0 = time.perf_counter()
-        #     out = p - (self.lr * g)
-        #     t1 = time.perf_counter()
-
-        #     p.copy_from(out)
-        #     t2 = time.perf_counter()
-
-        #     t_math += t1 - t0
-        #     t_copy += t2 - t1
-
-        # print(
-        #     f"[sgd cuda] math={t_math*1e3:.3f}ms copy={t_copy*1e3:.3f}ms total={(t_math+t_copy)*1e3:.3f}ms"
-        # )
+from ..tensor._tensor import Tensor
+from .._parameter import Parameter
 
 
 @dataclass
@@ -277,8 +135,8 @@ class Adam:
         if self.weight_decay < 0.0:
             raise ValueError(f"weight_decay must be >= 0, got {self.weight_decay}")
 
-        # Per-parameter state: id(p) -> {t, m, v}
-        # Store m, v as NumPy arrays (float32) to avoid depending on Tensor ops.
+        # Per-parameter state: id(p) -> {"t": int, "m": Tensor, "v": Tensor}
+        # State tensors do not require gradients.
         self._state: Dict[int, Dict[str, object]] = {}
 
     def zero_grad(self) -> None:
@@ -351,12 +209,10 @@ class Adam:
             v.copy_from(v_new)
 
             # bias correction
-            # NOTE: these are Python scalars; that’s fine.
             m_hat = m / (1.0 - (b1**t))
             v_hat = v / (1.0 - (b2**t))
 
             # update = lr * m_hat / (sqrt(v_hat) + eps)
-            # requires Tensor.sqrt() (or equivalent)
             denom = v_hat.sqrt() + self.eps
             step = self.lr * (m_hat / denom)
 

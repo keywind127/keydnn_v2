@@ -514,7 +514,7 @@ A checkpoint JSON has the form:
 ### Usage
 
 ```python
-from keydnn.infrastructure._models import Sequential
+from keydnn.infrastructure.models._sequential import Sequential
 from keydnn.infrastructure.convolution._conv2d_module import Conv2d
 from keydnn.infrastructure.fully_connected._linear import Linear
 from keydnn.infrastructure.pooling._pooling_module import MaxPool2d
