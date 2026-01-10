@@ -8,7 +8,7 @@ class TestSequentialXORTraining(unittest.TestCase):
     def test_xor_training_one_hidden_layer(self):
         # Only skip when components truly cannot be imported.
         try:
-            from src.keydnn.infrastructure._models import Sequential
+            from src.keydnn.infrastructure.models._sequential import Sequential
             from src.keydnn.infrastructure.fully_connected._linear import Linear
             from src.keydnn.infrastructure._activations import Sigmoid
             from src.keydnn.infrastructure.tensor._tensor import Tensor

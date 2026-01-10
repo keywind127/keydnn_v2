@@ -8,7 +8,7 @@ import unittest
 import numpy as np
 
 from src.keydnn.infrastructure.tensor._tensor import Tensor
-from src.keydnn.infrastructure._models import Sequential
+from src.keydnn.infrastructure.models._sequential import Sequential
 from src.keydnn.infrastructure._activations import (
     Sigmoid,
     ReLU,

@@ -327,7 +327,7 @@ def main() -> None:
         raise SystemExit("CUDA requested but CUDA native DLL/wrappers not available.")
 
     # Imports (after sys.path fix)
-    from keydnn.infrastructure._models import Sequential
+    from keydnn.infrastructure.models._sequential import Sequential
     from keydnn.infrastructure.fully_connected._linear import Linear
     from keydnn.infrastructure._activations import Sigmoid
     from keydnn.infrastructure.tensor._tensor import Tensor

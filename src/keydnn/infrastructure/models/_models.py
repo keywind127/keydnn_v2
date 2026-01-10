@@ -1,14 +1,27 @@
 """
-Model and container implementations.
+High-level model utilities.
 
-This module defines infrastructure-level model abstractions built on top of
-`Module`, including:
+This module defines the infrastructure-level `Model` base class, which extends
+the core `Module` abstraction with conveniences typically expected at the
+"top-level network" boundary:
 
-- `Model`: a semantic alias for top-level neural networks
-- `Sequential`: a container module that applies child modules in sequence
+- Inference helpers (`predict`)
+- Checkpoint serialization (`save_json`, `load_json`)
+- Lightweight, Keras-like training helpers (`train_on_batch`, `fit`)
 
-These classes provide a foundation for composing neural networks while
-remaining agnostic to training loops, optimizers, and execution engines.
+Important project note
+----------------------
+Historically, this file also hosted container and training-support utilities.
+Those responsibilities have since been split into dedicated modules:
+
+- `History` has been extracted into `._history` to keep metric tracking
+  independent of `Model` and training loops.
+- `Sequential` has been extracted into its own module to keep container
+  composition separate from the core `Model` API surface.
+
+As a result, this module now focuses on the `Model` abstraction and small
+training-loop helpers only, while remaining agnostic to specific optimizers,
+loss functions, tensor implementations, and execution engines.
 """
 
 from __future__ import annotations
@@ -20,35 +33,54 @@ from typing import (
     Sequence,
     Iterable,
     Iterator,
-    List,
-    Mapping,
     Optional,
     Tuple,
-    Union,
 )
-from dataclasses import dataclass, field
 from pathlib import Path
 import json
 
-from ._module import Module
+from ._history import History
 
-from .module._serialization_core import (
+from .._module import Module
+
+from ..module._serialization_core import (
     module_to_config,
     module_from_config,
-    register_module,
 )
-from .module._serialization_weights import (
+from ..module._serialization_weights import (
     extract_state_payload,
     load_state_payload_,
 )
 
 
-Number = Union[int, float]
-
-
 def _to_float_scalar(x: Any) -> float:
     """
-    Best-effort conversion of a scalar-like tensor/ndarray/python number into float.
+    Convert a scalar-like value to a Python `float`.
+
+    This helper exists to normalize values returned by losses/metrics into a
+    portable representation suitable for logging and for `History` storage.
+
+    Supported inputs
+    ----------------
+    - Python numbers (`int`, `float`)
+    - Objects exposing `.item()` (NumPy scalars, some tensor APIs)
+    - KeyDNN tensors exposing `.to_numpy()`
+    - NumPy scalars/arrays (best-effort)
+
+    Parameters
+    ----------
+    x : Any
+        Scalar-like object to convert.
+
+    Returns
+    -------
+    float
+        Converted scalar value.
+
+    Notes
+    -----
+    This function is intentionally permissive to reduce friction across CPU/CUDA
+    backends and different tensor implementations.
     """
     if isinstance(x, (int, float)):
         return float(x)
@@ -72,7 +104,7 @@ def _to_float_scalar(x: Any) -> float:
         except Exception:
             pass
 
-    # Numpy scalar / array(1,)
+    # NumPy scalar / array(1,)
     try:
         import numpy as np
 
@@ -88,7 +120,23 @@ def _to_float_scalar(x: Any) -> float:
 
 def _batch_size_of(xb: Any) -> int:
     """
-    Best-effort batch size inference (defaults to 1 if unknown).
+    Infer batch size from a batch-like object.
+
+    Parameters
+    ----------
+    xb : Any
+        Batch input object. If it exposes a tuple `shape` with at least one
+        dimension, `shape[0]` is interpreted as batch size.
+
+    Returns
+    -------
+    int
+        Best-effort batch size, defaulting to 1 if unknown.
+
+    Notes
+    -----
+    This is used by `fit()` to compute weighted epoch averages when batches may
+    have different sizes.
     """
     shape = getattr(xb, "shape", None)
     if shape is not None and isinstance(shape, tuple) and len(shape) >= 1:
@@ -106,13 +154,41 @@ def _iter_minibatches_xy(
     shuffle: bool = True,
 ) -> Iterator[Tuple[Any, Any]]:
     """
-    Generic mini-batcher for array-like datasets supporting __len__ and __getitem__.
-    Works for numpy arrays, python lists, and many tensor wrappers.
+    Yield mini-batches from array-like `(x, y)` datasets.
+
+    This is a small utility used by `Model.fit()` for dataset inputs that support
+    `__len__` and `__getitem__` (e.g., NumPy arrays, Python lists, many tensor
+    wrappers).
+
+    Parameters
+    ----------
+    x : Any
+        Dataset inputs. Must support `len(x)` and indexing (`x[i]` or
+        `x[list_of_indices]`).
+    y : Any
+        Dataset targets. Must support `len(y)` and indexing.
+    batch_size : int
+        Desired mini-batch size.
+    shuffle : bool, optional
+        If True, shuffle indices each epoch. Default is True.
+
+    Yields
+    ------
+    Iterator[Tuple[Any, Any]]
+        `(x_batch, y_batch)` pairs.
+
+    Raises
+    ------
+    TypeError
+        If `x` or `y` do not support `len()` / indexing.
+    ValueError
+        If `x` and `y` have different lengths.
 
     Notes
     -----
-    - If `shuffle=True`, we shuffle indices, not the underlying storage.
-    - If x/y don't support len/getitem, this will raise TypeError.
+    - When `shuffle=True`, we shuffle indices, not the underlying storage.
+    - If vectorized advanced indexing fails (e.g., `x[batch_ids]`), this
+      function falls back to Python list-gathering.
     """
     n = len(x)
     if len(y) != n:
@@ -146,57 +222,36 @@ def _iter_minibatches_xy(
 
 def _call_metric(metric: Callable[..., Any], y_true: Any, y_pred: Any) -> Any:
     """
-    Call a metric callable in a forgiving way.
+    Invoke a metric callable using a forgiving argument convention.
 
     Conventions supported
     ---------------------
-    - metric(y_true, y_pred)   (Keras style)
-    - metric(y_pred, y_true)   (some libs do this)
+    - `metric(y_true, y_pred)` (Keras style)
+    - `metric(y_pred, y_true)` (alternate style)
+
+    Parameters
+    ----------
+    metric : Callable[..., Any]
+        Metric function/callable.
+    y_true : Any
+        Ground-truth batch targets.
+    y_pred : Any
+        Model predictions for the batch.
+
+    Returns
+    -------
+    Any
+        Metric output, typically a scalar tensor/number.
+
+    Notes
+    -----
+    This helper exists to reduce integration friction with user-defined metric
+    callables that may swap argument order.
     """
     try:
         return metric(y_true, y_pred)
     except TypeError:
         return metric(y_pred, y_true)
-
-
-@dataclass
-class History:
-    """
-    Keras-like history object.
-
-    Attributes
-    ----------
-    history : dict[str, list[float]]
-        Mapping from metric name -> per-epoch values.
-    epoch : list[int]
-        Epoch indices (0-based) appended as training progresses.
-    """
-
-    history: Dict[str, List[float]] = field(default_factory=dict)
-    epoch: List[int] = field(default_factory=list)
-
-    def _ensure_key(self, k: str) -> None:
-        if k not in self.history:
-            self.history[k] = []
-
-    def append_epoch(self, epoch_idx: int, logs: Mapping[str, Number]) -> None:
-        """
-        Append aggregated epoch logs.
-        """
-        self.epoch.append(int(epoch_idx))
-        for k, v in logs.items():
-            self._ensure_key(k)
-            self.history[k].append(float(v))
-
-    def last(self) -> Dict[str, float]:
-        """
-        Return the latest epoch's logs.
-        """
-        out: Dict[str, float] = {}
-        for k, vs in self.history.items():
-            if vs:
-                out[k] = float(vs[-1])
-        return out
 
 
 class Model(Module):
@@ -206,19 +261,28 @@ class Model(Module):
     `Model` is a semantic specialization of `Module` intended to represent
     complete networks rather than individual layers. It preserves all core
     `Module` behavior (parameter registration, recursion, callable semantics)
-    while serving as an extension point for higher-level training and inference
-    utilities (e.g., `fit`, `evaluate`, `predict`, checkpointing).
+    while providing higher-level convenience methods:
+
+    - `predict` for inference-style forward passes
+    - `save_json` / `load_json` for architecture + weights checkpointing
+    - `train_on_batch` and `fit` for lightweight training loops and metric logging
 
     Notes
     -----
-    - This class currently adds minimal functionality beyond `Module`.
-    - Mode management (`train` / `eval`) is optional and only applied when
-      supported by the underlying implementation.
+    - This class remains optimizer-agnostic: optimizers are duck-typed and only
+      expected to expose `zero_grad()` and `step()` when used by the training APIs.
+    - Mode management (`train` / `eval`) is optional and only used when present.
+    - `History` is imported from `._history` (extracted into a separate module).
     """
 
     def __init__(self) -> None:
         """
         Initialize a model with no additional state beyond `Module`.
+
+        Notes
+        -----
+        Subclasses typically define parameters/modules during their own
+        initialization; `Model` itself does not add extra fields.
         """
         super().__init__()
 
@@ -226,7 +290,7 @@ class Model(Module):
         """
         Perform an inference-style forward pass.
 
-        This method invokes `forward` directly and optionally switches the model
+        This method invokes `forward()` directly and optionally switches the model
         into evaluation mode if such a mode is supported.
 
         Parameters
@@ -310,6 +374,13 @@ class Model(Module):
         -------
         Model
             Reconstructed model with weights loaded.
+
+        Raises
+        ------
+        ValueError
+            If the checkpoint format is unsupported.
+        TypeError
+            If the reconstructed object is not an instance of `cls`.
         """
         p = Path(path)
         payload = json.loads(p.read_text(encoding="utf-8"))
@@ -342,39 +413,62 @@ class Model(Module):
         step: bool = True,
     ) -> Dict[str, float]:
         """
-        Train for a single batch (Keras-like).
+        Run a single training step on one mini-batch.
+
+        This method provides a Keras-like primitive that:
+        - switches the model to training mode when available (`train()`)
+        - computes predictions and loss
+        - runs backpropagation (`loss.backward()`) when enabled
+        - steps the optimizer (`optimizer.step()`) when enabled
+        - returns a dictionary of scalar logs (loss + metrics)
 
         Parameters
         ----------
-        x_batch, y_batch
+        x_batch, y_batch : Any
             One mini-batch of inputs and targets.
-        loss
-            Callable: loss(y_pred, y_true) -> scalar tensor/number.
-        optimizer
+        loss : Callable[[Any, Any], Any]
+            Callable producing a scalar loss: `loss(y_pred, y_true)`.
+        optimizer : Any
             Optimizer-like object. Expected (duck-typed) methods:
-                - zero_grad() (optional)
-                - step() (optional)
-        metrics
-            Optional list of metric callables. Expected signature:
-                metric(y_true, y_pred) -> scalar tensor/number
-            (Also supports metric(y_pred, y_true) as a fallback.)
-        metric_names
+            - `zero_grad()` (optional)
+            - `step()` (optional)
+        metrics : Optional[Sequence[Callable[..., Any]]], optional
+            Optional metric callables. Expected signature:
+            `metric(y_true, y_pred) -> scalar tensor/number`.
+            A reversed argument order is also supported as a fallback.
+        metric_names : Optional[Sequence[str]], optional
             Optional names matching `metrics`. If omitted, names are inferred from
-            `metric.__name__` when available, else "metric_{i}".
-        zero_grad, backward, step
-            Control hooks for training steps.
+            `metric.__name__` when available, else `"metric_{i}"`.
+        zero_grad : bool, optional
+            If True, clears gradients before the backward pass. Default is True.
+        backward : bool, optional
+            If True, calls `loss.backward()`. Default is True.
+        step : bool, optional
+            If True, calls `optimizer.step()`. Default is True.
 
         Returns
         -------
-        dict[str, float]
-            Batch logs, e.g. {"loss": 0.123, "accuracy": 0.98}
+        Dict[str, float]
+            Batch logs, e.g. `{"loss": 0.123, "accuracy": 0.98}`.
+
+        Raises
+        ------
+        TypeError
+            If the loss return value does not support `.backward()` while
+            `backward=True`.
+        ValueError
+            If `metric_names` is provided but its length does not match `metrics`.
+
+        Notes
+        -----
+        The returned logs are converted to Python floats using `_to_float_scalar`
+        for consistent reporting across CPU/CUDA tensor backends.
         """
         train_fn = getattr(self, "train", None)
         if callable(train_fn):
             train_fn()
 
         if zero_grad:
-            # Prefer optimizer.zero_grad if available; fallback to model.zero_grad if present.
             opt_zero = getattr(optimizer, "zero_grad", None)
             if callable(opt_zero):
                 opt_zero()
@@ -388,7 +482,6 @@ class Model(Module):
         loss_value = _to_float_scalar(loss_tensor)
 
         if backward:
-            # Loss object expected to have backward() (autograd convention)
             bw = getattr(loss_tensor, "backward", None)
             if not callable(bw):
                 raise TypeError(
@@ -409,12 +502,11 @@ class Model(Module):
                 raise ValueError("metric_names must have the same length as metrics")
 
             for i, m in enumerate(metrics):
-                name = None
-                if metric_names is not None:
-                    name = metric_names[i]
-                else:
-                    name = getattr(m, "__name__", None) or f"metric_{i}"
-
+                name = (
+                    metric_names[i]
+                    if metric_names is not None
+                    else (getattr(m, "__name__", None) or f"metric_{i}")
+                )
                 mv = _call_metric(m, y_batch, y_pred)
                 logs[str(name)] = _to_float_scalar(mv)
 
@@ -435,17 +527,61 @@ class Model(Module):
         verbose: int = 1,
     ) -> History:
         """
-        Keras-like training loop.
+        Train the model for a fixed number of epochs.
+
+        This method provides a Keras-like training loop built on top of
+        `train_on_batch()`. It aggregates batch logs into per-epoch metrics and
+        records them in a `History` object.
 
         Supported input forms
         ---------------------
-        1) (x, y) array-like datasets (must support len() and __getitem__)
-        2) x as an iterable yielding (x_batch, y_batch), with y=None
+        1) `(x, y)` dataset:
+           - `x` and `y` are array-like and support `len()` and indexing
+           - batching/shuffling is handled internally via `_iter_minibatches_xy`
+        2) Iterable-of-batches:
+           - `y` is `None`
+           - `x` is an iterable yielding `(x_batch, y_batch)` tuples
+
+        Parameters
+        ----------
+        x : Any
+            Dataset inputs, or an iterable yielding `(x_batch, y_batch)` tuples.
+        y : Optional[Any], optional
+            Dataset targets. Must be provided for dataset inputs; must be `None`
+            for iterable-of-batches inputs.
+        loss : Callable[[Any, Any], Any]
+            Callable producing a scalar loss: `loss(y_pred, y_true)`.
+        optimizer : Any
+            Optimizer-like object, expected to expose `zero_grad()` and `step()`.
+        metrics : Optional[Sequence[Callable[..., Any]]], optional
+            Metric callables to compute per batch and aggregate per epoch.
+        metric_names : Optional[Sequence[str]], optional
+            Optional names matching `metrics`. If omitted, names are inferred.
+        batch_size : int, optional
+            Mini-batch size for dataset inputs. Default is 32.
+        epochs : int, optional
+            Number of epochs to train for. Default is 1.
+        shuffle : bool, optional
+            Whether to shuffle dataset inputs each epoch. Default is True.
+        verbose : int, optional
+            If non-zero, prints a simple epoch summary. Default is 1.
 
         Returns
         -------
         History
-            Per-epoch aggregated metrics.
+            A `History` instance (from `._history`) containing per-epoch metrics.
+
+        Raises
+        ------
+        ValueError
+            If `epochs < 1` or `batch_size < 1`.
+        TypeError
+            If `y is None` but `x` is not an iterable of `(x_batch, y_batch)`.
+
+        Notes
+        -----
+        Per-epoch metric values are computed as weighted means over batches,
+        using `_batch_size_of()` to determine the weight for each batch.
         """
         if epochs < 1:
             raise ValueError("epochs must be >= 1")
@@ -454,10 +590,21 @@ class Model(Module):
 
         hist = History()
 
-        # Build epoch iterator
         def _epoch_batches() -> Iterator[Tuple[Any, Any]]:
+            """
+            Yield `(x_batch, y_batch)` pairs for one epoch.
+
+            Returns
+            -------
+            Iterator[Tuple[Any, Any]]
+                Batch iterator for the current epoch.
+
+            Notes
+            -----
+            - For `y is None`, the caller supplies the batch iterator directly.
+            - For dataset inputs, batching is handled via `_iter_minibatches_xy`.
+            """
             if y is None:
-                # Expect x yields (xb, yb)
                 if not isinstance(x, Iterable):
                     raise TypeError(
                         "If y is None, x must be an iterable of (x_batch, y_batch)"
@@ -469,13 +616,11 @@ class Model(Module):
                         )
                     yield b[0], b[1]
             else:
-                # x/y dataset
                 yield from _iter_minibatches_xy(
                     x, y, batch_size=batch_size, shuffle=shuffle
                 )
 
         for epoch_idx in range(epochs):
-            # Running sums for weighted average
             sums: Dict[str, float] = {}
             count: Dict[str, int] = {}
             seen = 0
@@ -497,7 +642,6 @@ class Model(Module):
                     sums[k] = sums.get(k, 0.0) + float(v) * bs
                     count[k] = count.get(k, 0) + bs
 
-            # Aggregate epoch means
             epoch_logs: Dict[str, float] = {}
             for k, s in sums.items():
                 denom = float(count.get(k, 0) or 1)
@@ -506,7 +650,6 @@ class Model(Module):
             hist.append_epoch(epoch_idx, epoch_logs)
 
             if verbose:
-                # Simple Keras-ish line: "Epoch 1/5 - loss: ... - acc: ..."
                 parts = [f"Epoch {epoch_idx + 1}/{epochs}"]
                 for k, v in epoch_logs.items():
                     parts.append(f"{k}: {v:.6f}")
@@ -514,212 +657,3 @@ class Model(Module):
                 print(" - ".join(parts))
 
         return hist
-
-
-@register_module()
-class Sequential(Model):
-    """
-    Sequential container module.
-
-    Applies a sequence of child modules in order:
-
-        y = L_n(...L_2(L_1(x)))
-
-    This container is useful for constructing simple feedforward networks
-    without explicitly defining a custom `forward` method.
-
-    Key Features
-    ------------
-    - Deterministic layer ordering
-    - Automatic submodule registration
-    - Supports indexing, iteration, and dynamic extension via `add`
-    """
-
-    def __init__(self, *layers: Module) -> None:
-        """
-        Initialize a Sequential container.
-
-        Parameters
-        ----------
-        *layers : Module
-            Zero or more modules to be added to the container in order.
-        """
-        super().__init__()
-        self._layers: List[Module] = []
-        for layer in layers:
-            self.add(layer)
-
-    def get_config(self) -> dict[str, Any]:
-        return {}
-
-    def add(self, layer: Module, name: Optional[str] = None) -> None:
-        """
-        Append a module to the container.
-
-        The module is registered as a child submodule, enabling recursive
-        parameter discovery.
-
-        Parameters
-        ----------
-        layer : Module
-            The module to append.
-        name : Optional[str], optional
-            Explicit name for the submodule. If omitted, a numeric name
-            ("0", "1", ...) is assigned automatically.
-
-        Raises
-        ------
-        TypeError
-            If `layer` is not an instance of `Module`.
-        ValueError
-            If the provided name conflicts with an existing submodule.
-        """
-        if not isinstance(layer, Module):
-            raise TypeError(f"Sequential.add expects a Module, got: {type(layer)}")
-
-        idx = len(self._layers)
-        layer_name = name if name is not None else str(idx)
-
-        if hasattr(self, "_modules") and layer_name in self._modules:
-            raise ValueError(f"Duplicate layer name '{layer_name}' in Sequential.")
-
-        self._layers.append(layer)
-
-        # Register as child module for parameter recursion
-        if hasattr(self, "_modules"):
-            self._modules[layer_name] = layer
-        else:
-            # Fallback for minimal Module implementations
-            setattr(self, layer_name, layer)
-
-    def forward(self, x):
-        """
-        Apply all layers sequentially.
-
-        Parameters
-        ----------
-        x : ITensor
-            Input tensor to the first layer.
-
-        Returns
-        -------
-        ITensor
-            Output of the final layer.
-        """
-        out = x
-        for layer in self._layers:
-            out = layer(out)
-        return out
-
-    def __len__(self) -> int:
-        """
-        Return the number of layers in the container.
-        """
-        return len(self._layers)
-
-    def __iter__(self) -> Iterator[Module]:
-        """
-        Iterate over contained layers in order.
-        """
-        return iter(self._layers)
-
-    def __getitem__(self, idx: int) -> Module:
-        """
-        Retrieve a layer by index.
-
-        Parameters
-        ----------
-        idx : int
-            Index of the layer.
-
-        Returns
-        -------
-        Module
-            The requested layer.
-        """
-        return self._layers[idx]
-
-    def layers(self) -> Tuple[Module, ...]:
-        """
-        Return all layers as an immutable tuple.
-
-        Returns
-        -------
-        Tuple[Module, ...]
-            Tuple of contained modules.
-        """
-        return tuple(self._layers)
-
-    def summary(self) -> str:
-        """
-        Generate a lightweight textual summary of the container.
-
-        Returns
-        -------
-        str
-            Human-readable representation listing layer indices and types.
-
-        Notes
-        -----
-        - No shape inference or parameter counting is performed.
-        """
-        lines = [f"{self.__class__.__name__}("]
-        for i, layer in enumerate(self._layers):
-            lines.append(f"  ({i}): {layer.__class__.__name__}")
-        lines.append(")")
-        return "\n".join(lines)
-
-    def predict(self, x, *, requires_grad: bool = False):
-        """
-        Perform an inference-style forward pass for the Sequential model.
-
-        Parameters
-        ----------
-        x : ITensor
-            Input tensor.
-        requires_grad : bool, optional
-            Placeholder for future gradient-control semantics.
-
-        Returns
-        -------
-        ITensor
-            Output of the sequential computation.
-        """
-        eval_fn = getattr(self, "eval", None)
-        if callable(eval_fn):
-            eval_fn()
-
-        return self.forward(x)
-
-    @classmethod
-    def from_config(cls, cfg: dict[str, Any]) -> "Sequential":
-        """
-        Construct a Sequential container from config.
-
-        Notes
-        -----
-        Children are attached later by the deserializer into `self._modules`.
-        This method restores the ordered `_layers` view from `_modules` once present.
-        """
-        return cls()
-
-    def _post_load(self) -> None:
-        """
-        Internal hook invoked by JSON deserialization after children are attached.
-
-        Restores `_layers` ordering from `_modules` so that indexing, iteration,
-        and forward() work correctly after load.
-        """
-        if not hasattr(self, "_modules") or not isinstance(self._modules, dict):
-            return
-
-        # Deterministic order: numeric names first ("0", "1", ...)
-        def _key_order(k: str) -> tuple[int, int | str]:
-            try:
-                return (0, int(k))
-            except ValueError:
-                return (1, k)
-
-        self._layers = [
-            self._modules[k] for k in sorted(self._modules.keys(), key=_key_order)
-        ]

@@ -24,7 +24,7 @@ from pathlib import Path
 import numpy as np
 
 from keydnn.infrastructure.tensor._tensor import Tensor
-from keydnn.infrastructure._models import Sequential
+from keydnn.infrastructure.models._sequential import Sequential
 from keydnn.infrastructure.fully_connected._linear import Linear
 
 

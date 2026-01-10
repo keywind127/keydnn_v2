@@ -8,7 +8,7 @@ import unittest
 import numpy as np
 
 from src.keydnn.infrastructure.tensor._tensor import Tensor
-from src.keydnn.infrastructure._models import Sequential
+from src.keydnn.infrastructure.models._sequential import Sequential
 from src.keydnn.infrastructure.fully_connected._linear import Linear
 from src.keydnn.infrastructure.convolution._conv2d_module import Conv2d
 from src.keydnn.infrastructure.pooling._pooling_module import (

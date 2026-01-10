@@ -91,7 +91,7 @@ class _FitTrainOnBatchMixin:
         return Device(self.DEVICE_STR)
 
     def _build_model(self, device):
-        from src.keydnn.infrastructure._models import Sequential
+        from src.keydnn.infrastructure.models._sequential import Sequential
         from src.keydnn.infrastructure.fully_connected._linear import Linear
         from src.keydnn.infrastructure._activations import Sigmoid
 
@@ -138,7 +138,7 @@ class _FitTrainOnBatchMixin:
         - training solves XOR
         """
         try:
-            from src.keydnn.infrastructure._models import Sequential  # noqa: F401
+            from src.keydnn.infrastructure.models._sequential import Sequential  # noqa: F401
         except (ModuleNotFoundError, ImportError) as e:
             self.skipTest(f"Missing imports: {e}")
 
@@ -203,7 +203,7 @@ class _FitTrainOnBatchMixin:
         - final model solves XOR
         """
         try:
-            from src.keydnn.infrastructure._models import Sequential  # noqa: F401
+            from src.keydnn.infrastructure.models._sequential import Sequential  # noqa: F401
         except (ModuleNotFoundError, ImportError) as e:
             self.skipTest(f"Missing imports: {e}")
 
@@ -335,7 +335,7 @@ class TestModelTrainOnBatchContract(unittest.TestCase):
         may live on Sequential/Model instances, not as classmethods.
         """
         try:
-            from src.keydnn.infrastructure._models import Model
+            from src.keydnn.infrastructure.models._models import Model
         except (ModuleNotFoundError, ImportError) as e:
             self.skipTest(f"Missing imports: {e}")
 
@@ -382,7 +382,7 @@ class TestModelFitHistoryContract(unittest.TestCase):
         - aggregates into History with correct lengths
         """
         try:
-            from src.keydnn.infrastructure._models import Model
+            from src.keydnn.infrastructure.models._models import Model
         except (ModuleNotFoundError, ImportError) as e:
             self.skipTest(f"Missing imports: {e}")
 
