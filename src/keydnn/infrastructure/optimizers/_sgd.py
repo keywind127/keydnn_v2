@@ -26,11 +26,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable, Sequence
 
+from ...domain.optimizers._optimizer import _Optimizer
 from .._parameter import Parameter
 
 
 @dataclass
-class SGD:
+class SGD(_Optimizer):
     """
     Stochastic Gradient Descent (SGD) optimizer.
 
