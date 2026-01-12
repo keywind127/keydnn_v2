@@ -50,8 +50,8 @@ pip install -e .
 ### Minimal Tensor + autograd
 
 ```python
-from keydnn.infrastructure.tensor._tensor import Tensor
-from keydnn.domain.device._device import Device
+from keydnn.presentation.apis.tensors.tensor import Tensor
+from keydnn.presentation.apis.tensors.device import Device
 
 x = Tensor(shape=(2, 3), device=Device("cpu"), requires_grad=True)
 y = (x * 2.0).sum()
@@ -63,8 +63,8 @@ print(x.grad.to_numpy())
 ### CUDA example (device-resident ops)
 
 ```python
-from keydnn.infrastructure.tensor._tensor import Tensor
-from keydnn.domain.device._device import Device
+from keydnn.presentation.apis.tensors.tensor import Tensor
+from keydnn.presentation.apis.tensors.device import Device
 
 x = Tensor.rand((1024, 1024), device=Device("cuda:0"), requires_grad=True)
 y = (x @ x.T).mean()
@@ -514,12 +514,12 @@ A checkpoint JSON has the form:
 ### Usage
 
 ```python
-from keydnn.infrastructure.models._sequential import Sequential
-from keydnn.infrastructure.convolution._conv2d_module import Conv2d
-from keydnn.infrastructure.fully_connected._linear import Linear
-from keydnn.infrastructure.pooling._pooling_module import MaxPool2d
-from keydnn.infrastructure.flatten._flatten_module import Flatten
-from keydnn.infrastructure._activations import ReLU, Softmax
+from keydnn.presentation.apis.models.sequential import Sequential
+from keydnn.presentation.apis.layers.convolutional.conv2d import Conv2d
+from keydnn.presentation.apis.layers.fullyconnected.linear import Linear
+from keydnn.presentation.apis.layers.pooling.maxpool import MaxPool2d
+from keydnn.presentation.apis.layers.miscellaneous import Flatten
+from keydnn.presentation.apis.activations import ReLU, Softmax
 
 model = Sequential(
     Conv2d(in_channels=1, out_channels=8, kernel_size=3, padding=1),
@@ -615,11 +615,11 @@ The test suite is split into two categories:
   - Gradient propagation across time and both directions
 
   ```python
-  from keydnn.infrastructure.recurrent import LSTM, GRU, Bidirectional
+  from keydnn.presentation.apis.layers.recurrent.bidirectional import Bidirectional
+  from keydnn.presentation.apis.layers.recurrent import LSTM
 
   model = Bidirectional(
-      LSTM(input_size=16, hidden_size=32, return_sequences=True),
-      return_sequences=True
+      LSTM(input_size=16, hidden_size=32, return_sequences=True), return_sequences=True
   )
   ```
 
