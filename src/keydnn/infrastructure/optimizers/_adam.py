@@ -27,12 +27,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable, Sequence, Tuple, Dict
 
+from ...domain.optimizers._optimizer import _Optimizer
 from ..tensor._tensor import Tensor
 from .._parameter import Parameter
 
 
 @dataclass
-class Adam:
+class Adam(_Optimizer):
     """
     Adam optimizer.
 

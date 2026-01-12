@@ -40,9 +40,7 @@ from pathlib import Path
 import json
 
 from ._history import History
-
 from .._module import Module
-
 from ..module._serialization_core import (
     module_to_config,
     module_from_config,
@@ -51,6 +49,7 @@ from ..module._serialization_weights import (
     extract_state_payload,
     load_state_payload_,
 )
+from .callbacks import Callback, CallbackList
 
 
 def _to_float_scalar(x: Any) -> float:
@@ -352,12 +351,7 @@ class Model(Module):
         p = Path(path)
         p.parent.mkdir(parents=True, exist_ok=True)
 
-        payload = {
-            "format": "keydnn.json.ckpt.v1",
-            "arch": module_to_config(self),
-            "state": extract_state_payload(self),
-        }
-
+        payload = self.to_json_payload()
         p.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
     @classmethod
@@ -383,7 +377,7 @@ class Model(Module):
             If the reconstructed object is not an instance of `cls`.
         """
         p = Path(path)
-        payload = json.loads(p.read_text(encoding="utf-8"))
+        payload: Dict[str, Any] = json.loads(p.read_text(encoding="utf-8"))
 
         fmt = payload.get("format")
         if fmt != "keydnn.json.ckpt.v1":
@@ -525,6 +519,8 @@ class Model(Module):
         epochs: int = 1,
         shuffle: bool = True,
         verbose: int = 1,
+        validation_data: Optional[Tuple[Any, Any]] = None,
+        callbacks: Optional[Sequence["Callback"]] = None,
     ) -> History:
         """
         Train the model for a fixed number of epochs.
@@ -588,7 +584,62 @@ class Model(Module):
         if batch_size < 1:
             raise ValueError("batch_size must be >= 1")
 
+        cb_list = CallbackList(callbacks)
+        cb_list.set_model(self)
+
+        cb_list.on_train_begin(logs={})
+
         hist = History()
+
+        def _eval_epoch(xv: Any, yv: Any) -> Dict[str, float]:
+            # Switch to eval mode if available
+            eval_fn = getattr(self, "eval", None)
+            train_fn = getattr(self, "train", None)
+            was_training = getattr(self, "training", None)
+
+            if callable(eval_fn):
+                eval_fn()
+
+            sums: Dict[str, float] = {}
+            count: Dict[str, int] = {}
+
+            # reuse batching logic for validation
+            for xb, yb in _iter_minibatches_xy(
+                xv, yv, batch_size=batch_size, shuffle=False
+            ):
+                # forward-only, no optimizer
+                y_pred = self(xb)
+                loss_tensor = loss(y_pred, yb)
+                logs_b: Dict[str, float] = {"loss": _to_float_scalar(loss_tensor)}
+
+                if metrics:
+                    if metric_names is not None and len(metric_names) != len(metrics):
+                        raise ValueError(
+                            "metric_names must have the same length as metrics"
+                        )
+                    for i, m in enumerate(metrics):
+                        name = (
+                            metric_names[i]
+                            if metric_names is not None
+                            else (getattr(m, "__name__", None) or f"metric_{i}")
+                        )
+                        mv = _call_metric(m, yb, y_pred)
+                        logs_b[str(name)] = _to_float_scalar(mv)
+
+                bs = _batch_size_of(xb)
+                for k, v in logs_b.items():
+                    sums[k] = sums.get(k, 0.0) + float(v) * bs
+                    count[k] = count.get(k, 0) + bs
+
+            out: Dict[str, float] = {}
+            for k, s in sums.items():
+                denom = float(count.get(k, 0) or 1)
+                out[f"val_{k}"] = s / denom
+
+            if callable(train_fn) and was_training is True:
+                train_fn()
+
+            return out
 
         def _epoch_batches() -> Iterator[Tuple[Any, Any]]:
             """
@@ -621,11 +672,16 @@ class Model(Module):
                 )
 
         for epoch_idx in range(epochs):
+            cb_list.on_epoch_begin(epoch_idx, logs={})
+
             sums: Dict[str, float] = {}
             count: Dict[str, int] = {}
             seen = 0
 
+            batch_idx = 0
             for xb, yb in _epoch_batches():
+                cb_list.on_batch_begin(batch_idx, logs={})
+
                 logs = self.train_on_batch(
                     xb,
                     yb,
@@ -635,19 +691,29 @@ class Model(Module):
                     metric_names=metric_names,
                 )
 
+                cb_list.on_batch_end(batch_idx, logs=logs)
+
                 bs = _batch_size_of(xb)
                 seen += bs
-
                 for k, v in logs.items():
                     sums[k] = sums.get(k, 0.0) + float(v) * bs
                     count[k] = count.get(k, 0) + bs
+
+                batch_idx += 1
 
             epoch_logs: Dict[str, float] = {}
             for k, s in sums.items():
                 denom = float(count.get(k, 0) or 1)
                 epoch_logs[k] = s / denom
 
+            # validation (optional)
+            if validation_data is not None:
+                xv, yv = validation_data
+                epoch_logs.update(_eval_epoch(xv, yv))
+
             hist.append_epoch(epoch_idx, epoch_logs)
+
+            cb_list.on_epoch_end(epoch_idx, logs=epoch_logs)
 
             if verbose:
                 parts = [f"Epoch {epoch_idx + 1}/{epochs}"]
@@ -656,4 +722,66 @@ class Model(Module):
                 parts.append(f"seen: {seen}")
                 print(" - ".join(parts))
 
+            if cb_list.stop_training:
+                break
+
+        cb_list.on_train_end(logs=hist.last())
         return hist
+
+    def to_json_payload(self) -> Dict[str, Any]:
+        """
+        Serialize model architecture and weights into a JSON-serializable payload.
+
+        This is the in-memory counterpart to `save_json(path)` and is useful for:
+        - callback-based checkpointing without filesystem writes
+        - snapshotting best weights for early stopping restore
+        - programmatic checkpoint transport (e.g., RPC, DB, etc.)
+
+        Returns
+        -------
+        Dict[str, Any]
+            JSON-serializable checkpoint payload with keys:
+            - "format": str
+            - "arch": dict
+            - "state": dict
+
+        Notes
+        -----
+        The payload is compatible with the on-disk format produced by `save_json()`.
+        """
+        return {
+            "format": "keydnn.json.ckpt.v1",
+            "arch": module_to_config(self),
+            "state": extract_state_payload(self),
+        }
+
+    def from_json_payload_(self, payload: Dict[str, Any]) -> None:
+        """
+        Load weights in-place from a JSON checkpoint payload.
+
+        This method restores only the parameter state into the current model
+        instance. It is intended for in-memory restores (e.g., EarlyStopping).
+
+        Parameters
+        ----------
+        payload : Dict[str, Any]
+            A checkpoint payload produced by `to_json_payload()` or loaded from
+            disk via `json.loads(...)`.
+
+        Raises
+        ------
+        ValueError
+            If the checkpoint format is unsupported.
+
+        Notes
+        -----
+        - This method does not reconstruct the module graph.
+        - It assumes the current model architecture matches the payload.
+        - Shape mismatches are detected by `load_state_payload_()`.
+        """
+        fmt = payload.get("format")
+        if fmt != "keydnn.json.ckpt.v1":
+            raise ValueError(f"Unsupported checkpoint format: {fmt!r}")
+
+        # Only restore weights into this instance.
+        load_state_payload_(self, payload["state"])

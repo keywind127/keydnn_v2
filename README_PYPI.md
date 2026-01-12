@@ -69,8 +69,8 @@ pip install -e .
 ## Quickstart
 
 ```python
-from keydnn.infrastructure.tensor._tensor import Tensor
-from keydnn.domain.device._device import Device
+from keydnn.presentation.apis.tensors.tensor import Tensor
+from keydnn.presentation.apis.tensors.device import Device
 
 x = Tensor(shape=(2, 3), device=Device("cpu"), requires_grad=True)
 y = (x * 2.0).sum()
