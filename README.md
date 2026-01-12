@@ -15,6 +15,7 @@ It is designed to be both:
   - **cuDNN** acceleration for `conv2d` and `conv2d_transpose`
 - CUDA implementations for core ops: **pooling**, **reductions**, **elementwise arithmetic**, and **in-place scalar ops** (optimizer-friendly)
 - Extensive **unit tests** (CPU↔CUDA parity) and standalone **microbenchmarks** under `scripts/`
+- Keras-style training loop (`Model.fit`) with callbacks (EarlyStopping, ModelCheckpoint) and JSON checkpointing
 
 > **Status:** Work in progress (pre-stable). APIs may change as the framework evolves.
 
@@ -50,7 +51,7 @@ pip install -e .
 ### Minimal Tensor + autograd
 
 ```python
-from keydnn.presentation.apis.tensors.tensor import Tensor
+from keydnn.presentation.apis.tensors import Tensor
 from keydnn.presentation.apis.tensors.device import Device
 
 x = Tensor(shape=(2, 3), device=Device("cpu"), requires_grad=True)
@@ -63,13 +64,134 @@ print(x.grad.to_numpy())
 ### CUDA example (device-resident ops)
 
 ```python
-from keydnn.presentation.apis.tensors.tensor import Tensor
+from keydnn.presentation.apis.tensors import Tensor
 from keydnn.presentation.apis.tensors.device import Device
 
 x = Tensor.rand((1024, 1024), device=Device("cuda:0"), requires_grad=True)
 y = (x @ x.T).mean()
 y.backward()
 print(repr(y))
+
+```
+
+### Training example (`Model.fit` + callbacks)
+
+```python
+from __future__ import annotations
+
+import numpy as np
+
+from keydnn.presentation.apis.callbacks import EarlyStopping, ModelCheckpoint
+from keydnn.presentation.apis.backend.ops import cuda_available
+from keydnn.presentation.apis.activations import Sigmoid
+from keydnn.presentation.apis.models import Sequential
+from keydnn.presentation.apis.tensors import Tensor
+from keydnn.presentation.apis.tensors import Device
+from keydnn.presentation.apis.optimizers import SGD
+from keydnn.presentation.apis.layers import Linear
+
+
+def _tensor_from_numpy(arr: np.ndarray, device, requires_grad=False) -> Tensor:
+    t = Tensor(shape=arr.shape, device=device, requires_grad=requires_grad)
+    t.copy_from_numpy(np.asarray(arr, dtype=np.float32))
+    return t
+
+
+def _xor_data_numpy():
+    x_np = np.array(
+        [[0.0, 0.0], [0.0, 1.0], [1.0, 0.0], [1.0, 1.0]],
+        dtype=np.float32,
+    )
+    y_np = np.array([[0.0], [1.0], [1.0], [0.0]], dtype=np.float32)
+    return x_np, y_np
+
+
+def _accuracy_from_pred_np(y_true_np: np.ndarray, pred_np: np.ndarray) -> float:
+    y_hat = (pred_np >= 0.5).astype(np.float32)
+    return float((y_hat == y_true_np).mean())
+
+
+def mse_loss(pred: Tensor, target: Tensor) -> Tensor:
+    diff = pred - target
+    sq = diff * diff
+    return sq.mean()
+
+
+def acc_metric(y_true: Tensor, y_pred: Tensor) -> float:
+    yp = np.asarray(y_pred.to_numpy(), dtype=np.float32)
+    yt = np.asarray(y_true.to_numpy(), dtype=np.float32)
+    return _accuracy_from_pred_np(yt, yp)
+
+
+if __name__ == "__main__":
+
+    device = Device("cuda:0") if cuda_available() else Device("cpu")
+
+    x_base, y_base = _xor_data_numpy()
+    repeats = 256
+    x_np = np.repeat(x_base, repeats=repeats, axis=0)
+    y_np = np.repeat(y_base, repeats=repeats, axis=0)
+
+    x = _tensor_from_numpy(x_np, device=device, requires_grad=False)
+    y = _tensor_from_numpy(y_np, device=device, requires_grad=False)
+
+    hidden_dim = 8
+
+    if str(device).startswith("cuda"):
+        model = Sequential(
+            Linear(2, hidden_dim, device=device),
+            Sigmoid(),
+            Linear(hidden_dim, 1, device=device),
+            Sigmoid(),
+        )
+    else:
+        model = Sequential(
+            Linear(2, hidden_dim),
+            Sigmoid(),
+            Linear(hidden_dim, 1),
+            Sigmoid(),
+        )
+
+    optimizer = SGD(model.parameters(), lr=1.0)
+
+    callbacks = [
+        EarlyStopping(
+            monitor="acc",
+            mode="max",
+            patience=5,
+            min_delta=1e-4,
+            restore_best_weights=True,
+        ),
+        ModelCheckpoint(
+            filepath="xor_epoch{epoch:03d}_loss{loss:.6f}.json",
+            monitor="acc",
+            mode="max",
+            save_best_only=True,
+            verbose=1,
+        ),
+    ]
+
+    history = model.fit(
+        x,
+        y,
+        loss=mse_loss,
+        optimizer=optimizer,
+        metrics=[acc_metric],
+        metric_names=["acc"],
+        batch_size=32,
+        epochs=2000,
+        shuffle=True,
+        callbacks=callbacks,
+        verbose=1,
+    )
+
+    x_eval = _tensor_from_numpy(x_base, device=device, requires_grad=False)
+    pred: Tensor = model(x_eval)
+    pred_np = np.asarray(pred.to_numpy(), dtype=np.float32)
+
+    print("device:", str(device))
+    print("pred:", pred_np.reshape(-1).round(3).tolist())
+    print("acc:", _accuracy_from_pred_np(y_base, pred_np))
 
 ```
 
@@ -89,12 +211,17 @@ print(repr(y))
 | Conv2D Transpose                              |  ✅ |   ✅ | CUDA backend with **cuDNN** acceleration where available  |
 | Indexing / slicing (`__getitem__`)            |  ✅ |   ⚠️ | CUDA path may use a correctness-first CPU fallback        |
 | RNN modules (RNN/LSTM/GRU)                    |  ✅ |   ⚠️ | implemented via Tensor ops; no fused CUDA RNN kernels yet |
+| Normalization (BatchNorm1d/2d, LayerNorm)     |  ✅ |   ⚠️ | LayerNorm is CPU; CUDA coverage varies by module          |
+| Training loop (`Model.fit`, `train_on_batch`) |  ✅ |   ✅ | Keras-like training APIs; works with CPU/CUDA tensors     |
+| Callbacks (EarlyStopping, ModelCheckpoint)    |  ✅ |   ✅ | hook wiring via CallbackList; JSON checkpoint integration |
 
 ---
 
 ## Architecture Overview
 
-KeyDNN follows a layered, interface-driven design:
+KeyDNN exposes its intended public surface under `keydnn.presentation.apis`.
+These modules provide stable import paths and aliases, while internal infrastructure
+packages may evolve as long as they satisfy domain interfaces.
 
 ### Domain
 
@@ -138,21 +265,11 @@ Provides concrete implementations of domain contracts:
   - CPU reference implementation + native CPU backend (where available)
   - CUDA backend with **cuDNN** acceleration where available
   - Tested via forward/backward parity checks and module/Fn unit tests
-- `RNNCell` — vanilla recurrent neural network cell (tanh activation)
-  - NumPy-based forward and backward
-  - Autograd-compatible via dynamic computation graphs
-- Recurrent neural network layers:
-  - `RNNCell` — vanilla tanh recurrent cell
-  - `LSTMCell` — long short-term memory cell (input/forget/output gates)
-  - `GRUCell` — gated recurrent unit cell
-  - NumPy-based forward and backward implementations
-  - Full autograd support via dynamic computation graphs
-- Sequence-level recurrent modules:
-  - `RNN`
-  - `LSTM`
-  - `GRU`
-  - Time-major execution with Backpropagation Through Time (BPTT)
-  - Keras-compatible `return_sequences` / `return_state` semantics
+- Recurrent modules:
+  - Cells: `RNNCell`, `LSTMCell`, `GRUCell`
+  - Sequence modules: `RNN`, `LSTM`, `GRU`
+  - `Bidirectional` wrapper (Keras-style)
+  - Time-major execution with BPTT and `return_sequences` / `return_state`
 - Keras-style bidirectional execution via `Bidirectional`
   - Generic wrapper supporting `RNN`, `LSTM`, and `GRU`
   - Forward/backward layer cloning
@@ -514,11 +631,11 @@ A checkpoint JSON has the form:
 ### Usage
 
 ```python
-from keydnn.presentation.apis.models.sequential import Sequential
-from keydnn.presentation.apis.layers.convolutional.conv2d import Conv2d
-from keydnn.presentation.apis.layers.fullyconnected.linear import Linear
-from keydnn.presentation.apis.layers.pooling.maxpool import MaxPool2d
-from keydnn.presentation.apis.layers.miscellaneous import Flatten
+from keydnn.presentation.apis.models import Sequential
+from keydnn.presentation.apis.layers import Conv2d
+from keydnn.presentation.apis.layers import Linear
+from keydnn.presentation.apis.layers import MaxPool2d
+from keydnn.presentation.apis.layers import Flatten
 from keydnn.presentation.apis.activations import ReLU, Softmax
 
 model = Sequential(
@@ -615,8 +732,8 @@ The test suite is split into two categories:
   - Gradient propagation across time and both directions
 
   ```python
-  from keydnn.presentation.apis.layers.recurrent.bidirectional import Bidirectional
-  from keydnn.presentation.apis.layers.recurrent import LSTM
+  from keydnn.presentation.apis.layers import Bidirectional
+  from keydnn.presentation.apis.layers import LSTM
 
   model = Bidirectional(
       LSTM(input_size=16, hidden_size=32, return_sequences=True), return_sequences=True

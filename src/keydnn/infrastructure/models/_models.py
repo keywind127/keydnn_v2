@@ -189,8 +189,8 @@ def _iter_minibatches_xy(
     - If vectorized advanced indexing fails (e.g., `x[batch_ids]`), this
       function falls back to Python list-gathering.
     """
-    n = len(x)
-    if len(y) != n:
+    n = x.shape[0]
+    if y.shape[0] != n:
         raise ValueError(
             f"x and y must have same length, got len(x)={n}, len(y)={len(y)}"
         )
