@@ -52,6 +52,135 @@ from ..module._serialization_weights import (
 from .callbacks import Callback, CallbackList
 
 
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Sequence,
+    Iterable,
+    Iterator,
+    Optional,
+    Tuple,
+    Mapping,
+    Union,
+)
+
+# ... existing imports ...
+
+
+LossLike = Union[str, Callable[[Any, Any], Any]]
+OptimizerLike = Union[str, Any]
+
+
+def _normalize_key(s: str) -> str:
+    return s.strip().lower().replace("-", "").replace("_", "")
+
+
+def _resolve_loss(loss: LossLike) -> Callable[[Any, Any], Any]:
+    """
+    Resolve a loss spec into a callable: loss(y_pred, y_true) -> scalar Tensor-like.
+    Supports:
+      - callable (returned as-is)
+      - string names: "mse", "sse", "bce", "cce"
+    """
+    if callable(loss):
+        return loss
+
+    if not isinstance(loss, str):
+        raise TypeError(f"loss must be a callable or str, got {type(loss).__name__}")
+
+    key = _normalize_key(loss)
+
+    # Prefer presentation API (it already wraps ctx/apply correctly)
+    try:
+        from src.keydnn.presentation.apis import losses as pres_losses  # type: ignore
+
+        mapping: Dict[str, Callable[[Any, Any], Any]] = {
+            "mse": pres_losses.mse,
+            "sse": pres_losses.sse,
+            "bce": pres_losses.binary_cross_entropy,
+            "binarycrossentropy": pres_losses.binary_cross_entropy,
+            "cce": pres_losses.categorical_cross_entropy,
+            "categoricalcrossentropy": pres_losses.categorical_cross_entropy,
+        }
+        if key in mapping:
+            return mapping[key]
+    except Exception:
+        # Fall back to infra if presentation isn't available in this context
+        pass
+
+    # Infra fallback: try Function-style .apply(...) or callable wrappers if they exist
+    try:
+        from src.keydnn.infrastructure import _losses as infra_losses  # type: ignore
+
+        mapping2: Dict[str, Any] = {
+            "mse": getattr(infra_losses, "mse", None)
+            or getattr(infra_losses, "MSE", None),
+            "sse": getattr(infra_losses, "sse", None)
+            or getattr(infra_losses, "SSE", None),
+            "bce": getattr(infra_losses, "binary_cross_entropy", None)
+            or getattr(infra_losses, "BinaryCrossEntropy", None),
+            "cce": getattr(infra_losses, "categorical_cross_entropy", None)
+            or getattr(infra_losses, "CategoricalCrossEntropy", None),
+        }
+        obj = mapping2.get(key)
+
+        # If it's directly callable, good.
+        if callable(obj):
+            return obj
+
+        # If it's a Function class exposing apply(pred, target)
+        if (
+            obj is not None
+            and hasattr(obj, "apply")
+            and callable(getattr(obj, "apply"))
+        ):
+            return lambda pred, target: obj.apply(pred, target)
+
+    except Exception:
+        pass
+
+    raise ValueError(
+        f"Unknown loss {loss!r}. Supported: 'mse', 'sse', 'bce', 'cce' or a callable loss(y_pred, y_true)."
+    )
+
+
+def _resolve_optimizer(
+    model: "Model",
+    optimizer: OptimizerLike,
+    optimizer_kwargs: Optional[Mapping[str, Any]] = None,
+) -> Any:
+    """
+    Resolve optimizer spec into an optimizer instance.
+    Supports:
+      - instance (returned as-is)
+      - string names: "sgd", "adam"  -> instantiated with model.parameters()
+    """
+    if not isinstance(optimizer, str):
+        return optimizer
+
+    key = _normalize_key(optimizer)
+    kwargs = dict(optimizer_kwargs or {})
+
+    # defaults (so user can just pass "sgd" without kwargs)
+    if "lr" not in kwargs and "learning_rate" not in kwargs:
+        kwargs["lr"] = 1.0
+
+    if key == "sgd":
+        from src.keydnn.infrastructure.optimizers._sgd import SGD  # type: ignore
+
+        return SGD(model.parameters(), **kwargs)
+
+    if key == "adam":
+        from src.keydnn.infrastructure.optimizers._adam import Adam  # type: ignore
+
+        return Adam(model.parameters(), **kwargs)
+
+    raise ValueError(
+        f"Unknown optimizer {optimizer!r}. Supported: 'sgd', 'adam' or an optimizer instance."
+    )
+
+
 def _to_float_scalar(x: Any) -> float:
     """
     Convert a scalar-like value to a Python `float`.
@@ -521,6 +650,7 @@ class Model(Module):
         verbose: int = 1,
         validation_data: Optional[Tuple[Any, Any]] = None,
         callbacks: Optional[Sequence["Callback"]] = None,
+        optimizer_kwargs: Optional[Mapping[str, Any]] = None,
     ) -> History:
         """
         Train the model for a fixed number of epochs.
@@ -584,15 +714,16 @@ class Model(Module):
         if batch_size < 1:
             raise ValueError("batch_size must be >= 1")
 
+        loss_fn = _resolve_loss(loss)
+        opt_obj = _resolve_optimizer(self, optimizer, optimizer_kwargs)
+
         cb_list = CallbackList(callbacks)
         cb_list.set_model(self)
-
         cb_list.on_train_begin(logs={})
 
         hist = History()
 
         def _eval_epoch(xv: Any, yv: Any) -> Dict[str, float]:
-            # Switch to eval mode if available
             eval_fn = getattr(self, "eval", None)
             train_fn = getattr(self, "train", None)
             was_training = getattr(self, "training", None)
@@ -603,13 +734,11 @@ class Model(Module):
             sums: Dict[str, float] = {}
             count: Dict[str, int] = {}
 
-            # reuse batching logic for validation
             for xb, yb in _iter_minibatches_xy(
                 xv, yv, batch_size=batch_size, shuffle=False
             ):
-                # forward-only, no optimizer
                 y_pred = self(xb)
-                loss_tensor = loss(y_pred, yb)
+                loss_tensor = loss_fn(y_pred, yb)
                 logs_b: Dict[str, float] = {"loss": _to_float_scalar(loss_tensor)}
 
                 if metrics:
@@ -638,29 +767,15 @@ class Model(Module):
 
             if callable(train_fn) and was_training is True:
                 train_fn()
-
             return out
 
         def _epoch_batches() -> Iterator[Tuple[Any, Any]]:
-            """
-            Yield `(x_batch, y_batch)` pairs for one epoch.
-
-            Returns
-            -------
-            Iterator[Tuple[Any, Any]]
-                Batch iterator for the current epoch.
-
-            Notes
-            -----
-            - For `y is None`, the caller supplies the batch iterator directly.
-            - For dataset inputs, batching is handled via `_iter_minibatches_xy`.
-            """
             if y is None:
                 if not isinstance(x, Iterable):
                     raise TypeError(
                         "If y is None, x must be an iterable of (x_batch, y_batch)"
                     )
-                for b in x:  # type: ignore[assignment]
+                for b in x:
                     if not (isinstance(b, tuple) and len(b) == 2):
                         raise TypeError(
                             "Iterable x must yield (x_batch, y_batch) tuples"
@@ -685,8 +800,8 @@ class Model(Module):
                 logs = self.train_on_batch(
                     xb,
                     yb,
-                    loss=loss,
-                    optimizer=optimizer,
+                    loss=loss_fn,  # CHANGED
+                    optimizer=opt_obj,  # CHANGED
                     metrics=metrics,
                     metric_names=metric_names,
                 )
@@ -706,13 +821,11 @@ class Model(Module):
                 denom = float(count.get(k, 0) or 1)
                 epoch_logs[k] = s / denom
 
-            # validation (optional)
             if validation_data is not None:
                 xv, yv = validation_data
                 epoch_logs.update(_eval_epoch(xv, yv))
 
             hist.append_epoch(epoch_idx, epoch_logs)
-
             cb_list.on_epoch_end(epoch_idx, logs=epoch_logs)
 
             if verbose:
