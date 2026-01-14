@@ -35,6 +35,8 @@ from typing import (
     Iterator,
     Optional,
     Tuple,
+    Mapping,
+    Union,
 )
 from pathlib import Path
 import json
@@ -52,22 +54,6 @@ from ..module._serialization_weights import (
 from .callbacks import Callback, CallbackList
 
 
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    Sequence,
-    Iterable,
-    Iterator,
-    Optional,
-    Tuple,
-    Mapping,
-    Union,
-)
-
-# ... existing imports ...
-
-
 LossLike = Union[str, Callable[[Any, Any], Any]]
 OptimizerLike = Union[str, Any]
 
@@ -76,72 +62,66 @@ def _normalize_key(s: str) -> str:
     return s.strip().lower().replace("-", "").replace("_", "")
 
 
-def _resolve_loss(loss: LossLike) -> Callable[[Any, Any], Any]:
+def _resolve_loss(loss: Any) -> Callable[[Any, Any], Any]:
     """
-    Resolve a loss spec into a callable: loss(y_pred, y_true) -> scalar Tensor-like.
-    Supports:
-      - callable (returned as-is)
-      - string names: "mse", "sse", "bce", "cce"
+    Resolve loss argument into a callable loss(y_pred, y_true) -> scalar Tensor.
+
+    Supported string aliases:
+    - "mse": mean((pred - target)^2)
+    - "sse": sum((pred - target)^2)
+    - "bce": mean(-[y*log(p) + (1-y)*log(1-p)])
+    - "cce": -(sum(y*log(p))) / N   (N=batch size)
     """
     if callable(loss):
         return loss
 
     if not isinstance(loss, str):
-        raise TypeError(f"loss must be a callable or str, got {type(loss).__name__}")
+        raise TypeError(
+            "loss must be a callable loss(y_pred, y_true) or a string like "
+            "'mse'/'sse'/'bce'/'cce'."
+        )
 
-    key = _normalize_key(loss)
+    key = loss.strip().lower()
 
-    # Prefer presentation API (it already wraps ctx/apply correctly)
-    try:
-        from src.keydnn.presentation.apis import losses as pres_losses  # type: ignore
+    if key == "mse":
 
-        mapping: Dict[str, Callable[[Any, Any], Any]] = {
-            "mse": pres_losses.mse,
-            "sse": pres_losses.sse,
-            "bce": pres_losses.binary_cross_entropy,
-            "binarycrossentropy": pres_losses.binary_cross_entropy,
-            "cce": pres_losses.categorical_cross_entropy,
-            "categoricalcrossentropy": pres_losses.categorical_cross_entropy,
-        }
-        if key in mapping:
-            return mapping[key]
-    except Exception:
-        # Fall back to infra if presentation isn't available in this context
-        pass
+        def _mse(y_pred, y_true):
+            diff = y_pred - y_true
+            sq = diff * diff
+            return sq.mean()
 
-    # Infra fallback: try Function-style .apply(...) or callable wrappers if they exist
-    try:
-        from src.keydnn.infrastructure import _losses as infra_losses  # type: ignore
+        return _mse
 
-        mapping2: Dict[str, Any] = {
-            "mse": getattr(infra_losses, "mse", None)
-            or getattr(infra_losses, "MSE", None),
-            "sse": getattr(infra_losses, "sse", None)
-            or getattr(infra_losses, "SSE", None),
-            "bce": getattr(infra_losses, "binary_cross_entropy", None)
-            or getattr(infra_losses, "BinaryCrossEntropy", None),
-            "cce": getattr(infra_losses, "categorical_cross_entropy", None)
-            or getattr(infra_losses, "CategoricalCrossEntropy", None),
-        }
-        obj = mapping2.get(key)
+    if key == "sse":
 
-        # If it's directly callable, good.
-        if callable(obj):
-            return obj
+        def _sse(y_pred, y_true):
+            diff = y_pred - y_true
+            sq = diff * diff
+            return sq.sum()
 
-        # If it's a Function class exposing apply(pred, target)
-        if (
-            obj is not None
-            and hasattr(obj, "apply")
-            and callable(getattr(obj, "apply"))
-        ):
-            return lambda pred, target: obj.apply(pred, target)
+        return _sse
 
-    except Exception:
-        pass
+    if key in ("bce", "binary_crossentropy", "binarycrossentropy"):
+
+        def _bce(y_pred, y_true):
+            # mean( -[ y*log(p) + (1-y)*log(1-p) ] )
+            return -(
+                y_true * y_pred.log() + (1.0 - y_true) * (1.0 - y_pred).log()
+            ).mean()
+
+        return _bce
+
+    if key in ("cce", "categorical_crossentropy", "categoricalcrossentropy"):
+
+        def _cce(y_pred, y_true):
+            # -(sum(y*log(p))) / N   where N=batch size
+            return -(y_true * y_pred.log()).sum() / y_pred.shape[0]
+
+        return _cce
 
     raise ValueError(
-        f"Unknown loss {loss!r}. Supported: 'mse', 'sse', 'bce', 'cce' or a callable loss(y_pred, y_true)."
+        f"Unknown loss {loss!r}. Supported: 'mse', 'sse', 'bce', 'cce' "
+        "or a callable loss(y_pred, y_true)."
     )
 
 
@@ -640,8 +620,8 @@ class Model(Module):
         x: Any,
         y: Optional[Any] = None,
         *,
-        loss: Callable[[Any, Any], Any],
-        optimizer: Any,
+        loss: LossLike,
+        optimizer: OptimizerLike,
         metrics: Optional[Sequence[Callable[..., Any]]] = None,
         metric_names: Optional[Sequence[str]] = None,
         batch_size: int = 32,
@@ -675,9 +655,9 @@ class Model(Module):
         y : Optional[Any], optional
             Dataset targets. Must be provided for dataset inputs; must be `None`
             for iterable-of-batches inputs.
-        loss : Callable[[Any, Any], Any]
+        loss : LossLike
             Callable producing a scalar loss: `loss(y_pred, y_true)`.
-        optimizer : Any
+        optimizer : OptimizerLike
             Optimizer-like object, expected to expose `zero_grad()` and `step()`.
         metrics : Optional[Sequence[Callable[..., Any]]], optional
             Metric callables to compute per batch and aggregate per epoch.
@@ -800,8 +780,8 @@ class Model(Module):
                 logs = self.train_on_batch(
                     xb,
                     yb,
-                    loss=loss_fn,  # CHANGED
-                    optimizer=opt_obj,  # CHANGED
+                    loss=loss_fn,
+                    optimizer=opt_obj,
                     metrics=metrics,
                     metric_names=metric_names,
                 )
