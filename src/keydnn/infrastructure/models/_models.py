@@ -507,13 +507,14 @@ class Model(Module):
         x_batch: Any,
         y_batch: Any,
         *,
-        loss: Callable[[Any, Any], Any],
+        loss: Any,
         optimizer: Any,
         metrics: Optional[Sequence[Callable[..., Any]]] = None,
         metric_names: Optional[Sequence[str]] = None,
         zero_grad: bool = True,
         backward: bool = True,
         step: bool = True,
+        optimizer_kwargs: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, float]:
         """
         Run a single training step on one mini-batch.
@@ -525,16 +526,29 @@ class Model(Module):
         - steps the optimizer (`optimizer.step()`) when enabled
         - returns a dictionary of scalar logs (loss + metrics)
 
+        In addition to callables/instances, this method also supports *string*
+        shortcuts for both `loss` and `optimizer`, using the same resolution
+        helpers as `Model.fit()`.
+
+        Supported string forms
+        ----------------------
+        loss:
+        - "mse", "sse", "bce", "cce"
+        Resolved to a callable with signature: `loss(y_pred, y_true) -> Tensor`.
+
+        optimizer:
+        - "sgd", "adam"
+        Resolved by constructing the optimizer using `self.parameters()`.
+        Hyperparameters can be provided via `optimizer_kwargs`.
+
         Parameters
         ----------
         x_batch, y_batch : Any
             One mini-batch of inputs and targets.
-        loss : Callable[[Any, Any], Any]
-            Callable producing a scalar loss: `loss(y_pred, y_true)`.
-        optimizer : Any
-            Optimizer-like object. Expected (duck-typed) methods:
-            - `zero_grad()` (optional)
-            - `step()` (optional)
+        loss : str | Callable[[Any, Any], Any]
+            Loss spec. Either a callable `loss(y_pred, y_true)` or a string shortcut.
+        optimizer : str | Any
+            Optimizer spec. Either an optimizer instance or a string shortcut.
         metrics : Optional[Sequence[Callable[..., Any]]], optional
             Optional metric callables. Expected signature:
             `metric(y_true, y_pred) -> scalar tensor/number`.
@@ -542,6 +556,9 @@ class Model(Module):
         metric_names : Optional[Sequence[str]], optional
             Optional names matching `metrics`. If omitted, names are inferred from
             `metric.__name__` when available, else `"metric_{i}"`.
+        optimizer_kwargs : Optional[Dict[str, Any]], optional
+            Extra kwargs passed when resolving a string optimizer (e.g. `{"lr": 0.1}`).
+            Ignored if `optimizer` is already an optimizer instance.
         zero_grad : bool, optional
             If True, clears gradients before the backward pass. Default is True.
         backward : bool, optional
@@ -560,19 +577,24 @@ class Model(Module):
             If the loss return value does not support `.backward()` while
             `backward=True`.
         ValueError
-            If `metric_names` is provided but its length does not match `metrics`.
+            If `metric_names` is provided but its length does not match `metrics`,
+            or if an unknown string loss/optimizer is provided.
 
         Notes
         -----
         The returned logs are converted to Python floats using `_to_float_scalar`
         for consistent reporting across CPU/CUDA tensor backends.
         """
+        # Resolve string shortcuts (same helpers used by fit()).
+        loss_fn = _resolve_loss(loss)  # type: ignore[name-defined]
+        opt = _resolve_optimizer(self, optimizer, optimizer_kwargs=optimizer_kwargs)  # type: ignore[name-defined]
+
         train_fn = getattr(self, "train", None)
         if callable(train_fn):
             train_fn()
 
         if zero_grad:
-            opt_zero = getattr(optimizer, "zero_grad", None)
+            opt_zero = getattr(opt, "zero_grad", None)
             if callable(opt_zero):
                 opt_zero()
             else:
@@ -581,7 +603,7 @@ class Model(Module):
                     mdl_zero()
 
         y_pred = self(x_batch)
-        loss_tensor = loss(y_pred, y_batch)
+        loss_tensor = loss_fn(y_pred, y_batch)
         loss_value = _to_float_scalar(loss_tensor)
 
         if backward:
@@ -594,7 +616,7 @@ class Model(Module):
             bw()
 
         if step:
-            opt_step = getattr(optimizer, "step", None)
+            opt_step = getattr(opt, "step", None)
             if callable(opt_step):
                 opt_step()
 
