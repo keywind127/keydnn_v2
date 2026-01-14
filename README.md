@@ -83,11 +83,9 @@ import numpy as np
 
 from keydnn.presentation.apis.callbacks import EarlyStopping, ModelCheckpoint
 from keydnn.presentation.apis.backend.ops import cuda_available
+from keydnn.presentation.apis.tensors import Tensor, Device
 from keydnn.presentation.apis.activations import Sigmoid
 from keydnn.presentation.apis.models import Sequential
-from keydnn.presentation.apis.tensors import Tensor
-from keydnn.presentation.apis.tensors import Device
-from keydnn.presentation.apis.optimizers import SGD
 from keydnn.presentation.apis.layers import Linear
 
 
@@ -111,12 +109,6 @@ def _accuracy_from_pred_np(y_true_np: np.ndarray, pred_np: np.ndarray) -> float:
     return float((y_hat == y_true_np).mean())
 
 
-def mse_loss(pred: Tensor, target: Tensor) -> Tensor:
-    diff = pred - target
-    sq = diff * diff
-    return sq.mean()
-
-
 def acc_metric(y_true: Tensor, y_pred: Tensor) -> float:
     yp = np.asarray(y_pred.to_numpy(), dtype=np.float32)
     yt = np.asarray(y_true.to_numpy(), dtype=np.float32)
@@ -125,16 +117,25 @@ def acc_metric(y_true: Tensor, y_pred: Tensor) -> float:
 
 if __name__ == "__main__":
 
+    # ------------------------------------------------------------------
+    # Device
+    # ------------------------------------------------------------------
     device = Device("cuda:0") if cuda_available() else Device("cpu")
 
+    # ------------------------------------------------------------------
+    # XOR dataset
+    # ------------------------------------------------------------------
     x_base, y_base = _xor_data_numpy()
     repeats = 256
     x_np = np.repeat(x_base, repeats=repeats, axis=0)
     y_np = np.repeat(y_base, repeats=repeats, axis=0)
 
-    x = _tensor_from_numpy(x_np, device=device, requires_grad=False)
-    y = _tensor_from_numpy(y_np, device=device, requires_grad=False)
+    x = _tensor_from_numpy(x_np, device=device)
+    y = _tensor_from_numpy(y_np, device=device)
 
+    # ------------------------------------------------------------------
+    # Model
+    # ------------------------------------------------------------------
     hidden_dim = 8
 
     if str(device).startswith("cuda"):
@@ -152,8 +153,9 @@ if __name__ == "__main__":
             Sigmoid(),
         )
 
-    optimizer = SGD(model.parameters(), lr=1.0)
-
+    # ------------------------------------------------------------------
+    # Callbacks
+    # ------------------------------------------------------------------
     callbacks = [
         EarlyStopping(
             monitor="acc",
@@ -171,11 +173,15 @@ if __name__ == "__main__":
         ),
     ]
 
+    # ------------------------------------------------------------------
+    # Training
+    # ------------------------------------------------------------------
     history = model.fit(
         x,
         y,
-        loss=mse_loss,
-        optimizer=optimizer,
+        loss="mse",
+        optimizer="sgd",
+        optimizer_kwargs={"lr": 1.0},
         metrics=[acc_metric],
         metric_names=["acc"],
         batch_size=32,
@@ -185,14 +191,16 @@ if __name__ == "__main__":
         verbose=1,
     )
 
-    x_eval = _tensor_from_numpy(x_base, device=device, requires_grad=False)
+    # ------------------------------------------------------------------
+    # Evaluation
+    # ------------------------------------------------------------------
+    x_eval = _tensor_from_numpy(x_base, device=device)
     pred: Tensor = model(x_eval)
     pred_np = np.asarray(pred.to_numpy(), dtype=np.float32)
 
     print("device:", str(device))
     print("pred:", pred_np.reshape(-1).round(3).tolist())
     print("acc:", _accuracy_from_pred_np(y_base, pred_np))
-
 ```
 
 ---
