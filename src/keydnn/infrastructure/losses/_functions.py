@@ -29,9 +29,9 @@ operation before invoking backpropagation.
 
 from typing import Tuple
 
-from .tensor._tensor_context import Context
-from ._function import Function
-from .tensor._tensor import Tensor
+from ..tensor._tensor_context import Context
+from ..activations._functions import Function
+from ..tensor._tensor import Tensor
 
 
 def _scalar_to_float(t: Tensor) -> float:

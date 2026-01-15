@@ -114,7 +114,7 @@ def main() -> None:
 
     from keydnn.infrastructure.models._sequential import Sequential
     from keydnn.infrastructure.fully_connected._linear import Linear
-    from keydnn.infrastructure._activations import Sigmoid
+    from keydnn.infrastructure.activations._modules import Sigmoid
     from keydnn.infrastructure.tensor._tensor import Tensor
     from keydnn.domain.device._device import Device
 

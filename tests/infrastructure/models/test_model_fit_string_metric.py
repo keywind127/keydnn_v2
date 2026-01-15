@@ -188,7 +188,7 @@ class _FitMetricStringAccIntegrationMixin:
     def _build_model(self, device):
         from src.keydnn.infrastructure.models._sequential import Sequential
         from src.keydnn.infrastructure.fully_connected._linear import Linear
-        from src.keydnn.infrastructure._activations import Sigmoid
+        from src.keydnn.infrastructure.activations._modules import Sigmoid
 
         hidden_dim = 8
         if self.DEVICE_STR.startswith("cuda"):

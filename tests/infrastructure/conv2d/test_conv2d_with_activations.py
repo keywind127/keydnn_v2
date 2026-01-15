@@ -4,7 +4,7 @@ import numpy as np
 from src.keydnn.domain.device._device import Device
 from src.keydnn.infrastructure.tensor._tensor import Tensor
 from src.keydnn.infrastructure.convolution._conv2d_module import Conv2d
-from src.keydnn.infrastructure._activations import (
+from src.keydnn.infrastructure.activations._modules import (
     Sigmoid,
     ReLU,
     LeakyReLU,

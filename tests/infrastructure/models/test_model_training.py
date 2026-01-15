@@ -10,7 +10,7 @@ class TestSequentialXORTraining(unittest.TestCase):
         try:
             from src.keydnn.infrastructure.models._sequential import Sequential
             from src.keydnn.infrastructure.fully_connected._linear import Linear
-            from src.keydnn.infrastructure._activations import Sigmoid
+            from src.keydnn.infrastructure.activations._modules import Sigmoid
             from src.keydnn.infrastructure.tensor._tensor import Tensor
             from src.keydnn.domain.device._device import Device
             from src.keydnn.infrastructure.optimizers._sgd import SGD

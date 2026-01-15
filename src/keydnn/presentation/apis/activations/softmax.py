@@ -1,4 +1,4 @@
-from ....infrastructure._activations import Softmax
+from ....infrastructure.activations._modules import Softmax
 
 
 __all__ = [

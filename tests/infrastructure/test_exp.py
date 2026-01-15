@@ -4,7 +4,7 @@ import numpy as np
 from src.keydnn.infrastructure.tensor._tensor_context import Context
 from src.keydnn.domain.device._device import Device
 from src.keydnn.infrastructure.tensor._tensor import Tensor
-from src.keydnn.infrastructure._function import ExpFn, exp
+from src.keydnn.infrastructure.activations._functions import ExpFn, exp
 
 
 def make_cpu_tensor(arr: np.ndarray, *, requires_grad: bool = False) -> Tensor:

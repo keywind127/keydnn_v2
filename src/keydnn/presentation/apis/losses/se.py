@@ -1,7 +1,11 @@
-from ....infrastructure._losses import MSEFn, SSEFn
-
-MSE = MSEFn
-SSE = SSEFn
+from ....infrastructure.losses import (
+    MSEFn,
+    SSEFn,
+)
+from ....infrastructure.losses import (
+    MSE,
+    SSE,
+)
 
 __all__ = [
     "MSE",

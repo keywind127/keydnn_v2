@@ -1,4 +1,4 @@
-from ....infrastructure._activations import Tanh
+from ....infrastructure.activations._modules import Tanh
 
 
 __all__ = [

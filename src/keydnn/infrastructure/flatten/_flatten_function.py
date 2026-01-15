@@ -26,7 +26,7 @@ from typing import Optional, Sequence, Tuple
 from ..tensor._tensor_context import Context
 
 from ..tensor._tensor import Tensor
-from .._function import Function
+from ..activations._functions import Function
 
 
 class FlattenFn(Function):
