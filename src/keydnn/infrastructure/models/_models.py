@@ -56,6 +56,7 @@ from .callbacks import Callback, CallbackList
 
 LossLike = Union[str, Callable[[Any, Any], Any]]
 OptimizerLike = Union[str, Any]
+MetricLike = Union[str, Callable[..., Any]]
 
 
 def _normalize_key(s: str) -> str:
@@ -362,6 +363,175 @@ def _call_metric(metric: Callable[..., Any], y_true: Any, y_pred: Any) -> Any:
         return metric(y_pred, y_true)
 
 
+def _to_numpy_any(x: Any):
+    try:
+        import numpy as np
+    except Exception:  # pragma: no cover
+        raise
+
+    if hasattr(x, "to_numpy") and callable(getattr(x, "to_numpy")):
+        return np.asarray(x.to_numpy())
+    return np.asarray(x)
+
+
+def _accuracy_metric(y_true: Any, y_pred: Any) -> float:
+    """
+    Compute accuracy for common KeyDNN training setups.
+
+    Rules (best-effort):
+    - If y_pred last dim > 1: multiclass -> argmax over last dim
+      - If y_true has same shape as y_pred: assume one-hot -> argmax
+      - Else assume integer labels
+    - Else: binary -> threshold y_pred >= 0.5, compare against y_true in {0,1}
+    """
+    import numpy as np
+
+    yt = _to_numpy_any(y_true).astype(np.float32, copy=False)
+    yp = _to_numpy_any(y_pred).astype(np.float32, copy=False)
+
+    # Flatten common (N,1) -> (N,)
+    if yt.ndim >= 2 and yt.shape[-1] == 1:
+        yt2 = yt.reshape(-1)
+    else:
+        yt2 = yt
+
+    if yp.ndim >= 2 and yp.shape[-1] == 1:
+        yp2 = yp.reshape(-1)
+    else:
+        yp2 = yp
+
+    # Multiclass: (N, C)
+    if yp.ndim >= 2 and yp.shape[-1] > 1:
+        pred_cls = np.argmax(yp, axis=-1)
+
+        if yt.shape == yp.shape:
+            true_cls = np.argmax(yt, axis=-1)
+        else:
+            true_cls = yt.astype(np.int64, copy=False)
+            if true_cls.ndim > 1:
+                true_cls = true_cls.reshape(-1)
+
+        pred_cls = pred_cls.reshape(-1)
+        true_cls = true_cls.reshape(-1)
+
+        n = min(pred_cls.size, true_cls.size)
+        if n == 0:
+            return 0.0
+        return float((pred_cls[:n] == true_cls[:n]).mean())
+
+    # Binary
+    pred_bin = (yp2 >= 0.5).astype(np.float32, copy=False)
+    true_bin = (yt2 >= 0.5).astype(np.float32, copy=False)
+
+    pred_bin = pred_bin.reshape(-1)
+    true_bin = true_bin.reshape(-1)
+
+    n = min(pred_bin.size, true_bin.size)
+    if n == 0:
+        return 0.0
+    return float((pred_bin[:n] == true_bin[:n]).mean())
+
+
+def _resolve_metrics_and_names(
+    metrics: Optional[Sequence[MetricLike]],
+    metric_names: Optional[Sequence[str]],
+) -> Tuple[Optional[Sequence[Callable[..., Any]]], Optional[Sequence[str]]]:
+    """
+    Resolve metrics spec to callables + names.
+
+    Supports:
+    - callable metrics
+    - string metrics: "acc" / "accuracy"
+
+    If `metric_names` is None, names are inferred:
+    - string metric -> the string itself (normalized display kept original)
+    - callable -> callable.__name__ or "metric_{i}"
+    """
+    if metrics is None:
+        return None, metric_names
+
+    resolved: list[Callable[..., Any]] = []
+    names: list[str] = []
+
+    if metric_names is not None and len(metric_names) != len(metrics):
+        raise ValueError("metric_names must have the same length as metrics")
+
+    for i, m in enumerate(metrics):
+        # name selection
+        if metric_names is not None:
+            name = str(metric_names[i])
+        else:
+            name = (
+                str(m)
+                if isinstance(m, str)
+                else (getattr(m, "__name__", None) or f"metric_{i}")
+            )
+
+        # metric resolution
+        if isinstance(m, str):
+            key = _normalize_key(m)
+            if key in ("acc", "accuracy"):
+                resolved.append(_accuracy_metric)
+                names.append(name)
+                continue
+            raise ValueError(
+                f"Unknown metric {m!r}. Supported: 'acc'/'accuracy' or a callable metric(y_true, y_pred)."
+            )
+
+        resolved.append(m)
+        names.append(name)
+
+    return resolved, names
+
+
+def _resolve_metric(metric: Any) -> Callable[[Any, Any], Any]:
+    """
+    Resolve a metric specification into a callable.
+
+    Supported forms
+    ---------------
+    - callable: returned as-is
+    - string shortcuts:
+        - "acc", "accuracy" -> binary accuracy (threshold=0.5)
+
+    Returns
+    -------
+    Callable[[y_true, y_pred], scalar]
+    """
+    if callable(metric):
+        return metric
+
+    if not isinstance(metric, str):
+        raise TypeError(
+            "Metric must be a callable or string identifier "
+            f"(got {type(metric).__name__})"
+        )
+
+    key = metric.lower()
+
+    if key in {"acc", "accuracy"}:
+
+        def _accuracy(y_true, y_pred):
+            # Tensor-friendly, CPU/CUDA safe
+            yp = y_pred.to_numpy()
+            yt = y_true.to_numpy()
+
+            import numpy as np
+
+            yp = np.asarray(yp, dtype=np.float32)
+            yt = np.asarray(yt, dtype=np.float32)
+
+            y_hat = (yp >= 0.5).astype(np.float32)
+            return float((y_hat == yt).mean())
+
+        _accuracy.__name__ = "acc"
+        return _accuracy
+
+    raise ValueError(
+        f"Unknown metric {metric!r}. Supported: 'acc' or a callable metric."
+    )
+
+
 class Model(Module):
     """
     Base class for top-level neural network models.
@@ -507,72 +677,65 @@ class Model(Module):
         x_batch: Any,
         y_batch: Any,
         *,
-        loss: Callable[[Any, Any], Any],
+        loss: Any,
         optimizer: Any,
-        metrics: Optional[Sequence[Callable[..., Any]]] = None,
+        metrics: Optional[Sequence[Any]] = None,
         metric_names: Optional[Sequence[str]] = None,
         zero_grad: bool = True,
         backward: bool = True,
         step: bool = True,
+        optimizer_kwargs: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, float]:
         """
         Run a single training step on one mini-batch.
 
-        This method provides a Keras-like primitive that:
-        - switches the model to training mode when available (`train()`)
-        - computes predictions and loss
-        - runs backpropagation (`loss.backward()`) when enabled
-        - steps the optimizer (`optimizer.step()`) when enabled
-        - returns a dictionary of scalar logs (loss + metrics)
+        Supports string shortcuts for:
+        - loss: "mse", "sse", "bce", "cce"
+        - optimizer: "sgd", "adam"
+        - metrics: "acc"
 
-        Parameters
-        ----------
-        x_batch, y_batch : Any
-            One mini-batch of inputs and targets.
-        loss : Callable[[Any, Any], Any]
-            Callable producing a scalar loss: `loss(y_pred, y_true)`.
-        optimizer : Any
-            Optimizer-like object. Expected (duck-typed) methods:
-            - `zero_grad()` (optional)
-            - `step()` (optional)
-        metrics : Optional[Sequence[Callable[..., Any]]], optional
-            Optional metric callables. Expected signature:
-            `metric(y_true, y_pred) -> scalar tensor/number`.
-            A reversed argument order is also supported as a fallback.
-        metric_names : Optional[Sequence[str]], optional
-            Optional names matching `metrics`. If omitted, names are inferred from
-            `metric.__name__` when available, else `"metric_{i}"`.
-        zero_grad : bool, optional
-            If True, clears gradients before the backward pass. Default is True.
-        backward : bool, optional
-            If True, calls `loss.backward()`. Default is True.
-        step : bool, optional
-            If True, calls `optimizer.step()`. Default is True.
-
-        Returns
-        -------
-        Dict[str, float]
-            Batch logs, e.g. `{"loss": 0.123, "accuracy": 0.98}`.
-
-        Raises
-        ------
-        TypeError
-            If the loss return value does not support `.backward()` while
-            `backward=True`.
-        ValueError
-            If `metric_names` is provided but its length does not match `metrics`.
-
-        Notes
-        -----
-        The returned logs are converted to Python floats using `_to_float_scalar`
-        for consistent reporting across CPU/CUDA tensor backends.
+        See Model.fit() for full semantics.
         """
+
+        # ------------------------------------------------------------------
+        # Resolve loss / optimizer (shared with fit)
+        # ------------------------------------------------------------------
+        loss_fn = _resolve_loss(loss)  # type: ignore[name-defined]
+        opt = _resolve_optimizer(
+            self, optimizer, optimizer_kwargs=optimizer_kwargs
+        )  # type: ignore[name-defined]
+
+        # ------------------------------------------------------------------
+        # Resolve metrics (NEW)
+        # ------------------------------------------------------------------
+        resolved_metrics: Optional[Sequence[Callable[..., Any]]] = None
+        resolved_names: Optional[Sequence[str]] = None
+
+        if metrics:
+            resolved_metrics = []
+            resolved_names = []
+
+            if metric_names is not None and len(metric_names) != len(metrics):
+                raise ValueError("metric_names must have the same length as metrics")
+
+            for i, m in enumerate(metrics):
+                fn = _resolve_metric(m)
+                resolved_metrics.append(fn)
+
+                if metric_names is not None:
+                    resolved_names.append(metric_names[i])
+                else:
+                    resolved_names.append(getattr(fn, "__name__", f"metric_{i}"))
+
+        # ------------------------------------------------------------------
+        # Training mode
+        # ------------------------------------------------------------------
         train_fn = getattr(self, "train", None)
         if callable(train_fn):
             train_fn()
 
         if zero_grad:
-            opt_zero = getattr(optimizer, "zero_grad", None)
+            opt_zero = getattr(opt, "zero_grad", None)
             if callable(opt_zero):
                 opt_zero()
             else:
@@ -580,8 +743,11 @@ class Model(Module):
                 if callable(mdl_zero):
                     mdl_zero()
 
+        # ------------------------------------------------------------------
+        # Forward + loss
+        # ------------------------------------------------------------------
         y_pred = self(x_batch)
-        loss_tensor = loss(y_pred, y_batch)
+        loss_tensor = loss_fn(y_pred, y_batch)
         loss_value = _to_float_scalar(loss_tensor)
 
         if backward:
@@ -594,24 +760,19 @@ class Model(Module):
             bw()
 
         if step:
-            opt_step = getattr(optimizer, "step", None)
+            opt_step = getattr(opt, "step", None)
             if callable(opt_step):
                 opt_step()
 
+        # ------------------------------------------------------------------
+        # Logs
+        # ------------------------------------------------------------------
         logs: Dict[str, float] = {"loss": float(loss_value)}
 
-        if metrics:
-            if metric_names is not None and len(metric_names) != len(metrics):
-                raise ValueError("metric_names must have the same length as metrics")
-
-            for i, m in enumerate(metrics):
-                name = (
-                    metric_names[i]
-                    if metric_names is not None
-                    else (getattr(m, "__name__", None) or f"metric_{i}")
-                )
-                mv = _call_metric(m, y_batch, y_pred)
-                logs[str(name)] = _to_float_scalar(mv)
+        if resolved_metrics:
+            for name, fn in zip(resolved_names, resolved_metrics):
+                mv = _call_metric(fn, y_batch, y_pred)
+                logs[name] = _to_float_scalar(mv)
 
         return logs
 
@@ -622,7 +783,7 @@ class Model(Module):
         *,
         loss: LossLike,
         optimizer: OptimizerLike,
-        metrics: Optional[Sequence[Callable[..., Any]]] = None,
+        metrics: Optional[Sequence[MetricLike]] = None,
         metric_names: Optional[Sequence[str]] = None,
         batch_size: int = 32,
         epochs: int = 1,
@@ -659,7 +820,7 @@ class Model(Module):
             Callable producing a scalar loss: `loss(y_pred, y_true)`.
         optimizer : OptimizerLike
             Optimizer-like object, expected to expose `zero_grad()` and `step()`.
-        metrics : Optional[Sequence[Callable[..., Any]]], optional
+        metrics : MetricLike, optional
             Metric callables to compute per batch and aggregate per epoch.
         metric_names : Optional[Sequence[str]], optional
             Optional names matching `metrics`. If omitted, names are inferred.
@@ -697,6 +858,8 @@ class Model(Module):
         loss_fn = _resolve_loss(loss)
         opt_obj = _resolve_optimizer(self, optimizer, optimizer_kwargs)
 
+        metrics_fn, metric_names2 = _resolve_metrics_and_names(metrics, metric_names)
+
         cb_list = CallbackList(callbacks)
         cb_list.set_model(self)
         cb_list.on_train_begin(logs={})
@@ -721,15 +884,11 @@ class Model(Module):
                 loss_tensor = loss_fn(y_pred, yb)
                 logs_b: Dict[str, float] = {"loss": _to_float_scalar(loss_tensor)}
 
-                if metrics:
-                    if metric_names is not None and len(metric_names) != len(metrics):
-                        raise ValueError(
-                            "metric_names must have the same length as metrics"
-                        )
-                    for i, m in enumerate(metrics):
+                if metrics_fn:
+                    for i, m in enumerate(metrics_fn):
                         name = (
-                            metric_names[i]
-                            if metric_names is not None
+                            metric_names2[i]
+                            if metric_names2 is not None
                             else (getattr(m, "__name__", None) or f"metric_{i}")
                         )
                         mv = _call_metric(m, yb, y_pred)
@@ -782,8 +941,8 @@ class Model(Module):
                     yb,
                     loss=loss_fn,
                     optimizer=opt_obj,
-                    metrics=metrics,
-                    metric_names=metric_names,
+                    metrics=metrics_fn,
+                    metric_names=metric_names2,
                 )
 
                 cb_list.on_batch_end(batch_idx, logs=logs)

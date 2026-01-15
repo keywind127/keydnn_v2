@@ -109,12 +109,6 @@ def _accuracy_from_pred_np(y_true_np: np.ndarray, pred_np: np.ndarray) -> float:
     return float((y_hat == y_true_np).mean())
 
 
-def acc_metric(y_true: Tensor, y_pred: Tensor) -> float:
-    yp = np.asarray(y_pred.to_numpy(), dtype=np.float32)
-    yt = np.asarray(y_true.to_numpy(), dtype=np.float32)
-    return _accuracy_from_pred_np(yt, yp)
-
-
 if __name__ == "__main__":
 
     # ------------------------------------------------------------------
@@ -182,8 +176,7 @@ if __name__ == "__main__":
         loss="mse",
         optimizer="sgd",
         optimizer_kwargs={"lr": 1.0},
-        metrics=[acc_metric],
-        metric_names=["acc"],
+        metrics=["acc"],
         batch_size=32,
         epochs=2000,
         shuffle=True,
