@@ -15,7 +15,7 @@ from src.keydnn.infrastructure.fully_connected._linear import Linear
 from src.keydnn.infrastructure.convolution._conv2d_module import Conv2d
 from src.keydnn.infrastructure.pooling._pooling_module import MaxPool2d
 from src.keydnn.infrastructure.flatten._flatten_module import Flatten
-from src.keydnn.infrastructure._activations import ReLU, Sigmoid, Softmax
+from src.keydnn.infrastructure.activations._modules import ReLU, Sigmoid, Softmax
 from src.keydnn.infrastructure.recurrent._rnn_module import RNN
 
 

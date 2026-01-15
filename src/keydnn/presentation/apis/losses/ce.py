@@ -1,5 +1,11 @@
-from ....infrastructure._losses import BinaryCrossEntropyFn, CategoricalCrossEntropyFn
-from ....infrastructure.losses import BinaryCrossEntropy, CategoricalCrossEntropy
+from ....infrastructure.losses import (
+    BinaryCrossEntropyFn,
+    CategoricalCrossEntropyFn,
+)
+from ....infrastructure.losses import (
+    BinaryCrossEntropy,
+    CategoricalCrossEntropy,
+)
 
 BCEFn = BinaryCrossEntropyFn
 CCEFn = CategoricalCrossEntropyFn

@@ -28,7 +28,7 @@ import math
 import statistics
 import time
 from dataclasses import dataclass
-from typing import Callable, Dict, List, Sequence, Tuple
+from typing import Callable, Dict, List, Sequence
 
 import numpy as np
 
@@ -46,7 +46,6 @@ if SRC_DIR not in sys.path:
 # Project imports (KeyDNN)
 # ----------------------------
 def _import_keydnn():
-    # Adjust these imports if your paths differ.
     from keydnn.infrastructure.tensor._tensor import Tensor  # type: ignore
     from keydnn.domain.device._device import Device  # type: ignore
 
@@ -55,7 +54,6 @@ def _import_keydnn():
 
 def _cuda_available() -> bool:
     try:
-        # Any known-good loader in your tree is fine.
         from keydnn.infrastructure.native_cuda.python.maxpool2d_ctypes import (  # type: ignore
             load_keydnn_cuda_native,
         )
@@ -67,7 +65,6 @@ def _cuda_available() -> bool:
 
 
 def _get_cuda_lib():
-    # Prefer Tensor._get_cuda_lib() if present to ensure a shared handle.
     Tensor, _Device = _import_keydnn()
     if hasattr(Tensor, "_get_cuda_lib"):
         return Tensor._get_cuda_lib()
@@ -79,7 +76,6 @@ def _get_cuda_lib():
 
 
 def _cuda_sync(lib) -> None:
-    # If you already have a Tensor._cuda_sync(), you can call that instead.
     try:
         from keydnn.infrastructure.native_cuda.python.global_avgpool2d_ctypes import (  # type: ignore
             cuda_synchronize,
@@ -87,12 +83,10 @@ def _cuda_sync(lib) -> None:
 
         cuda_synchronize(lib)
     except Exception:
-        # As a fallback, do nothing (bench will still run, but timings may be optimistic).
         pass
 
 
 def _h2d(lib, dst_dev: int, host_arr: np.ndarray) -> None:
-    # Use compat alias (keyword-only + sync)
     from keydnn.infrastructure.native_cuda.python.ops import memcpy_ctypes as mc  # type: ignore
 
     mc.memcpy_htod(
@@ -121,7 +115,6 @@ def _make_cpu_tensor_from_numpy(arr: np.ndarray):
     t = Tensor(
         shape=arr.shape, device=Device("cpu"), requires_grad=False, dtype=arr.dtype
     )
-    # Many of your CPU tensors use copy_from_numpy; keep it consistent with the framework.
     t.copy_from_numpy(arr)
     return t
 
@@ -133,7 +126,6 @@ def _make_cuda_tensor_from_numpy(arr: np.ndarray, device_str: str = "cuda:0"):
     t = Tensor(
         shape=arr.shape, device=Device(device_str), requires_grad=False, dtype=arr.dtype
     )
-    # Ensure device allocation exists
     if hasattr(t, "_ensure_cuda_alloc"):
         t._ensure_cuda_alloc(dtype=np.dtype(arr.dtype))
     else:
@@ -141,13 +133,11 @@ def _make_cuda_tensor_from_numpy(arr: np.ndarray, device_str: str = "cuda:0"):
             "Tensor lacks _ensure_cuda_alloc; cannot build CUDA tensors for bench."
         )
 
-    # Copy host -> device
     _h2d(lib, int(t.data), arr)
     return t
 
 
 def _to_numpy_cpu(t) -> np.ndarray:
-    # Your framework likely has to_numpy / numpy conversion helpers.
     if hasattr(t, "to_numpy"):
         return t.to_numpy()
     if hasattr(t, "_to_numpy"):
@@ -228,8 +218,6 @@ def _time_op(
 
 
 def _build_ops(a, b, alpha: float) -> Dict[str, Callable[[], object]]:
-    # Use Python operators so we measure your Tensor mixins + ext dispatch.
-    # Each call returns a new Tensor (or equivalent).
     ops: Dict[str, Callable[[], object]] = {
         "add": lambda: a + b,
         "sub": lambda: a - b,
@@ -239,20 +227,16 @@ def _build_ops(a, b, alpha: float) -> Dict[str, Callable[[], object]]:
         "neg": lambda: (-a),
     }
 
-    # Optional unary exp if your Tensor supports it
     if hasattr(a, "exp") and callable(getattr(a, "exp")):
         ops["exp"] = lambda: a.exp()
     else:
-        # Many frameworks implement exp as a function: Tensor.exp(a) or keydnn.exp(a)
         try:
-            from keydnn.infrastructure._function import exp as fn_exp  # type: ignore
+            from keydnn.infrastructure.activations._functions import exp as fn_exp  # type: ignore
 
             ops["exp"] = lambda: fn_exp(a)
         except Exception:
             pass
 
-    # Optional scalar fast-paths (if implemented as magic methods or helper methods)
-    # This tries to benchmark (a + alpha) and (a * alpha) etc.
     try:
         ops["add_scalar"] = lambda: a + alpha
         ops["sub_scalar"] = lambda: a - alpha
@@ -268,15 +252,12 @@ def _sanity_check(
     cpu_out: np.ndarray, gpu_out: np.ndarray, name: str, dtype: np.dtype
 ) -> None:
     if name == "gt":
-        # gt outputs may be float32 by design on CUDA in your kernel ABI.
-        # Compare as float32.
         cpu_cmp = cpu_out.astype(np.float32, copy=False)
         gpu_cmp = gpu_out.astype(np.float32, copy=False)
         if not np.allclose(cpu_cmp, gpu_cmp, rtol=0, atol=0):
             raise AssertionError(f"[sanity] {name} mismatch (gt)")
         return
 
-    # For float ops, tolerate tiny diffs.
     atol = 1e-6 if dtype == np.float32 else 1e-12
     rtol = 1e-5 if dtype == np.float32 else 1e-10
     if not np.allclose(cpu_out, gpu_out, rtol=rtol, atol=atol):
@@ -391,7 +372,6 @@ def main() -> None:
         else:
             gpu_med, gpu_p95 = float("nan"), float("nan")
 
-        # Optional correctness check: run op once on both and compare
         if args.sanity and have_cuda:
             out_cpu = cpu_ops[name]()
             out_gpu = gpu_ops[name]()
@@ -439,7 +419,6 @@ def main() -> None:
     if args.sanity and have_cuda:
         print("Sanity: PASS (all selected ops)")
 
-    # One extra hint: if user didn’t sync, remind (but don’t block)
     if have_cuda and not args.sync_each_iter:
         print(
             "\nNote: CUDA timings may be optimistic without --sync_each_iter (kernels are async)."

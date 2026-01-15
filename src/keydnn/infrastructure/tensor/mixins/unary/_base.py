@@ -170,7 +170,7 @@ class TensorMixinUnary(ABC):
         - NumPy is not used directly here; numerical kernels remain encapsulated
           inside Tensor operations or autograd Functions.
         """
-        from ...._function import TanhFn
+        from ....activations._functions import TanhFn
         from ..._tensor_context import Context
 
         ctx = Context(parents=(self,), backward_fn=None)
@@ -199,7 +199,7 @@ class TensorMixinUnary(ABC):
         in ``._function`` and integrates with the autograd system.
         """
         from ..._tensor_context import Context
-        from ...._function import SigmoidFn
+        from ....activations._functions import SigmoidFn
 
         # Build context with parents and a callable backward_fn
         ctx = Context(parents=(self,), backward_fn=None)

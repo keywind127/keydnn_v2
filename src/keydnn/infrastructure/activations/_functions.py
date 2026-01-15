@@ -45,10 +45,10 @@ Notes
 
 from typing import Tuple
 
-from .tensor._tensor_context import Context
+from ..tensor._tensor_context import Context
 
-from .tensor._tensor import Tensor
-from ..domain._function import Function
+from ..tensor._tensor import Tensor
+from ...domain._function import Function
 
 
 class ExpFn(Function):

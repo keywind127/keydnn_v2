@@ -17,7 +17,7 @@ from src.keydnn.infrastructure.pooling._pooling_module import (
 from src.keydnn.infrastructure.flatten._flatten_module import (
     Flatten,
 )
-from src.keydnn.infrastructure._activations import (
+from src.keydnn.infrastructure.activations._modules import (
     ReLU,
     Sigmoid,
     Softmax,

@@ -329,7 +329,7 @@ def main() -> None:
     # Imports (after sys.path fix)
     from keydnn.infrastructure.models._sequential import Sequential
     from keydnn.infrastructure.fully_connected._linear import Linear
-    from keydnn.infrastructure._activations import Sigmoid
+    from keydnn.infrastructure.activations._modules import Sigmoid
     from keydnn.infrastructure.tensor._tensor import Tensor
     from keydnn.domain.device._device import Device
     from keydnn.infrastructure.optimizers._sgd import SGD

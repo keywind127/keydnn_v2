@@ -38,7 +38,7 @@ from ..module._serialization_core import register_module
 from ..tensor._tensor import Tensor
 from .._module import Module
 
-from .._losses import (
+from ._functions import (
     SSEFn,
     MSEFn,
     BinaryCrossEntropyFn,

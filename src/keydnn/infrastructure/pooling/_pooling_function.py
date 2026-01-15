@@ -43,7 +43,7 @@ from typing import Optional, Sequence, Tuple
 
 from ..tensor._tensor_context import Context
 
-from .._function import Function
+from ..activations._functions import Function
 from ..tensor._tensor import Tensor
 from ..ops.pool2d_cpu import _pair
 from ..ops import pool2d_cpu_ext as cpu_ext

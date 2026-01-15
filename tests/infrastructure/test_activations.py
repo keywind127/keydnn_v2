@@ -4,9 +4,9 @@ import numpy as np
 from src.keydnn.infrastructure.tensor._tensor_context import Context
 from src.keydnn.domain.device._device import Device
 from src.keydnn.infrastructure.tensor._tensor import Tensor
-from src.keydnn.infrastructure._activations import Sigmoid, ReLU, LeakyReLU, Tanh
-from src.keydnn.infrastructure._function import SoftmaxFn
-from src.keydnn.infrastructure._activations import Softmax
+from src.keydnn.infrastructure.activations._modules import Sigmoid, ReLU, LeakyReLU, Tanh
+from src.keydnn.infrastructure.activations._functions import SoftmaxFn
+from src.keydnn.infrastructure.activations._modules import Softmax
 
 
 def make_cpu_tensor(arr: np.ndarray, *, requires_grad: bool = False) -> Tensor:

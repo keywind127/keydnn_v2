@@ -1,4 +1,4 @@
-from ....infrastructure._activations import (
+from ....infrastructure.activations._modules import (
     LeakyReLU,
     ReLU,
 )

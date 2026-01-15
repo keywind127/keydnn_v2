@@ -29,14 +29,14 @@ Notes
 
 from typing import Any, Dict
 
-from .tensor._tensor_context import Context
+from ..tensor._tensor_context import Context
 
-from ..domain.model._stateless_mixin import StatelessConfigMixin
-from .module._serialization_core import register_module
-from .tensor._tensor import Tensor
-from ._module import Module
+from ...domain.model._stateless_mixin import StatelessConfigMixin
+from ..module._serialization_core import register_module
+from ..tensor._tensor import Tensor
+from .._module import Module
 
-from ._function import SigmoidFn, ReLUFn, LeakyReLUFn, TanhFn, SoftmaxFn
+from ._functions import SigmoidFn, ReLUFn, LeakyReLUFn, TanhFn, SoftmaxFn
 
 
 @register_module()

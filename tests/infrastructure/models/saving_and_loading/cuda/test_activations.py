@@ -11,7 +11,7 @@ import numpy as np
 from src.keydnn.domain.device._device import Device
 from src.keydnn.infrastructure.tensor._tensor import Tensor
 from src.keydnn.infrastructure.models._sequential import Sequential
-from src.keydnn.infrastructure._activations import (
+from src.keydnn.infrastructure.activations._modules import (
     Sigmoid,
     ReLU,
     LeakyReLU,

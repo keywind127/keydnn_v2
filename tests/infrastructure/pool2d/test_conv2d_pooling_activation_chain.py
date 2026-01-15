@@ -9,7 +9,7 @@ from src.keydnn.infrastructure.pooling._pooling_module import (
     AvgPool2d,
     GlobalAvgPool2d,
 )
-from src.keydnn.infrastructure._activations import Sigmoid
+from src.keydnn.infrastructure.activations._modules import Sigmoid
 
 
 def tensor_from_numpy(arr: np.ndarray, device: Device, requires_grad: bool) -> Tensor:
