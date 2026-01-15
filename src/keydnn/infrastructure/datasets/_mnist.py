@@ -27,9 +27,13 @@ from ._idx import load_idx_images_gz, load_idx_labels_gz
 
 
 _MNIST_BASE_URLS: List[str] = [
+    # Reliable mirrors first
+    "https://raw.githubusercontent.com/fgnt/mnist/master/",
+    "https://ossci-datasets.s3.amazonaws.com/mnist/",
+    # Keep the original host last (can be flaky)
     "http://yann.lecun.com/exdb/mnist/",
-    # Optional: add mirrors here
 ]
+
 
 _MNIST_FILES = {
     "train-images-idx3-ubyte.gz": None,
