@@ -484,6 +484,54 @@ def _resolve_metrics_and_names(
     return resolved, names
 
 
+def _resolve_metric(metric: Any) -> Callable[[Any, Any], Any]:
+    """
+    Resolve a metric specification into a callable.
+
+    Supported forms
+    ---------------
+    - callable: returned as-is
+    - string shortcuts:
+        - "acc", "accuracy" -> binary accuracy (threshold=0.5)
+
+    Returns
+    -------
+    Callable[[y_true, y_pred], scalar]
+    """
+    if callable(metric):
+        return metric
+
+    if not isinstance(metric, str):
+        raise TypeError(
+            "Metric must be a callable or string identifier "
+            f"(got {type(metric).__name__})"
+        )
+
+    key = metric.lower()
+
+    if key in {"acc", "accuracy"}:
+
+        def _accuracy(y_true, y_pred):
+            # Tensor-friendly, CPU/CUDA safe
+            yp = y_pred.to_numpy()
+            yt = y_true.to_numpy()
+
+            import numpy as np
+
+            yp = np.asarray(yp, dtype=np.float32)
+            yt = np.asarray(yt, dtype=np.float32)
+
+            y_hat = (yp >= 0.5).astype(np.float32)
+            return float((y_hat == yt).mean())
+
+        _accuracy.__name__ = "acc"
+        return _accuracy
+
+    raise ValueError(
+        f"Unknown metric {metric!r}. Supported: 'acc' or a callable metric."
+    )
+
+
 class Model(Module):
     """
     Base class for top-level neural network models.
@@ -631,7 +679,7 @@ class Model(Module):
         *,
         loss: Any,
         optimizer: Any,
-        metrics: Optional[Sequence[Callable[..., Any]]] = None,
+        metrics: Optional[Sequence[Any]] = None,
         metric_names: Optional[Sequence[str]] = None,
         zero_grad: bool = True,
         backward: bool = True,
@@ -641,76 +689,47 @@ class Model(Module):
         """
         Run a single training step on one mini-batch.
 
-        This method provides a Keras-like primitive that:
-        - switches the model to training mode when available (`train()`)
-        - computes predictions and loss
-        - runs backpropagation (`loss.backward()`) when enabled
-        - steps the optimizer (`optimizer.step()`) when enabled
-        - returns a dictionary of scalar logs (loss + metrics)
+        Supports string shortcuts for:
+        - loss: "mse", "sse", "bce", "cce"
+        - optimizer: "sgd", "adam"
+        - metrics: "acc"
 
-        In addition to callables/instances, this method also supports *string*
-        shortcuts for both `loss` and `optimizer`, using the same resolution
-        helpers as `Model.fit()`.
-
-        Supported string forms
-        ----------------------
-        loss:
-        - "mse", "sse", "bce", "cce"
-        Resolved to a callable with signature: `loss(y_pred, y_true) -> Tensor`.
-
-        optimizer:
-        - "sgd", "adam"
-        Resolved by constructing the optimizer using `self.parameters()`.
-        Hyperparameters can be provided via `optimizer_kwargs`.
-
-        Parameters
-        ----------
-        x_batch, y_batch : Any
-            One mini-batch of inputs and targets.
-        loss : str | Callable[[Any, Any], Any]
-            Loss spec. Either a callable `loss(y_pred, y_true)` or a string shortcut.
-        optimizer : str | Any
-            Optimizer spec. Either an optimizer instance or a string shortcut.
-        metrics : Optional[Sequence[Callable[..., Any]]], optional
-            Optional metric callables. Expected signature:
-            `metric(y_true, y_pred) -> scalar tensor/number`.
-            A reversed argument order is also supported as a fallback.
-        metric_names : Optional[Sequence[str]], optional
-            Optional names matching `metrics`. If omitted, names are inferred from
-            `metric.__name__` when available, else `"metric_{i}"`.
-        optimizer_kwargs : Optional[Dict[str, Any]], optional
-            Extra kwargs passed when resolving a string optimizer (e.g. `{"lr": 0.1}`).
-            Ignored if `optimizer` is already an optimizer instance.
-        zero_grad : bool, optional
-            If True, clears gradients before the backward pass. Default is True.
-        backward : bool, optional
-            If True, calls `loss.backward()`. Default is True.
-        step : bool, optional
-            If True, calls `optimizer.step()`. Default is True.
-
-        Returns
-        -------
-        Dict[str, float]
-            Batch logs, e.g. `{"loss": 0.123, "accuracy": 0.98}`.
-
-        Raises
-        ------
-        TypeError
-            If the loss return value does not support `.backward()` while
-            `backward=True`.
-        ValueError
-            If `metric_names` is provided but its length does not match `metrics`,
-            or if an unknown string loss/optimizer is provided.
-
-        Notes
-        -----
-        The returned logs are converted to Python floats using `_to_float_scalar`
-        for consistent reporting across CPU/CUDA tensor backends.
+        See Model.fit() for full semantics.
         """
-        # Resolve string shortcuts (same helpers used by fit()).
-        loss_fn = _resolve_loss(loss)  # type: ignore[name-defined]
-        opt = _resolve_optimizer(self, optimizer, optimizer_kwargs=optimizer_kwargs)  # type: ignore[name-defined]
 
+        # ------------------------------------------------------------------
+        # Resolve loss / optimizer (shared with fit)
+        # ------------------------------------------------------------------
+        loss_fn = _resolve_loss(loss)  # type: ignore[name-defined]
+        opt = _resolve_optimizer(
+            self, optimizer, optimizer_kwargs=optimizer_kwargs
+        )  # type: ignore[name-defined]
+
+        # ------------------------------------------------------------------
+        # Resolve metrics (NEW)
+        # ------------------------------------------------------------------
+        resolved_metrics: Optional[Sequence[Callable[..., Any]]] = None
+        resolved_names: Optional[Sequence[str]] = None
+
+        if metrics:
+            resolved_metrics = []
+            resolved_names = []
+
+            if metric_names is not None and len(metric_names) != len(metrics):
+                raise ValueError("metric_names must have the same length as metrics")
+
+            for i, m in enumerate(metrics):
+                fn = _resolve_metric(m)
+                resolved_metrics.append(fn)
+
+                if metric_names is not None:
+                    resolved_names.append(metric_names[i])
+                else:
+                    resolved_names.append(getattr(fn, "__name__", f"metric_{i}"))
+
+        # ------------------------------------------------------------------
+        # Training mode
+        # ------------------------------------------------------------------
         train_fn = getattr(self, "train", None)
         if callable(train_fn):
             train_fn()
@@ -724,6 +743,9 @@ class Model(Module):
                 if callable(mdl_zero):
                     mdl_zero()
 
+        # ------------------------------------------------------------------
+        # Forward + loss
+        # ------------------------------------------------------------------
         y_pred = self(x_batch)
         loss_tensor = loss_fn(y_pred, y_batch)
         loss_value = _to_float_scalar(loss_tensor)
@@ -742,20 +764,15 @@ class Model(Module):
             if callable(opt_step):
                 opt_step()
 
+        # ------------------------------------------------------------------
+        # Logs
+        # ------------------------------------------------------------------
         logs: Dict[str, float] = {"loss": float(loss_value)}
 
-        if metrics:
-            if metric_names is not None and len(metric_names) != len(metrics):
-                raise ValueError("metric_names must have the same length as metrics")
-
-            for i, m in enumerate(metrics):
-                name = (
-                    metric_names[i]
-                    if metric_names is not None
-                    else (getattr(m, "__name__", None) or f"metric_{i}")
-                )
-                mv = _call_metric(m, y_batch, y_pred)
-                logs[str(name)] = _to_float_scalar(mv)
+        if resolved_metrics:
+            for name, fn in zip(resolved_names, resolved_metrics):
+                mv = _call_metric(fn, y_batch, y_pred)
+                logs[name] = _to_float_scalar(mv)
 
         return logs
 
