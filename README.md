@@ -74,6 +74,25 @@ print(repr(y))
 
 ```
 
+### CLI demo (MNIST MLP smoke test)
+
+KeyDNN includes a small runnable training example wired through the package CLI:
+
+```bash
+# CPU (always available)
+python -m keydnn test --train_mnist_example --device cpu --epochs 4 --limit-train 50000 --limit-test 1000
+
+# CUDA (if CUDA backend + native libraries are available)
+python -m keydnn test --train_mnist_example --device cuda:0 --epochs 4 --limit-train 50000 --limit-test 1000
+```
+
+#### Notes:
+
+- The first run will download and cache MNIST under `~/.cache/keydnn/mnist/raw` (configurable via `--root`).
+- CUDA execution requires a compatible NVIDIA GPU and a working CUDA runtime (and may be skipped/raise if unavailable).
+
+###
+
 ### Training example (`Model.fit` + callbacks)
 
 ```python
