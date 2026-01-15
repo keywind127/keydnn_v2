@@ -1,13 +1,17 @@
 from ....infrastructure._losses import BinaryCrossEntropyFn, CategoricalCrossEntropyFn
+from ....infrastructure.losses import BinaryCrossEntropy, CategoricalCrossEntropy
 
-BinaryCrossEntropy = BinaryCrossEntropyFn
-CategoricalCrossEntropy = CategoricalCrossEntropyFn
-BCE = BinaryCrossEntropyFn
-CCE = CategoricalCrossEntropyFn
+BCEFn = BinaryCrossEntropyFn
+CCEFn = CategoricalCrossEntropyFn
+
+BCE = BinaryCrossEntropy
+CCE = CategoricalCrossEntropy
 
 __all__ = [
     "BCE",
     "CCE",
+    "BCEFn",
+    "CCEFn",
     "BinaryCrossEntropy",
     "CategoricalCrossEntropy",
     "BinaryCrossEntropyFn",
