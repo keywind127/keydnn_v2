@@ -56,6 +56,7 @@ from .callbacks import Callback, CallbackList
 
 LossLike = Union[str, Callable[[Any, Any], Any]]
 OptimizerLike = Union[str, Any]
+MetricLike = Union[str, Callable[..., Any]]
 
 
 def _normalize_key(s: str) -> str:
@@ -362,6 +363,127 @@ def _call_metric(metric: Callable[..., Any], y_true: Any, y_pred: Any) -> Any:
         return metric(y_pred, y_true)
 
 
+def _to_numpy_any(x: Any):
+    try:
+        import numpy as np
+    except Exception:  # pragma: no cover
+        raise
+
+    if hasattr(x, "to_numpy") and callable(getattr(x, "to_numpy")):
+        return np.asarray(x.to_numpy())
+    return np.asarray(x)
+
+
+def _accuracy_metric(y_true: Any, y_pred: Any) -> float:
+    """
+    Compute accuracy for common KeyDNN training setups.
+
+    Rules (best-effort):
+    - If y_pred last dim > 1: multiclass -> argmax over last dim
+      - If y_true has same shape as y_pred: assume one-hot -> argmax
+      - Else assume integer labels
+    - Else: binary -> threshold y_pred >= 0.5, compare against y_true in {0,1}
+    """
+    import numpy as np
+
+    yt = _to_numpy_any(y_true).astype(np.float32, copy=False)
+    yp = _to_numpy_any(y_pred).astype(np.float32, copy=False)
+
+    # Flatten common (N,1) -> (N,)
+    if yt.ndim >= 2 and yt.shape[-1] == 1:
+        yt2 = yt.reshape(-1)
+    else:
+        yt2 = yt
+
+    if yp.ndim >= 2 and yp.shape[-1] == 1:
+        yp2 = yp.reshape(-1)
+    else:
+        yp2 = yp
+
+    # Multiclass: (N, C)
+    if yp.ndim >= 2 and yp.shape[-1] > 1:
+        pred_cls = np.argmax(yp, axis=-1)
+
+        if yt.shape == yp.shape:
+            true_cls = np.argmax(yt, axis=-1)
+        else:
+            true_cls = yt.astype(np.int64, copy=False)
+            if true_cls.ndim > 1:
+                true_cls = true_cls.reshape(-1)
+
+        pred_cls = pred_cls.reshape(-1)
+        true_cls = true_cls.reshape(-1)
+
+        n = min(pred_cls.size, true_cls.size)
+        if n == 0:
+            return 0.0
+        return float((pred_cls[:n] == true_cls[:n]).mean())
+
+    # Binary
+    pred_bin = (yp2 >= 0.5).astype(np.float32, copy=False)
+    true_bin = (yt2 >= 0.5).astype(np.float32, copy=False)
+
+    pred_bin = pred_bin.reshape(-1)
+    true_bin = true_bin.reshape(-1)
+
+    n = min(pred_bin.size, true_bin.size)
+    if n == 0:
+        return 0.0
+    return float((pred_bin[:n] == true_bin[:n]).mean())
+
+
+def _resolve_metrics_and_names(
+    metrics: Optional[Sequence[MetricLike]],
+    metric_names: Optional[Sequence[str]],
+) -> Tuple[Optional[Sequence[Callable[..., Any]]], Optional[Sequence[str]]]:
+    """
+    Resolve metrics spec to callables + names.
+
+    Supports:
+    - callable metrics
+    - string metrics: "acc" / "accuracy"
+
+    If `metric_names` is None, names are inferred:
+    - string metric -> the string itself (normalized display kept original)
+    - callable -> callable.__name__ or "metric_{i}"
+    """
+    if metrics is None:
+        return None, metric_names
+
+    resolved: list[Callable[..., Any]] = []
+    names: list[str] = []
+
+    if metric_names is not None and len(metric_names) != len(metrics):
+        raise ValueError("metric_names must have the same length as metrics")
+
+    for i, m in enumerate(metrics):
+        # name selection
+        if metric_names is not None:
+            name = str(metric_names[i])
+        else:
+            name = (
+                str(m)
+                if isinstance(m, str)
+                else (getattr(m, "__name__", None) or f"metric_{i}")
+            )
+
+        # metric resolution
+        if isinstance(m, str):
+            key = _normalize_key(m)
+            if key in ("acc", "accuracy"):
+                resolved.append(_accuracy_metric)
+                names.append(name)
+                continue
+            raise ValueError(
+                f"Unknown metric {m!r}. Supported: 'acc'/'accuracy' or a callable metric(y_true, y_pred)."
+            )
+
+        resolved.append(m)
+        names.append(name)
+
+    return resolved, names
+
+
 class Model(Module):
     """
     Base class for top-level neural network models.
@@ -644,7 +766,7 @@ class Model(Module):
         *,
         loss: LossLike,
         optimizer: OptimizerLike,
-        metrics: Optional[Sequence[Callable[..., Any]]] = None,
+        metrics: Optional[Sequence[MetricLike]] = None,
         metric_names: Optional[Sequence[str]] = None,
         batch_size: int = 32,
         epochs: int = 1,
@@ -681,7 +803,7 @@ class Model(Module):
             Callable producing a scalar loss: `loss(y_pred, y_true)`.
         optimizer : OptimizerLike
             Optimizer-like object, expected to expose `zero_grad()` and `step()`.
-        metrics : Optional[Sequence[Callable[..., Any]]], optional
+        metrics : MetricLike, optional
             Metric callables to compute per batch and aggregate per epoch.
         metric_names : Optional[Sequence[str]], optional
             Optional names matching `metrics`. If omitted, names are inferred.
@@ -719,6 +841,8 @@ class Model(Module):
         loss_fn = _resolve_loss(loss)
         opt_obj = _resolve_optimizer(self, optimizer, optimizer_kwargs)
 
+        metrics_fn, metric_names2 = _resolve_metrics_and_names(metrics, metric_names)
+
         cb_list = CallbackList(callbacks)
         cb_list.set_model(self)
         cb_list.on_train_begin(logs={})
@@ -743,15 +867,11 @@ class Model(Module):
                 loss_tensor = loss_fn(y_pred, yb)
                 logs_b: Dict[str, float] = {"loss": _to_float_scalar(loss_tensor)}
 
-                if metrics:
-                    if metric_names is not None and len(metric_names) != len(metrics):
-                        raise ValueError(
-                            "metric_names must have the same length as metrics"
-                        )
-                    for i, m in enumerate(metrics):
+                if metrics_fn:
+                    for i, m in enumerate(metrics_fn):
                         name = (
-                            metric_names[i]
-                            if metric_names is not None
+                            metric_names2[i]
+                            if metric_names2 is not None
                             else (getattr(m, "__name__", None) or f"metric_{i}")
                         )
                         mv = _call_metric(m, yb, y_pred)
@@ -804,8 +924,8 @@ class Model(Module):
                     yb,
                     loss=loss_fn,
                     optimizer=opt_obj,
-                    metrics=metrics,
-                    metric_names=metric_names,
+                    metrics=metrics_fn,
+                    metric_names=metric_names2,
                 )
 
                 cb_list.on_batch_end(batch_idx, logs=logs)
