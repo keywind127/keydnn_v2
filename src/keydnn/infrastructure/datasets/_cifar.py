@@ -85,9 +85,10 @@ def _expand_root(root: Union[str, Path]) -> Path:
 
 def _safe_pickle_load(path: Path) -> dict:
     """
-    Load a CIFAR batch pickle file.
+    Load a CIFAR "python version" pickle payload.
 
-    The CIFAR "python version" uses pickled dicts with byte-string keys.
+    The CIFAR "python version" uses pickled dictionaries with byte-string keys.
+    This helper centralizes that decoding behavior.
 
     Parameters
     ----------
@@ -102,6 +103,30 @@ def _safe_pickle_load(path: Path) -> dict:
     with path.open("rb") as f:
         # encoding='bytes' preserves byte keys as bytes (common for CIFAR batches)
         return pickle.load(f, encoding="bytes")  # type: ignore[arg-type]
+
+
+def _load_cifar10_batch(path: Path) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Load a CIFAR-10 pickled batch file.
+
+    Parameters
+    ----------
+    path : Path
+        Path to a CIFAR-10 batch file (e.g., `data_batch_1`, `test_batch`).
+
+    Returns
+    -------
+    (np.ndarray, np.ndarray)
+        images : uint8 array of shape (N, 3, 32, 32) in NCHW order
+        labels : int64 array of shape (N,)
+    """
+    d = _safe_pickle_load(path)
+
+    data = np.asarray(d[b"data"], dtype=np.uint8)  # (N, 3072)
+    labels = np.asarray(d[b"labels"], dtype=np.int64)  # (N,)
+
+    images = data.reshape(-1, 3, 32, 32)  # NCHW
+    return images, labels
 
 
 def _extract_tar_gz(archive_path: Path, dst_dir: Path) -> None:
@@ -188,6 +213,8 @@ class CIFAR10:
     -----
     - Images are returned as shape (3, 32, 32) by default (channel-first).
     - If `normalize=True`, normalization is applied per-channel.
+    - The extracted folder `cifar-10-batches-py/` is preserved under the raw
+      directory to match the official archive structure (and unit tests).
     """
 
     root: Union[str, Path]
@@ -215,25 +242,18 @@ class CIFAR10:
         else:
             batch_files = [base / "test_batch"]
 
-        xs: List[np.ndarray] = []
-        ys: List[np.ndarray] = []
+        images_list = []
+        labels_list = []
 
-        for bf in batch_files:
-            d = _safe_pickle_load(bf)
-            # data: (N, 3072) uint8, labels: (N,)
-            x = np.asarray(d[b"data"], dtype=np.uint8)
-            y = np.asarray(d[b"labels"], dtype=np.uint8)
-            xs.append(x)
-            ys.append(y)
+        for path in batch_files:
+            x, y = _load_cifar10_batch(path)
+            images_list.append(x)
+            labels_list.append(y)
 
-        x_all = np.concatenate(xs, axis=0)
-        y_all = np.concatenate(ys, axis=0)
+        self.images = np.concatenate(images_list, axis=0)  # (N,3,32,32) uint8
+        self.labels = np.concatenate(labels_list, axis=0)  # (N,) int64
 
-        # Convert to (N, 3, 32, 32) uint8
-        self.images = x_all.reshape(-1, 3, 32, 32)
-        self.labels = y_all.reshape(-1)
-
-        # CIFAR-10 mean/std (in [0,1]) commonly used in literature
+        # Normalize constants (standard CIFAR-10 in [0,1] space)
         self._mean = np.array([0.4914, 0.4822, 0.4465], dtype=np.float32)
         self._std = np.array([0.2470, 0.2435, 0.2616], dtype=np.float32)
 
@@ -253,7 +273,7 @@ class CIFAR10:
         self.raw_dir.mkdir(parents=True, exist_ok=True)
         extracted = self.raw_dir / _CIFAR10_FOLDER
 
-        # If already extracted, we are done.
+        # If already extracted (official layout), we are done.
         if extracted.exists():
             return
 
@@ -267,12 +287,9 @@ class CIFAR10:
         expected_sha256 = _CIFAR_ARCHIVE_SHA256[_CIFAR10_ARCHIVE]
 
         last_err: Exception | None = None
-        for base in _CIFAR10_BASE_URLS:
+        for base_url in _CIFAR10_BASE_URLS:
             try:
-                # Mirrors may differ in path layout; we keep it simple:
-                # - ossci: .../cifar-10-python.tar.gz (some mirrors use direct filename)
-                # - uoft: .../cifar-10-python.tar.gz
-                url = base + _CIFAR10_ARCHIVE
+                url = base_url + _CIFAR10_ARCHIVE
                 download_url(url, archive_path, expected_sha256=expected_sha256)
                 _extract_tar_gz(archive_path, self.raw_dir)
                 last_err = None
@@ -282,10 +299,10 @@ class CIFAR10:
 
         if last_err is not None:
             raise RuntimeError(
-                f"Failed to download { _CIFAR10_ARCHIVE }: {last_err}"
+                f"Failed to download {_CIFAR10_ARCHIVE}: {last_err}"
             ) from last_err
 
-        # Validate extracted folder exists
+        # Validate extracted folder exists (matches unit tests).
         _ = _ensure_extracted_folder(self.raw_dir, folder_name=_CIFAR10_FOLDER)
 
     def __len__(self) -> int:
@@ -309,22 +326,18 @@ class CIFAR10:
             Image and label pair. By default, the image is a NumPy array of
             shape (3, 32, 32) and dtype `self.dtype`, and the label is an int.
         """
-        x = self.images[idx]  # uint8 (3,32,32)
+        x = self.images[idx].astype(self.dtype) / 255.0
         y = int(self.labels[idx])
 
-        # Convert to float in [0,1]
-        x_f = x.astype(self.dtype) / 255.0
-
         if self.normalize:
-            # channel-first per-channel normalization
-            x_f = (x_f - self._mean.reshape(3, 1, 1)) / self._std.reshape(3, 1, 1)
+            x = (x - self._mean[:, None, None]) / self._std[:, None, None]
 
         if self.transform is not None:
-            x_f = self.transform(x_f)
+            x = self.transform(x)
         if self.target_transform is not None:
             y = self.target_transform(y)
 
-        return x_f, y
+        return x, y
 
 
 def download_cifar10(root: str | Path) -> Path:
@@ -440,9 +453,9 @@ class CIFAR100:
         expected_sha256 = _CIFAR_ARCHIVE_SHA256[_CIFAR100_ARCHIVE]
 
         last_err: Exception | None = None
-        for base in _CIFAR100_BASE_URLS:
+        for base_url in _CIFAR100_BASE_URLS:
             try:
-                url = base + _CIFAR100_ARCHIVE
+                url = base_url + _CIFAR100_ARCHIVE
                 download_url(url, archive_path, expected_sha256=expected_sha256)
                 _extract_tar_gz(archive_path, self.raw_dir)
                 last_err = None
@@ -452,7 +465,7 @@ class CIFAR100:
 
         if last_err is not None:
             raise RuntimeError(
-                f"Failed to download { _CIFAR100_ARCHIVE }: {last_err}"
+                f"Failed to download {_CIFAR100_ARCHIVE}: {last_err}"
             ) from last_err
 
         _ = _ensure_extracted_folder(self.raw_dir, folder_name=_CIFAR100_FOLDER)

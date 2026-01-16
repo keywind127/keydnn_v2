@@ -146,9 +146,7 @@ class LayerNorm(Module):
             If device mismatches, rank is insufficient, or trailing dims do not
             match `normalized_shape`.
         """
-        if not x.device.is_cpu():
-            raise RuntimeError("LayerNorm is only supported for CPU tensors for now.")
-
+        
         if x.device != self.device:
             raise ValueError(
                 f"Device mismatch: x is {x.device}, module is {self.device}"

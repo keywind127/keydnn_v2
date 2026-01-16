@@ -374,11 +374,14 @@ def run_train_cifar10_conv(cfg: TrainCifar10Config) -> int:
     from ...infrastructure.datasets._cifar import CIFAR10
     from ...infrastructure.optimizers._sgd import SGD
 
+    # ------------------------------------------------------------------
+    # Dataset (materialized NumPy arrays, MNIST-style)
+    # ------------------------------------------------------------------
     ds_train = CIFAR10(
         root=cfg.root,
         train=True,
         download=True,
-        normalize=False,  # handled here to keep demo explicit
+        normalize=False,  # handled explicitly here
         return_numpy=True,
         dtype="float32",
     )
@@ -391,14 +394,12 @@ def run_train_cifar10_conv(cfg: TrainCifar10Config) -> int:
         dtype="float32",
     )
 
-    # Materialize for simplicity
-    x_train = np.stack(
-        [ds_train[i][0] for i in range(len(ds_train))], axis=0
-    )  # (N,3,32,32)
-    y_train = np.array([ds_train[i][1] for i in range(len(ds_train))], dtype=np.int64)
+    # Direct access (NO Python loops)
+    x_train = ds_train.images.astype(np.float32) / 255.0  # (N,3,32,32)
+    y_train = ds_train.labels.astype(np.int64)
 
-    x_test = np.stack([ds_test[i][0] for i in range(len(ds_test))], axis=0)
-    y_test = np.array([ds_test[i][1] for i in range(len(ds_test))], dtype=np.int64)
+    x_test = ds_test.images.astype(np.float32) / 255.0
+    y_test = ds_test.labels.astype(np.int64)
 
     if cfg.limit_train > 0:
         x_train = x_train[: cfg.limit_train]
@@ -407,16 +408,16 @@ def run_train_cifar10_conv(cfg: TrainCifar10Config) -> int:
         x_test = x_test[: cfg.limit_test]
         y_test = y_test[: cfg.limit_test]
 
-    # Ensure float32 in [0,1]
-    x_train = np.asarray(x_train, dtype=np.float32)
-    x_test = np.asarray(x_test, dtype=np.float32)
-
     if cfg.normalize:
         x_train = _maybe_normalize_cifar10(x_train)
         x_test = _maybe_normalize_cifar10(x_test)
 
+    # One-hot targets for MSE
     y_train_oh = _one_hot(y_train, 10)
 
+    # ------------------------------------------------------------------
+    # Model / Optimizer
+    # ------------------------------------------------------------------
     model = _build_cnn(device)
     opt = SGD(model.parameters(), lr=float(cfg.lr))
 
@@ -445,11 +446,14 @@ def run_train_cifar10_conv(cfg: TrainCifar10Config) -> int:
         print(f"Device: {device}")
         print(f"Train samples: {x_train.shape[0]} | Test samples: {x_test.shape[0]}")
         print(
-            f"CNN CIFAR-10 | lr={cfg.lr} | batch={cfg.batch_size} | epochs={cfg.epochs} "
-            f"| normalize={cfg.normalize}"
+            f"CNN CIFAR-10 | lr={cfg.lr} | batch={cfg.batch_size} | "
+            f"epochs={cfg.epochs} | normalize={cfg.normalize}"
         )
         print("Loss: MSE(one-hot) | Metric: acc(argmax logits)")
 
+    # ------------------------------------------------------------------
+    # Training loop
+    # ------------------------------------------------------------------
     for epoch in range(1, cfg.epochs + 1):
         t0 = time.time()
         losses = []

@@ -214,8 +214,6 @@ class BatchNorm1d(Module):
             If device mismatches, input rank is not 2D, or channel count does
             not match `num_features`.
         """
-        if not x.device.is_cpu():
-            raise RuntimeError("BatchNorm1d is only supported for CPU tensors for now.")
 
         if x.device != self.device:
             raise ValueError(
