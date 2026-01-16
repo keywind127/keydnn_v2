@@ -538,9 +538,7 @@ class BatchNorm2d(Module):
             If device mismatches, input rank is not 4D, or channel count does
             not match `num_features`.
         """
-        if not x.device.is_cpu():
-            raise RuntimeError("BatchNorm2d is only supported for CPU tensors for now.")
-
+        
         if x.device != self.device:
             raise ValueError(
                 f"Device mismatch: x is {x.device}, module is {self.device}"

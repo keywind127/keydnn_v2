@@ -70,6 +70,7 @@ class Dropout(Module):
         p : float, optional
             Dropout probability. Must be in the range [0, 1).
         """
+        super().__init__()
         if not 0.0 <= p < 1.0:
             raise ValueError("Dropout probability p must be in [0, 1).")
         self.p: float = float(p)  # must ensure self.p remains float
