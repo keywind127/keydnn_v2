@@ -29,6 +29,9 @@ import argparse
 from ....application.dto.train_mnist_config import TrainMnistConfig
 from ....application.examples.train_mnist_mlp import run_train_mnist_mlp
 
+from ....application.dto.train_cifar10_config import TrainCifar10Config
+from ....application.examples.train_cifar10_conv import run_train_cifar10_conv
+
 
 def add_test_subparser(subparsers: argparse._SubParsersAction) -> None:
     """
@@ -51,13 +54,23 @@ def add_test_subparser(subparsers: argparse._SubParsersAction) -> None:
     p = subparsers.add_parser("test", help="Run KeyDNN test utilities and examples")
     p.set_defaults(_handler=_handle_test)
 
+    # ------------------------------------------------------------------
+    # Example selectors
+    # ------------------------------------------------------------------
     p.add_argument(
         "--train_mnist_example",
         action="store_true",
         help="Run the MNIST MLP training example (smoke test / demo).",
     )
+    p.add_argument(
+        "--train_cifar_example",
+        action="store_true",
+        help="Run the CIFAR-10 CNN training example (smoke test / demo).",
+    )
 
-    # Common knobs (only used if --train_mnist_example is set)
+    # ------------------------------------------------------------------
+    # Common knobs (used by selected example)
+    # ------------------------------------------------------------------
     p.add_argument(
         "--root",
         type=str,
@@ -73,7 +86,6 @@ def add_test_subparser(subparsers: argparse._SubParsersAction) -> None:
     p.add_argument("--epochs", type=int, default=3, help="Number of training epochs.")
     p.add_argument("--batch-size", type=int, default=128, help="Mini-batch size.")
     p.add_argument("--lr", type=float, default=0.1, help="Learning rate.")
-    p.add_argument("--hidden-dim", type=int, default=256, help="Hidden layer width.")
     p.add_argument("--seed", type=int, default=0, help="PRNG seed for shuffling.")
     p.add_argument(
         "--no-shuffle", action="store_true", help="Disable shuffling each epoch."
@@ -84,9 +96,25 @@ def add_test_subparser(subparsers: argparse._SubParsersAction) -> None:
     p.add_argument(
         "--limit-test", type=int, default=0, help="Limit test samples (0=all)."
     )
-
-    # Optional: quieter output
     p.add_argument("--verbose", type=int, default=1, help="Verbosity level (0=quiet).")
+
+    # ------------------------------------------------------------------
+    # Example-specific knobs
+    # ------------------------------------------------------------------
+    # MNIST-only
+    p.add_argument(
+        "--hidden-dim",
+        type=int,
+        default=256,
+        help="Hidden layer width (MNIST MLP only).",
+    )
+
+    # CIFAR-only
+    p.add_argument(
+        "--normalize",
+        action="store_true",
+        help="Apply CIFAR-10 mean/std normalization (CIFAR-10 only).",
+    )
 
 
 def _handle_test(args: argparse.Namespace) -> int:
@@ -110,6 +138,15 @@ def _handle_test(args: argparse.Namespace) -> int:
         - 0 indicates success
         - 2 indicates invalid usage / no action selected
     """
+    # Prefer explicit else-if to avoid ambiguity if both flags are set.
+    if args.train_mnist_example and args.train_cifar_example:
+        print(
+            "Please select only one example at a time:\n"
+            "  python -m keydnn test --train_mnist_example\n"
+            "  python -m keydnn test --train_cifar_example"
+        )
+        return 2
+
     if args.train_mnist_example:
         cfg = TrainMnistConfig(
             root=args.root,
@@ -126,5 +163,25 @@ def _handle_test(args: argparse.Namespace) -> int:
         )
         return run_train_mnist_mlp(cfg)
 
-    print("No test action selected. Try: python -m keydnn test --train_mnist_example")
+    if args.train_cifar_example:
+        cfg = TrainCifar10Config(
+            root=args.root,
+            device=args.device,
+            epochs=int(args.epochs),
+            batch_size=int(args.batch_size),
+            lr=float(args.lr),
+            seed=int(args.seed),
+            shuffle=not bool(args.no_shuffle),
+            limit_train=int(args.limit_train),
+            limit_test=int(args.limit_test),
+            normalize=bool(args.normalize),
+            verbose=int(args.verbose),
+        )
+        return run_train_cifar10_conv(cfg)
+
+    print(
+        "No test action selected. Try one of:\n"
+        "  python -m keydnn test --train_mnist_example\n"
+        "  python -m keydnn test --train_cifar_example"
+    )
     return 2
