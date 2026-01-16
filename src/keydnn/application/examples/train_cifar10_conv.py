@@ -1,12 +1,11 @@
-# src/keydnn/application/examples/train_mnist_mlp.py
 """
-MNIST MLP training example (application use case).
+CIFAR-10 CNN training example (application use case).
 
-This module implements an application-layer use case that trains a simple MLP
-on MNIST using KeyDNN infrastructure components (dataset loader, Tensor,
-modules, and optimizers). It is intended to be callable from the presentation
-layer (e.g., `python -m keydnn test --train_mnist_example`) as a runnable demo
-or smoke test.
+This module implements an application-layer use case that trains a small
+convolutional network on CIFAR-10 using KeyDNN infrastructure components
+(dataset loader, Tensor, modules, and optimizers). It is intended to be callable
+from the presentation layer (e.g., `python -m keydnn test --train_cifar10_example`)
+as a runnable demo or smoke test.
 
 Design notes
 ------------
@@ -27,7 +26,7 @@ from typing import Iterable, Tuple
 
 import numpy as np
 
-from ..dto.train_mnist_config import TrainMnistConfig
+from ..dto.train_cifar10_config import TrainCifar10Config
 
 
 def _cuda_available() -> bool:
@@ -84,8 +83,7 @@ def _tensor_from_numpy(arr: np.ndarray, *, device):
     Parameters
     ----------
     arr : np.ndarray
-        Input array to copy into a KeyDNN Tensor. It will be converted to
-        float32 if needed.
+        Input array to copy into a KeyDNN Tensor.
     device : Device
         Target device.
 
@@ -175,7 +173,7 @@ def _one_hot(labels: np.ndarray, num_classes: int = 10) -> np.ndarray:
     labels : np.ndarray
         Integer labels of shape (N,).
     num_classes : int, optional
-        Number of classes. Defaults to 10 for MNIST.
+        Number of classes. Defaults to 10 for CIFAR-10.
 
     Returns
     -------
@@ -223,7 +221,7 @@ def _iter_minibatches(
     Parameters
     ----------
     x_np : np.ndarray
-        Input features of shape (N, D).
+        Input features of shape (N, C, H, W) or (N, D).
     y_np : np.ndarray
         Targets of shape (N, ...) aligned with x_np.
     batch_size : int
@@ -249,19 +247,44 @@ def _iter_minibatches(
         yield x_np[j], y_np[j]
 
 
-def _build_mlp(device, *, hidden_dim: int):
+def _maybe_normalize_cifar10(x: np.ndarray) -> np.ndarray:
     """
-    Build a simple MLP model for MNIST.
+    Optionally apply common CIFAR-10 normalization in [0,1] space.
 
-    The model maps a flattened MNIST input vector (784) to 10 output logits
-    using a single hidden layer.
+    CIFAR-10 mean/std (per channel) often used:
+      mean = (0.4914, 0.4822, 0.4465)
+      std  = (0.2470, 0.2435, 0.2616)
+
+    Parameters
+    ----------
+    x : np.ndarray
+        Input images (N, 3, 32, 32) float32 in [0,1].
+
+    Returns
+    -------
+    np.ndarray
+        Normalized images.
+    """
+    mean = np.array([0.4914, 0.4822, 0.4465], dtype=np.float32).reshape(1, 3, 1, 1)
+    std = np.array([0.2470, 0.2435, 0.2616], dtype=np.float32).reshape(1, 3, 1, 1)
+    return (x - mean) / std
+
+
+def _build_cnn(device):
+    """
+    Build a small CNN for CIFAR-10.
+
+    Architecture (simple, demo-friendly):
+    - Conv(3->16, 3x3, pad=1) -> ReLU -> MaxPool(2)
+    - Conv(16->32, 3x3, pad=1) -> ReLU -> MaxPool(2)
+    - Flatten
+    - Linear(32*8*8 -> 128) -> ReLU
+    - Linear(128 -> 10)
 
     Parameters
     ----------
     device : Device
         Target device used for device-aware module construction on CUDA.
-    hidden_dim : int
-        Hidden layer width.
 
     Returns
     -------
@@ -269,35 +292,56 @@ def _build_mlp(device, *, hidden_dim: int):
         A KeyDNN Sequential model instance.
     """
     from ...infrastructure.models._sequential import Sequential
-    from ...infrastructure.fully_connected._linear import Linear
+
+    # Layers (names may vary in your repo; adjust if needed)
+    from ...infrastructure.convolution._conv2d_module import Conv2d  # type: ignore
+    from ...infrastructure.pooling._pooling_module import MaxPool2d  # type: ignore
+    from ...infrastructure.flatten._flatten_module import Flatten  # type: ignore
+    from ...infrastructure.fully_connected._linear import Linear  # type: ignore
 
     # Prefer ReLU; fallback to Sigmoid if not available.
     try:
         from ...infrastructure.activations._modules import ReLU  # type: ignore
 
         act = ReLU()
+        act2 = ReLU()
     except Exception:
         from ...infrastructure.activations._modules import Sigmoid  # type: ignore
 
         act = Sigmoid()
+        act2 = Sigmoid()
 
-    if str(device).startswith("cuda"):
-        return Sequential(
-            Linear(784, hidden_dim, device=device),
-            act,
-            Linear(hidden_dim, 10, device=device),
-        )
+    use_cuda = str(device).startswith("cuda")
+
+    def _conv(in_ch, out_ch):
+        if use_cuda:
+            return Conv2d(
+                in_ch, out_ch, kernel_size=3, stride=1, padding=1, device=device
+            )
+        return Conv2d(in_ch, out_ch, kernel_size=3, stride=1, padding=1)
+
+    def _linear(in_f, out_f):
+        if use_cuda:
+            return Linear(in_f, out_f, device=device)
+        return Linear(in_f, out_f)
 
     return Sequential(
-        Linear(784, hidden_dim),
+        _conv(3, 16),
         act,
-        Linear(hidden_dim, 10),
+        MaxPool2d(kernel_size=2, stride=2),
+        _conv(16, 32),
+        act2,
+        MaxPool2d(kernel_size=2, stride=2),
+        Flatten(),
+        _linear(32 * 8 * 8, 128),
+        act2,
+        _linear(128, 10),
     )
 
 
-def run_train_mnist_mlp(cfg: TrainMnistConfig) -> int:
+def run_train_cifar10_conv(cfg: TrainCifar10Config) -> int:
     """
-    Train a simple MLP on MNIST (application use case).
+    Train a small CNN on CIFAR-10 (application use case).
 
     This function orchestrates:
     - dataset download/loading (infrastructure)
@@ -307,7 +351,7 @@ def run_train_mnist_mlp(cfg: TrainMnistConfig) -> int:
 
     Parameters
     ----------
-    cfg : TrainMnistConfig
+    cfg : TrainCifar10Config
         Use case configuration (application boundary DTO).
 
     Returns
@@ -327,21 +371,30 @@ def run_train_mnist_mlp(cfg: TrainMnistConfig) -> int:
 
     device = _device_from_string(cfg.device)
 
-    from ...infrastructure.datasets._mnist import MNIST
+    from ...infrastructure.datasets._cifar import CIFAR10
     from ...infrastructure.optimizers._sgd import SGD
 
-    # Load MNIST (NumPy by default)
-    ds_train = MNIST(
-        root=cfg.root, train=True, download=True, normalize=False, return_numpy=True
+    ds_train = CIFAR10(
+        root=cfg.root,
+        train=True,
+        download=True,
+        normalize=False,  # handled here to keep demo explicit
+        return_numpy=True,
+        dtype="float32",
     )
-    ds_test = MNIST(
-        root=cfg.root, train=False, download=True, normalize=False, return_numpy=True
+    ds_test = CIFAR10(
+        root=cfg.root,
+        train=False,
+        download=True,
+        normalize=False,
+        return_numpy=True,
+        dtype="float32",
     )
 
     # Materialize for simplicity
     x_train = np.stack(
         [ds_train[i][0] for i in range(len(ds_train))], axis=0
-    )  # (N,1,28,28)
+    )  # (N,3,32,32)
     y_train = np.array([ds_train[i][1] for i in range(len(ds_train))], dtype=np.int64)
 
     x_test = np.stack([ds_test[i][0] for i in range(len(ds_test))], axis=0)
@@ -354,15 +407,17 @@ def run_train_mnist_mlp(cfg: TrainMnistConfig) -> int:
         x_test = x_test[: cfg.limit_test]
         y_test = y_test[: cfg.limit_test]
 
-    # Flatten to (N,784)
-    x_train = x_train.reshape(x_train.shape[0], -1).astype(np.float32)
-    x_test = x_test.reshape(x_test.shape[0], -1).astype(np.float32)
+    # Ensure float32 in [0,1]
+    x_train = np.asarray(x_train, dtype=np.float32)
+    x_test = np.asarray(x_test, dtype=np.float32)
 
-    # One-hot for MSE
+    if cfg.normalize:
+        x_train = _maybe_normalize_cifar10(x_train)
+        x_test = _maybe_normalize_cifar10(x_test)
+
     y_train_oh = _one_hot(y_train, 10)
-    y_test_oh = _one_hot(y_test, 10)
 
-    model = _build_mlp(device, hidden_dim=cfg.hidden_dim)
+    model = _build_cnn(device)
     opt = SGD(model.parameters(), lr=float(cfg.lr))
 
     def acc_metric(y_true_batch, y_pred_batch):
@@ -390,14 +445,13 @@ def run_train_mnist_mlp(cfg: TrainMnistConfig) -> int:
         print(f"Device: {device}")
         print(f"Train samples: {x_train.shape[0]} | Test samples: {x_test.shape[0]}")
         print(
-            f"MLP: 784 -> {cfg.hidden_dim} -> 10 | lr={cfg.lr} | "
-            f"batch={cfg.batch_size} | epochs={cfg.epochs}"
+            f"CNN CIFAR-10 | lr={cfg.lr} | batch={cfg.batch_size} | epochs={cfg.epochs} "
+            f"| normalize={cfg.normalize}"
         )
         print("Loss: MSE(one-hot) | Metric: acc(argmax logits)")
 
     for epoch in range(1, cfg.epochs + 1):
         t0 = time.time()
-
         losses = []
         accs = []
 
