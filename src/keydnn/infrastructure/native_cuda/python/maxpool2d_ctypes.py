@@ -304,7 +304,7 @@ class CudaLib:
             src_host = np.ascontiguousarray(src_host)
 
         # CFUNCTYPE-based call (immune to lib.symbol.argtypes mutations)
-        from src.keydnn.infrastructure.native_cuda.python.ops import memcpy_ctypes as mc
+        from .ops import memcpy_ctypes as mc
 
         mc.cuda_memcpy_h2d(self.lib, int(dst_dev), src_host, int(src_host.nbytes))
 
@@ -324,7 +324,7 @@ class CudaLib:
             raise ValueError("dst_host must be C-contiguous")
 
         # CFUNCTYPE-based call (immune to lib.symbol.argtypes mutations)
-        from src.keydnn.infrastructure.native_cuda.python.ops import memcpy_ctypes as mc
+        from .ops import memcpy_ctypes as mc
 
         mc.cuda_memcpy_d2h(self.lib, dst_host, int(src_dev), int(dst_host.nbytes))
 
