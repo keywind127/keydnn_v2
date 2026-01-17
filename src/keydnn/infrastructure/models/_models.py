@@ -148,12 +148,12 @@ def _resolve_optimizer(
         kwargs["lr"] = 1.0
 
     if key == "sgd":
-        from src.keydnn.infrastructure.optimizers._sgd import SGD  # type: ignore
+        from ...infrastructure.optimizers._sgd import SGD  # type: ignore
 
         return SGD(model.parameters(), **kwargs)
 
     if key == "adam":
-        from src.keydnn.infrastructure.optimizers._adam import Adam  # type: ignore
+        from ...infrastructure.optimizers._adam import Adam  # type: ignore
 
         return Adam(model.parameters(), **kwargs)
 
