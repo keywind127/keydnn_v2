@@ -66,33 +66,39 @@ def _make_progress_hook(label: str):
     """
     start_time = time.time()
     last_print = 0.0
+    bar_width = 30
+
+    def _render(frac: float):
+        frac = min(max(frac, 0.0), 1.0)
+        filled = int(bar_width * frac)
+        bar = "#" * filled + "-" * (bar_width - filled)
+        percent = frac * 100.0
+        sys.stdout.write(f"\rDownloading {label}: [{bar}] {percent:6.2f}%")
+        sys.stdout.flush()
 
     def hook(blocknum: int, blocksize: int, totalsize: int) -> None:
         nonlocal last_print
-
-        downloaded = blocknum * blocksize
         now = time.time()
 
-        # Throttle updates to avoid spamming stdout
+        # throttle
         if now - last_print < 0.1:
             return
         last_print = now
 
         if totalsize > 0:
-            frac = min(downloaded / totalsize, 1.0)
-            bar_width = 30
-            filled = int(bar_width * frac)
-            bar = "#" * filled + "-" * (bar_width - filled)
-            percent = frac * 100.0
-
-            sys.stdout.write(f"\rDownloading {label}: [{bar}] {percent:6.2f}%")
+            downloaded = blocknum * blocksize
+            _render(downloaded / totalsize)
         else:
-            mb = downloaded / (1024 * 1024)
+            mb = (blocknum * blocksize) / (1024 * 1024)
             sys.stdout.write(f"\rDownloading {label}: {mb:6.2f} MB")
+            sys.stdout.flush()
 
+    def finalize():
+        _render(1.0)
+        sys.stdout.write("\n")
         sys.stdout.flush()
 
-    return hook
+    return hook, finalize
 
 
 def download_url(url: str, dst: Path, *, expected_sha256: Optional[str] = None) -> None:
@@ -134,13 +140,16 @@ def download_url(url: str, dst: Path, *, expected_sha256: Optional[str] = None) 
         tmp.unlink()
 
     label = dst.name
-    hook = _make_progress_hook(label)
+    hook, finalize = _make_progress_hook(label)
 
     try:
         urllib.request.urlretrieve(url, tmp.as_posix(), reporthook=hook)
-        sys.stdout.write("\n")
+        # Force a clean "done" state even if the hook never hit 100%.
+        finalize()
     except Exception:
+        # Ensure we don't leave the cursor mid-line.
         sys.stdout.write("\n")
+        sys.stdout.flush()
         raise
 
     tmp.replace(dst)
