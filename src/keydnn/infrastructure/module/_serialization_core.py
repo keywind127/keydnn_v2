@@ -43,12 +43,17 @@ Notes
 
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, Optional, Type
+from typing import Any, Callable, Optional, Type
+from typing_extensions import TypeVar
+
 
 _MODULE_REGISTRY: dict[str, Type[Any]] = {}
 
 
-def register_module(name: Optional[str] = None) -> Callable[[Type[Any]], Type[Any]]:
+C = TypeVar("C")
+
+
+def register_module(name: Optional[str] = None) -> Callable[[Type[C]], Type[C]]:
     """
     Register a module class for configuration-based deserialization.
 
@@ -75,7 +80,7 @@ def register_module(name: Optional[str] = None) -> Callable[[Type[Any]], Type[An
     ...     ...
     """
 
-    def deco(cls: Type[Any]) -> Type[Any]:
+    def deco(cls: Type[C]) -> Type[C]:
         key = name or cls.__name__
         _MODULE_REGISTRY[key] = cls
         return cls
@@ -190,8 +195,6 @@ def module_from_config(node: dict[str, Any]) -> Any:
                 f"Module '{type_name}' cannot accept children (no _modules dict)."
             )
 
-        # for name, child_node in children.items():
-        #     m._modules[str(name)] = module_from_config(child_node)
         for name, child_node in children.items():
             child = module_from_config(child_node)
 
