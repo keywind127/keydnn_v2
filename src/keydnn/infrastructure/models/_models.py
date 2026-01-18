@@ -182,18 +182,65 @@ def _resolve_loss(loss: Any) -> Callable[[Any, Any], Any]:
     if key in ("bce", "binary_crossentropy", "binarycrossentropy"):
 
         def _bce(y_pred, y_true):
-            # mean( -[ y*log(p) + (1-y)*log(1-p) ] )
-            return -(
-                y_true * y_pred.log() + (1.0 - y_true) * (1.0 - y_pred).log()
-            ).mean()
+            eps = 1e-7
+
+            # keep gradients alive near 0 and 1
+            p = y_pred + eps
+            q = (1.0 - y_pred) + eps
+
+            return -(y_true * p.log() + (1.0 - y_true) * q.log()).mean()
 
         return _bce
 
     if key in ("cce", "categorical_crossentropy", "categoricalcrossentropy"):
 
         def _cce(y_pred, y_true):
-            # -(sum(y*log(p))) / N   where N=batch size
-            return -(y_true * y_pred.log()).sum() / y_pred.shape[0]
+            """
+            Categorical cross-entropy for one-hot targets.
+
+            Assumes y_pred are probabilities (e.g. output of Softmax).
+            """
+
+            # ------------------------------------------------------------
+            # Shape check
+            # ------------------------------------------------------------
+            # sh = getattr(y_true, "shape", None)
+            # if not (isinstance(sh, tuple) and len(sh) == 2):
+            #     raise ValueError(
+            #         "cce expects one-hot targets of shape (N, C). "
+            #         "If you have integer labels, convert with one_hot() first."
+            #     )
+
+            # ------------------------------------------------------------
+            # Softmax sanity check (debug-only, no graph impact)
+            # ------------------------------------------------------------
+            # try:
+            #     p0 = y_pred.to_numpy()[0]
+            #     row_sum = float(p0.sum())
+            #     min_v = float(p0.min())
+            #     max_v = float(p0.max())
+
+            #     if not (0.0 <= min_v <= max_v <= 1.0) or not (
+            #         abs(row_sum - 1.0) < 1e-3
+            #     ):
+            #         print(
+            #             "[WARN][CCE] y_pred does not look like softmax output:\n"
+            #             f"  min={min_v:.6f}, max={max_v:.6f}, sum={row_sum:.6f}\n"
+            #             "  first row =",
+            #             p0,
+            #         )
+            # except Exception:
+            #     # Never let debug checks break training
+            #     pass
+
+            # ------------------------------------------------------------
+            # Stable CCE
+            # ------------------------------------------------------------
+            eps = 1e-7
+            logp = (y_pred + eps).log()
+
+            # -sum(y * log(p)) averaged over batch
+            return -(y_true * logp).sum(axis=1).mean()
 
         return _cce
 
@@ -1051,21 +1098,6 @@ class Model(Module):
                     )
                     sys.stdout.write("\r" + line)
                     sys.stdout.flush()
-
-            # # Ensure progress bar reaches 100% before moving to next line
-            # if verbose:
-            #     if total_batches is not None:
-            #         final_line = _render_progress_bar(
-            #             epoch_idx=epoch_idx,
-            #             epochs=epochs,
-            #             batch_idx=total_batches,  # force 100%
-            #             total_batches=total_batches,
-            #             logs_left=last_logs,
-            #         )
-            #         sys.stdout.write("\r" + final_line)
-            #         sys.stdout.flush()
-            #     sys.stdout.write("\n")
-            #     sys.stdout.flush()
 
             # Build epoch (train) averages
             epoch_logs: Dict[str, float] = {}

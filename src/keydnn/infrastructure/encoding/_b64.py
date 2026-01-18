@@ -35,8 +35,6 @@ def ndarray_to_payload(arr: np.ndarray) -> Dict[str, Any]:
         }
     """
     a = np.asarray(arr)
-    # Ensure stable dtype representation. You can decide to always save float32
-    # if you want: a = a.astype(np.float32, copy=False)
     payload = {
         "b64": bytes_to_b64_str(a.tobytes(order="C")),
         "dtype": a.dtype.str,  # e.g. "<f4"

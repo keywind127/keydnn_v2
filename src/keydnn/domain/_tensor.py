@@ -43,9 +43,6 @@ class ITensor(Protocol):
       them to exist.
     - The protocol currently mirrors the public API of the NumPy-backed
       `Tensor` implementation to keep typing consistent across layers.
-    - If you later want a stricter layering boundary, consider splitting this
-      into smaller protocols (e.g., `ITensorCore`, `ITensorAutograd`,
-      `ITensorOps`).
     """
 
     # ---------------------------------------------------------------------
@@ -1363,5 +1360,33 @@ class ITensor(Protocol):
         """
         Explicitly release CUDA storage now.
         Safe to call multiple times.
+        """
+        ...
+
+    def clamp(
+        self,
+        *,
+        min: float | None = None,
+        max: float | None = None,
+    ) -> "ITensor":
+        """
+        Clamp tensor values elementwise between `min` and `max`.
+
+        Parameters
+        ----------
+        min : float, optional
+            Minimum value. If None, no lower bound is applied.
+        max : float, optional
+            Maximum value. If None, no upper bound is applied.
+
+        Returns
+        -------
+        ITensor
+            A new ITensor with values clamped to the specified range.
+
+        Notes
+        -----
+        - This operation is differentiable almost everywhere.
+        - Gradients are zero where values are clipped.
         """
         ...
