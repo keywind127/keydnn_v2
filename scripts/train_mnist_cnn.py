@@ -341,7 +341,6 @@ def main() -> int:
     history = model.fit(
         x_t,
         y_t,
-        # loss=_mse_loss,
         loss="cce",
         optimizer=opt,
         metrics=[acc_metric],

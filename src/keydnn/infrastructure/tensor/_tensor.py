@@ -1339,29 +1339,27 @@ class Tensor(
 
     def item(self) -> float:
         """
-        Return the value of a scalar (or single-element) CPU tensor as a Python float.
+        Return the value of a scalar (or single-element) tensor as a Python float.
 
-        Raises
-        ------
-        RuntimeError
-            If called on a non-CPU tensor.
-        ValueError
-            If the tensor is not scalar and does not contain exactly 1 element.
+        Notes
+        -----
+        - CPU: reads from `_data`.
+        - CUDA: uses `to_numpy()` (D2H) to fetch the scalar.
         """
-        if not self.device.is_cpu():
-            self._raise_device_not_supported("item")
-
-        # Accept scalar shape () OR any shape with exactly one element.
-        if self.shape == ():
-            # _data is a 0-d ndarray on CPU
-            return float(self._data)  # type: ignore[arg-type]
-        if self.numel() != 1:
+        if self.shape != () and self.numel() != 1:
             raise ValueError(
                 f"Tensor.item() requires a scalar/1-element tensor, got shape={self.shape}"
             )
 
-        # For (1,) or (1,1,...) tensors
-        return float(self._data.reshape(-1)[0])
+        if self.device.is_cpu():
+            if self.shape == ():
+                return float(self._data)  # type: ignore[arg-type]
+            return float(self._data.reshape(-1)[0])
+
+        # CUDA (or other non-CPU): D2H scalar fetch
+        x = self.to_numpy()
+        return float(x.reshape(-1)[0])
+
 
     def _accumulate_grad_(self, g: "Tensor") -> None:
         """

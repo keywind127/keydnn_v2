@@ -53,7 +53,10 @@ from ..module._serialization_weights import (
     extract_state_payload,
     load_state_payload_,
 )
-from .callbacks import Callback, CallbackList
+from .callbacks import (
+    CallbackList,
+    Callback,
+)
 
 
 LossLike = Union[str, Callable[[Any, Any], Any]]
@@ -163,86 +166,72 @@ def _resolve_loss(loss: Any) -> Callable[[Any, Any], Any]:
 
     if key == "mse":
 
-        def _mse(y_pred, y_true):
-            diff = y_pred - y_true
-            sq = diff * diff
-            return sq.mean()
+        # def _mse(y_pred, y_true):
+        #     diff = y_pred - y_true
+        #     sq = diff * diff
+        #     return sq.mean()
 
-        return _mse
+        # from ..losses._wrappers import mse_loss
+
+        # return mse_loss()
+
+        from ..losses._functions import MSEFn
+
+        return MSEFn.as_loss()
 
     if key == "sse":
 
-        def _sse(y_pred, y_true):
-            diff = y_pred - y_true
-            sq = diff * diff
-            return sq.sum()
+        # def _sse(y_pred, y_true):
+        #     diff = y_pred - y_true
+        #     sq = diff * diff
+        #     return sq.sum()
 
-        return _sse
+        # return _sse
+
+        from ..losses._functions import SSEFn
+
+        return SSEFn.as_loss()
 
     if key in ("bce", "binary_crossentropy", "binarycrossentropy"):
 
-        def _bce(y_pred, y_true):
-            eps = 1e-7
+        # def _bce(y_pred, y_true):
+        #     eps = 1e-7
 
-            # keep gradients alive near 0 and 1
-            p = y_pred + eps
-            q = (1.0 - y_pred) + eps
+        #     # keep gradients alive near 0 and 1
+        #     p = y_pred + eps
+        #     q = (1.0 - y_pred) + eps
 
-            return -(y_true * p.log() + (1.0 - y_true) * q.log()).mean()
+        #     return -(y_true * p.log() + (1.0 - y_true) * q.log()).mean()
 
-        return _bce
+        # return _bce
+
+        from ..losses._functions import BinaryCrossEntropyFn
+
+        return BinaryCrossEntropyFn.as_loss()
 
     if key in ("cce", "categorical_crossentropy", "categoricalcrossentropy"):
 
-        def _cce(y_pred, y_true):
-            """
-            Categorical cross-entropy for one-hot targets.
+        # def _cce(y_pred, y_true):
+        #     """
+        #     Categorical cross-entropy for one-hot targets.
 
-            Assumes y_pred are probabilities (e.g. output of Softmax).
-            """
+        #     Assumes y_pred are probabilities (e.g. output of Softmax).
+        #     """
 
-            # ------------------------------------------------------------
-            # Shape check
-            # ------------------------------------------------------------
-            # sh = getattr(y_true, "shape", None)
-            # if not (isinstance(sh, tuple) and len(sh) == 2):
-            #     raise ValueError(
-            #         "cce expects one-hot targets of shape (N, C). "
-            #         "If you have integer labels, convert with one_hot() first."
-            #     )
+        #     # ------------------------------------------------------------
+        #     # Stable CCE
+        #     # ------------------------------------------------------------
+        #     eps = 1e-7
+        #     logp = (y_pred + eps).log()
 
-            # ------------------------------------------------------------
-            # Softmax sanity check (debug-only, no graph impact)
-            # ------------------------------------------------------------
-            # try:
-            #     p0 = y_pred.to_numpy()[0]
-            #     row_sum = float(p0.sum())
-            #     min_v = float(p0.min())
-            #     max_v = float(p0.max())
+        #     # -sum(y * log(p)) averaged over batch
+        #     return -(y_true * logp).sum(axis=1).mean()
 
-            #     if not (0.0 <= min_v <= max_v <= 1.0) or not (
-            #         abs(row_sum - 1.0) < 1e-3
-            #     ):
-            #         print(
-            #             "[WARN][CCE] y_pred does not look like softmax output:\n"
-            #             f"  min={min_v:.6f}, max={max_v:.6f}, sum={row_sum:.6f}\n"
-            #             "  first row =",
-            #             p0,
-            #         )
-            # except Exception:
-            #     # Never let debug checks break training
-            #     pass
+        # return _cce
 
-            # ------------------------------------------------------------
-            # Stable CCE
-            # ------------------------------------------------------------
-            eps = 1e-7
-            logp = (y_pred + eps).log()
+        from ..losses._functions import CategoricalCrossEntropyFn
 
-            # -sum(y * log(p)) averaged over batch
-            return -(y_true * logp).sum(axis=1).mean()
-
-        return _cce
+        return CategoricalCrossEntropyFn.as_loss()
 
     raise ValueError(
         f"Unknown loss {loss!r}. Supported: 'mse', 'sse', 'bce', 'cce' "

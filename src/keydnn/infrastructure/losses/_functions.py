@@ -27,10 +27,11 @@ These losses return scalar tensors and are intended to be used as the final
 operation before invoking backpropagation.
 """
 
-from typing import Tuple
+from typing import Callable, Tuple
 
 from ..tensor._tensor_context import Context
 from ..activations._functions import Function
+from ._apply_mixin import _ApplyMixin
 from ..tensor._tensor import Tensor
 
 
@@ -38,7 +39,12 @@ def _scalar_to_float(t: Tensor) -> float:
     """
     Extract a Python scalar from a scalar Tensor.
     """
-    return t.item()
+    import numpy as np
+
+    a = np.asarray(t.to_numpy())
+    if a.size != 1:
+        raise ValueError(f"Expected scalar/1-element grad, got shape={a.shape}")
+    return float(a.reshape(-1)[0])
 
 
 def _clamp_probs(p: Tensor, *, eps: float) -> Tensor:
@@ -53,7 +59,24 @@ def _clamp_probs(p: Tensor, *, eps: float) -> Tensor:
     return p.clamp(min=eps, max=(1.0 - eps))
 
 
-class SSEFn(Function):
+class _LossFnMixin(_ApplyMixin):
+    """
+    Helper mixin for loss `Function` classes.
+
+    Provides a common, copy/paste-friendly way to expose a `Callable` loss
+    suitable for `Model.fit(loss=...)`, without repeating boilerplate.
+
+    """
+
+    @classmethod
+    def as_loss(cls) -> Callable[[Tensor, Tensor], Tensor]:
+        """
+        Return a `(y_pred, y_true) -> scalar Tensor` callable using `cls.apply`.
+        """
+        return lambda y_pred, y_true: cls.apply(y_pred, y_true)
+
+
+class SSEFn(_LossFnMixin, Function):
     """
     Sum of Squared Errors (SSE) loss function.
 
@@ -98,7 +121,9 @@ class SSEFn(Function):
         """
         diff = pred - target
         ctx.save_for_backward(diff)
-        return (diff * diff).sum()
+        sq = diff * diff
+        scalar = sq.sum()
+        return scalar
 
     @staticmethod
     def backward(ctx: Context, grad_out: Tensor) -> Tuple[Tensor, Tensor]:
@@ -139,7 +164,7 @@ class SSEFn(Function):
         return grad_pred, grad_target
 
 
-class MSEFn(Function):
+class MSEFn(_LossFnMixin, Function):
     """
     Mean Squared Error (MSE) loss function.
 
@@ -228,7 +253,7 @@ class MSEFn(Function):
         return grad_pred, grad_target
 
 
-class BinaryCrossEntropyFn(Function):
+class BinaryCrossEntropyFn(_LossFnMixin, Function):
     """
     Binary Cross Entropy (BCE) loss function.
 
@@ -327,7 +352,7 @@ class BinaryCrossEntropyFn(Function):
         return grad_pred, None
 
 
-class CategoricalCrossEntropyFn(Function):
+class CategoricalCrossEntropyFn(_LossFnMixin, Function):
     """
     Categorical Cross Entropy (CCE) loss function.
 
