@@ -166,27 +166,11 @@ def _resolve_loss(loss: Any) -> Callable[[Any, Any], Any]:
 
     if key == "mse":
 
-        # def _mse(y_pred, y_true):
-        #     diff = y_pred - y_true
-        #     sq = diff * diff
-        #     return sq.mean()
-
-        # from ..losses._wrappers import mse_loss
-
-        # return mse_loss()
-
         from ..losses._functions import MSEFn
 
         return MSEFn.as_loss()
 
     if key == "sse":
-
-        # def _sse(y_pred, y_true):
-        #     diff = y_pred - y_true
-        #     sq = diff * diff
-        #     return sq.sum()
-
-        # return _sse
 
         from ..losses._functions import SSEFn
 
@@ -194,40 +178,11 @@ def _resolve_loss(loss: Any) -> Callable[[Any, Any], Any]:
 
     if key in ("bce", "binary_crossentropy", "binarycrossentropy"):
 
-        # def _bce(y_pred, y_true):
-        #     eps = 1e-7
-
-        #     # keep gradients alive near 0 and 1
-        #     p = y_pred + eps
-        #     q = (1.0 - y_pred) + eps
-
-        #     return -(y_true * p.log() + (1.0 - y_true) * q.log()).mean()
-
-        # return _bce
-
         from ..losses._functions import BinaryCrossEntropyFn
 
         return BinaryCrossEntropyFn.as_loss()
 
     if key in ("cce", "categorical_crossentropy", "categoricalcrossentropy"):
-
-        # def _cce(y_pred, y_true):
-        #     """
-        #     Categorical cross-entropy for one-hot targets.
-
-        #     Assumes y_pred are probabilities (e.g. output of Softmax).
-        #     """
-
-        #     # ------------------------------------------------------------
-        #     # Stable CCE
-        #     # ------------------------------------------------------------
-        #     eps = 1e-7
-        #     logp = (y_pred + eps).log()
-
-        #     # -sum(y * log(p)) averaged over batch
-        #     return -(y_true * logp).sum(axis=1).mean()
-
-        # return _cce
 
         from ..losses._functions import CategoricalCrossEntropyFn
 
@@ -1071,19 +1026,25 @@ class Model(Module):
                     count[k] = count.get(k, 0) + bs
 
                 batch_idx += 1
-                last_logs = logs
+                # last_logs = logs
 
                 # ------------------------------
-                # Progress bar (per batch)
+                # Progress bar (running averages like Keras)
                 # ------------------------------
                 if verbose:
+                    # weighted running average over seen samples
+                    avg_logs: Dict[str, float] = {}
+                    for k in sums.keys():
+                        denom = float(count.get(k, 0) or 1)
+                        avg_logs[k] = float(sums[k]) / denom
+
                     line = _render_progress_bar(
                         epoch_idx=epoch_idx,
                         epochs=epochs,
                         batch_idx=batch_idx,
                         total_batches=total_batches,
-                        logs_left=last_logs,  # batch training logs
-                        logs_right=None,  # no val until epoch end
+                        logs_left=avg_logs,  # <- cumulative avg (smooth)
+                        logs_right=None,
                     )
                     sys.stdout.write("\r" + line)
                     sys.stdout.flush()
