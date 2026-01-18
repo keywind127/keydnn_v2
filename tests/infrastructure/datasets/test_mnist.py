@@ -14,6 +14,10 @@ import gzip
 import struct
 from pathlib import Path
 
+from src.keydnn.infrastructure.datasets._base import _VerboseMixin
+
+_VerboseMixin.set_verbose(False)
+
 
 def _idx_images_payload(n: int, rows: int = 28, cols: int = 28) -> bytes:
     header = struct.pack(">IIII", 2051, n, rows, cols)

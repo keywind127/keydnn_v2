@@ -43,6 +43,10 @@ import json
 import math
 import sys
 
+import numpy as np
+
+from ..tensor._tensor import Tensor
+
 from ._history import History
 from .._module import Module
 from ..module._serialization_core import (
@@ -632,7 +636,7 @@ class Model(Module):
         """
         super().__init__()
 
-    def predict(self, x, *, requires_grad: bool = False):
+    def predict(self, x: Tensor, *, requires_grad: bool = False):
         """
         Perform an inference-style forward pass.
 
@@ -641,7 +645,7 @@ class Model(Module):
 
         Parameters
         ----------
-        x : ITensor
+        x : Tensor
             Input tensor (or tensor-like object) for inference.
         requires_grad : bool, optional
             Placeholder for future gradient-control semantics. Currently unused.
@@ -656,6 +660,10 @@ class Model(Module):
         - If the model implements `eval()` and `train()`, they may be used here.
         - Gradient suppression (`no_grad`) is not yet implemented.
         """
+
+        if not isinstance(x, Tensor):
+            raise TypeError("Input x must be a Tensor")
+
         eval_fn = getattr(self, "eval", None)
         train_fn = getattr(self, "train", None)
         was_training = getattr(self, "training", None)
@@ -742,8 +750,8 @@ class Model(Module):
 
     def train_on_batch(
         self,
-        x_batch: Any,
-        y_batch: Any,
+        x_batch: Tensor,
+        y_batch: Tensor,
         *,
         loss: Any,
         optimizer: Any,
@@ -764,6 +772,11 @@ class Model(Module):
 
         See Model.fit() for full semantics.
         """
+
+        if isinstance(x_batch, np.ndarray):
+            raise TypeError("x_batch must be a Tensor")
+        if isinstance(y_batch, np.ndarray):
+            raise TypeError("y_batch must be a Tensor")
 
         # ------------------------------------------------------------------
         # Resolve loss / optimizer (shared with fit)
@@ -846,8 +859,8 @@ class Model(Module):
 
     def fit(
         self,
-        x: Any,
-        y: Optional[Any] = None,
+        x: Union[Tensor, Iterable[Tuple[Tensor, Tensor]]],
+        y: Optional[Tensor] = None,
         *,
         loss: LossLike,
         optimizer: OptimizerLike,
@@ -879,9 +892,9 @@ class Model(Module):
 
         Parameters
         ----------
-        x : Any
+        x : Union[Tensor, Iterable[Tuple[Tensor, Tensor]]]
             Dataset inputs, or an iterable yielding `(x_batch, y_batch)` tuples.
-        y : Optional[Any], optional
+        y : Optional[Tensor], optional
             Dataset targets. Must be provided for dataset inputs; must be `None`
             for iterable-of-batches inputs.
         loss : LossLike
@@ -922,6 +935,12 @@ class Model(Module):
             raise ValueError("epochs must be >= 1")
         if batch_size < 1:
             raise ValueError("batch_size must be >= 1")
+
+        if y is not None:
+            if isinstance(x, np.ndarray):
+                raise TypeError("x must be a Tensor when y is provided")
+            if isinstance(y, np.ndarray):
+                raise TypeError("y must be a Tensor when provided")
 
         loss_fn = _resolve_loss(loss)
         opt_obj = _resolve_optimizer(self, optimizer, optimizer_kwargs)

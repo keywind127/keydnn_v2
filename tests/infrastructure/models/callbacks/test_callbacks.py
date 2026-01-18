@@ -7,7 +7,9 @@ from typing import Any, Dict, Optional, Sequence
 
 import numpy as np
 
+from src.keydnn.domain.device._device import Device
 from src.keydnn.infrastructure.models._models import Model
+from src.keydnn.infrastructure.utils._preprocessing import numpy_to_tensor
 
 from src.keydnn.infrastructure.models.callbacks._base import Callback, CallbackList
 from src.keydnn.infrastructure.models.callbacks._model_checkpoint import ModelCheckpoint
@@ -257,6 +259,13 @@ class TestFitWithCallbacks(unittest.TestCase):
         xv = np.zeros((8, 3), dtype=np.float32)
         yv = np.zeros((8, 3), dtype=np.float32)
 
+        device = Device("cpu")
+
+        x = numpy_to_tensor(x, device=device)
+        y = numpy_to_tensor(y, device=device)
+        xv = numpy_to_tensor(xv, device=device)
+        yv = numpy_to_tensor(yv, device=device)
+
         # Loss called twice per epoch (train + val) due to validation_data.
         # val_loss improves epoch 0->1 then worsens twice => stop with patience=1.
         # We'll keep train loss arbitrary.
@@ -307,6 +316,13 @@ class TestFitWithCallbacks(unittest.TestCase):
         y = np.zeros((8, 3), dtype=np.float32)
         xv = np.zeros((8, 3), dtype=np.float32)
         yv = np.zeros((8, 3), dtype=np.float32)
+
+        device = Device("cpu")
+
+        x = numpy_to_tensor(x, device=device)
+        y = numpy_to_tensor(y, device=device)
+        xv = numpy_to_tensor(xv, device=device)
+        yv = numpy_to_tensor(yv, device=device)
 
         # Train+val per epoch.
         loss_values = [
