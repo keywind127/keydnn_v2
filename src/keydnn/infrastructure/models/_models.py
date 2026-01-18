@@ -40,6 +40,8 @@ from typing import (
 )
 from pathlib import Path
 import json
+import math
+import sys
 
 from ._history import History
 from .._module import Module
@@ -61,6 +63,81 @@ MetricLike = Union[str, Callable[..., Any]]
 
 def _normalize_key(s: str) -> str:
     return s.strip().lower().replace("-", "").replace("_", "")
+
+
+def _num_batches_for_epoch(
+    x: Any,
+    y: Optional[Any],
+    *,
+    batch_size: int,
+) -> Optional[int]:
+    """
+    Best-effort compute number of batches in the epoch.
+
+    Returns None if unknown (e.g., generator with no __len__).
+    """
+    if y is not None:
+        # Dataset input (x, y) assumed array-like with shape[0]
+        n = getattr(x, "shape", None)
+        if isinstance(n, tuple) and len(n) >= 1 and isinstance(n[0], int):
+            total = n[0]
+        else:
+            # fallback to len(x) if available
+            try:
+                total = len(x)
+            except Exception:
+                return None
+        return int(math.ceil(total / float(batch_size)))
+
+    # Iterable-of-batches input
+    try:
+        return int(len(x))  # type: ignore[arg-type]
+    except Exception:
+        return None
+
+
+def _render_progress_bar(
+    *,
+    epoch_idx: int,
+    epochs: int,
+    batch_idx: int,
+    total_batches: Optional[int],
+    logs_left: Optional[Dict[str, float]],
+    logs_right: Optional[Dict[str, float]] = None,
+    width: int = 30,
+) -> str:
+    """
+    Render a single-line progress bar string for the current epoch/batch.
+    """
+    prefix = f"Epoch {epoch_idx + 1}/{epochs}"
+
+    parts: list[str] = []
+
+    if total_batches is None or total_batches <= 0:
+        parts.append(prefix)
+        parts.append(f"{batch_idx} batches")
+    else:
+        done = min(batch_idx, total_batches)
+        frac = done / float(total_batches)
+        pct = int(round(frac * 100.0))
+
+        filled = int(round(frac * width))
+        filled = max(0, min(width, filled))
+        bar = "=" * filled + "." * (width - filled)
+
+        parts.append(f"{prefix} [{bar}] {done}/{total_batches} ({pct:3d}%)")
+
+    # left logs: training metrics
+    if logs_left:
+        for k, v in logs_left.items():
+            parts.append(f"{k}: {v:.6f}")
+
+    # right logs: validation metrics (val_*)
+    if logs_right:
+        for k, v in logs_right.items():
+            parts.append(f"{k}: {v:.6f}")
+
+    return " - ".join(parts)
 
 
 def _resolve_loss(loss: Any) -> Callable[[Any, Any], Any]:
@@ -932,7 +1009,11 @@ class Model(Module):
             count: Dict[str, int] = {}
             seen = 0
 
+            total_batches = _num_batches_for_epoch(x, y, batch_size=batch_size)
+
             batch_idx = 0
+            last_logs: Optional[Dict[str, float]] = None
+
             for xb, yb in _epoch_batches():
                 cb_list.on_batch_begin(batch_idx, logs={})
 
@@ -954,20 +1035,74 @@ class Model(Module):
                     count[k] = count.get(k, 0) + bs
 
                 batch_idx += 1
+                last_logs = logs
 
+                # ------------------------------
+                # Progress bar (per batch)
+                # ------------------------------
+                if verbose:
+                    line = _render_progress_bar(
+                        epoch_idx=epoch_idx,
+                        epochs=epochs,
+                        batch_idx=batch_idx,
+                        total_batches=total_batches,
+                        logs_left=last_logs,  # batch training logs
+                        logs_right=None,  # no val until epoch end
+                    )
+                    sys.stdout.write("\r" + line)
+                    sys.stdout.flush()
+
+            # # Ensure progress bar reaches 100% before moving to next line
+            # if verbose:
+            #     if total_batches is not None:
+            #         final_line = _render_progress_bar(
+            #             epoch_idx=epoch_idx,
+            #             epochs=epochs,
+            #             batch_idx=total_batches,  # force 100%
+            #             total_batches=total_batches,
+            #             logs_left=last_logs,
+            #         )
+            #         sys.stdout.write("\r" + final_line)
+            #         sys.stdout.flush()
+            #     sys.stdout.write("\n")
+            #     sys.stdout.flush()
+
+            # Build epoch (train) averages
             epoch_logs: Dict[str, float] = {}
             for k, s in sums.items():
                 denom = float(count.get(k, 0) or 1)
                 epoch_logs[k] = s / denom
 
+            # Validation averages (val_*)
             if validation_data is not None:
                 xv, yv = validation_data
                 epoch_logs.update(_eval_epoch(xv, yv))
 
+            # Keras-like: re-render final progress line at 100% including val_* metrics
+            if verbose:
+                train_side = {
+                    k: v for k, v in epoch_logs.items() if not str(k).startswith("val_")
+                }
+                val_side = {
+                    k: v for k, v in epoch_logs.items() if str(k).startswith("val_")
+                }
+
+                final_line = _render_progress_bar(
+                    epoch_idx=epoch_idx,
+                    epochs=epochs,
+                    batch_idx=total_batches if total_batches is not None else batch_idx,
+                    total_batches=total_batches,
+                    logs_left=train_side,
+                    logs_right=val_side,
+                )
+                sys.stdout.write("\r" + final_line + " " * 10 + "\n")
+                sys.stdout.flush()
+
+            # History + callbacks
             hist.append_epoch(epoch_idx, epoch_logs)
             cb_list.on_epoch_end(epoch_idx, logs=epoch_logs)
 
-            if verbose:
+            if verbose >= 2:
                 parts = [f"Epoch {epoch_idx + 1}/{epochs}"]
                 for k, v in epoch_logs.items():
                     parts.append(f"{k}: {v:.6f}")
