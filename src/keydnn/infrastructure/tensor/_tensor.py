@@ -1360,7 +1360,6 @@ class Tensor(
         x = self.to_numpy()
         return float(x.reshape(-1)[0])
 
-
     def _accumulate_grad_(self, g: "Tensor") -> None:
         """
         In-place accumulate gradient `g` into `self.grad` (CPU-only).
@@ -2589,3 +2588,21 @@ class Tensor(
             x = mask * x + (1.0 - mask) * max_t
 
         return x
+
+    def __len__(self) -> int:
+        """
+        Return the size of the first dimension of the tensor.
+
+        Raises
+        ------
+        ValueError
+            If the tensor has no dimensions (i.e., is a scalar).
+
+        Returns
+        -------
+        int
+            Size of the first dimension.
+        """
+        if len(self.shape) == 0:
+            raise ValueError("len() of a scalar tensor is not defined")
+        return int(self.shape[0])

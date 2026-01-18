@@ -10,6 +10,10 @@ from unittest.mock import patch
 
 import numpy as np
 
+from src.keydnn.infrastructure.datasets._base import _VerboseMixin
+
+_VerboseMixin.set_verbose(False)
+
 
 def _cifar_batch_dict(n: int, *, num_classes: int, kind: str) -> dict:
     """

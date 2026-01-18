@@ -101,7 +101,13 @@ def _make_progress_hook(label: str):
     return hook, finalize
 
 
-def download_url(url: str, dst: Path, *, expected_sha256: Optional[str] = None) -> None:
+def download_url(
+    url: str,
+    dst: Path,
+    *,
+    expected_sha256: Optional[str] = None,
+    verbose: bool = False,
+) -> None:
     """
     Download a file from a URL into a local path with optional integrity checking.
 
@@ -122,6 +128,8 @@ def download_url(url: str, dst: Path, *, expected_sha256: Optional[str] = None) 
     expected_sha256 : str, optional
         Expected SHA256 checksum. If provided, the downloaded file is verified
         and a RuntimeError is raised on mismatch.
+    verbose : bool, optional
+        If True, enables progress reporting. Default is False.
 
     Raises
     ------
@@ -143,13 +151,18 @@ def download_url(url: str, dst: Path, *, expected_sha256: Optional[str] = None) 
     hook, finalize = _make_progress_hook(label)
 
     try:
+        # pass verbose hook only if requested
+        if not verbose:
+            hook = None
         urllib.request.urlretrieve(url, tmp.as_posix(), reporthook=hook)
         # Force a clean "done" state even if the hook never hit 100%.
-        finalize()
+        if verbose:
+            finalize()
     except Exception:
         # Ensure we don't leave the cursor mid-line.
-        sys.stdout.write("\n")
-        sys.stdout.flush()
+        if verbose:
+            sys.stdout.write("\n")
+            sys.stdout.flush()
         raise
 
     tmp.replace(dst)

@@ -35,6 +35,7 @@ from typing import Any, Callable, List, Optional, Tuple, Union
 import numpy as np
 
 from ._download import download_url
+from ._base import _VerboseMixin
 
 
 # --------------------------------------------------------------------------------------
@@ -182,7 +183,7 @@ def _ensure_extracted_folder(raw_dir: Path, *, folder_name: str) -> Path:
 
 
 @dataclass
-class CIFAR10:
+class CIFAR10(_VerboseMixin):
     """
     CIFAR-10 dataset (32x32 RGB, 10 classes).
 
@@ -290,7 +291,12 @@ class CIFAR10:
         for base_url in _CIFAR10_BASE_URLS:
             try:
                 url = base_url + _CIFAR10_ARCHIVE
-                download_url(url, archive_path, expected_sha256=expected_sha256)
+                download_url(
+                    url,
+                    archive_path,
+                    expected_sha256=expected_sha256,
+                    verbose=self._verbose,
+                )
                 _extract_tar_gz(archive_path, self.raw_dir)
                 last_err = None
                 break
@@ -365,7 +371,7 @@ def download_cifar10(root: str | Path) -> Path:
 
 
 @dataclass
-class CIFAR100:
+class CIFAR100(_VerboseMixin):
     """
     CIFAR-100 dataset (32x32 RGB, 100 classes).
 
@@ -456,7 +462,12 @@ class CIFAR100:
         for base_url in _CIFAR100_BASE_URLS:
             try:
                 url = base_url + _CIFAR100_ARCHIVE
-                download_url(url, archive_path, expected_sha256=expected_sha256)
+                download_url(
+                    url,
+                    archive_path,
+                    expected_sha256=expected_sha256,
+                    verbose=self._verbose,
+                )
                 _extract_tar_gz(archive_path, self.raw_dir)
                 last_err = None
                 break

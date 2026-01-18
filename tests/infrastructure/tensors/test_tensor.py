@@ -472,6 +472,13 @@ class TestTensorReshape(TestCase):
         with self.assertRaises(Exception):
             _ = x.reshape((3, 2))
 
+    def test_tensor_length(self):
+        x = self._make_arange((4, 5, 6), requires_grad=False)
+        self.assertEqual(len(x), 4)
+
+        y = self._make_arange((10,), requires_grad=False)
+        self.assertEqual(len(y), 10)
+
 
 if __name__ == "__main__":
     unittest.main()

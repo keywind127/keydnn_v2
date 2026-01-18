@@ -102,19 +102,6 @@ def _accuracy_from_probs_np(y_true_int: np.ndarray, probs: np.ndarray) -> float:
     return float((pred == y_true_int).mean())
 
 
-def _mse_loss(pred, target):
-    """
-    Mean squared error: mean((pred - target)^2).
-    """
-    diff = pred - target
-    sq = diff * diff
-    if hasattr(sq, "mean"):
-        return sq.mean()
-    if hasattr(sq, "sum"):
-        return sq.sum() * (1.0 / target.shape[0])
-    raise AttributeError("Tensor must implement mean() or sum()")
-
-
 # --------------------------------------------------------------------------------------
 # Model
 # --------------------------------------------------------------------------------------
@@ -234,7 +221,7 @@ def main() -> int:
     Script entrypoint.
     """
     ap = argparse.ArgumentParser(prog="train_mnist_cnn_bn", description=__doc__)
-    ap.add_argument("--root", type=str, default="~/.cache/keydnn")
+    ap.add_argument("--root", type=str, default="~/.cache/keydnn_v2")
     ap.add_argument("--device", type=str, default="cpu")
     ap.add_argument("--epochs", type=int, default=3)
     ap.add_argument("--batch-size", type=int, default=128)

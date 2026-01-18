@@ -1390,3 +1390,19 @@ class ITensor(Protocol):
         - Gradients are zero where values are clipped.
         """
         ...
+
+    def __len__(self) -> int:
+        """
+        Return the size of the first dimension of the tensor.
+
+        Raises
+        ------
+        ValueError
+            If the tensor has no dimensions (i.e., is a scalar).
+
+        Returns
+        -------
+        int
+            Size of the first dimension.
+        """
+        ...

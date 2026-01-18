@@ -23,6 +23,7 @@ from typing import Callable, Optional, Tuple, Union, Any, List
 import numpy as np
 
 from ._download import download_url
+from ._base import _VerboseMixin
 from ._idx import load_idx_images_gz, load_idx_labels_gz
 
 
@@ -61,7 +62,7 @@ def _expand_root(root: Union[str, Path]) -> Path:
 
 
 @dataclass
-class MNIST:
+class MNIST(_VerboseMixin):
     """
     MNIST handwritten digit dataset.
 
@@ -158,6 +159,7 @@ class MNIST:
                         base + fname,
                         self.raw_dir / fname,
                         expected_sha256=expected_sha256,
+                        verbose=self._verbose,
                     )
                     last_err = None
                     break

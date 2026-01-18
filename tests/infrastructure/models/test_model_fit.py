@@ -6,6 +6,8 @@ from unittest.mock import Mock
 
 import numpy as np
 
+from src.keydnn.domain.device._device import Device
+
 RUN_SLOW = os.environ.get("KEYDNN_RUN_SLOW", "0") == "1"
 
 
@@ -138,7 +140,9 @@ class _FitTrainOnBatchMixin:
         - training solves XOR
         """
         try:
-            from src.keydnn.infrastructure.models._sequential import Sequential  # noqa: F401
+            from src.keydnn.infrastructure.models._sequential import (
+                Sequential,
+            )  # noqa: F401
         except (ModuleNotFoundError, ImportError) as e:
             self.skipTest(f"Missing imports: {e}")
 
@@ -203,7 +207,9 @@ class _FitTrainOnBatchMixin:
         - final model solves XOR
         """
         try:
-            from src.keydnn.infrastructure.models._sequential import Sequential  # noqa: F401
+            from src.keydnn.infrastructure.models._sequential import (
+                Sequential,
+            )  # noqa: F401
         except (ModuleNotFoundError, ImportError) as e:
             self.skipTest(f"Missing imports: {e}")
 
@@ -352,10 +358,13 @@ class TestModelTrainOnBatchContract(unittest.TestCase):
         loss_fn = Mock(side_effect=lambda y_pred, y_true: FakeScalar(1.234))
         metrics = [Mock(side_effect=_simple_metric)]
 
+        x = _tensor_from_numpy(np.array([[0.0]]), device=Device("cpu"))
+        y = _tensor_from_numpy(np.array([[1.0]]), device=Device("cpu"))
+
         # Call instance method
         logs = m.train_on_batch(
-            "x",
-            "y",
+            x,
+            y,
             loss=loss_fn,
             optimizer=opt,
             metrics=metrics,

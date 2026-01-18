@@ -6,6 +6,8 @@ from src.keydnn.infrastructure.models._models import Model
 from src.keydnn.infrastructure._parameter import Parameter
 from src.keydnn.infrastructure._module import Module
 from src.keydnn.domain.device._device import Device
+from src.keydnn.infrastructure.tensor._tensor import Tensor
+from src.keydnn.infrastructure.utils._preprocessing import numpy_to_tensor
 
 
 class AddOne(Module):
@@ -88,16 +90,24 @@ class TestModelPredict(unittest.TestCase):
 
         m = Identity()
 
-        # Your current Model.predict calls self.eval(), but Module/Model doesn't
-        # implement eval() yet. So either:
-        # - update Model.predict to check for eval() before calling it, OR
-        # - expect AttributeError for now.
+        device = Device("cpu")
+        x = numpy_to_tensor(
+            np.array([1.0, 2.0, 3.0], dtype=np.float32),
+            device=device,
+        )
+
         try:
-            out = m.predict(123)
+            out = m.predict(x)
         except AttributeError as e:
             self.assertIn("eval", str(e))
         else:
-            self.assertEqual(out, 123)
+            self.assertTrue(
+                np.all(
+                    np.equal(
+                        out.to_numpy(), np.array([1.0, 2.0, 3.0], dtype=np.float32)
+                    )
+                )
+            )
 
 
 if __name__ == "__main__":
