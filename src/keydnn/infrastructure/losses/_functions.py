@@ -41,6 +41,18 @@ def _scalar_to_float(t: Tensor) -> float:
     return t.item()
 
 
+def _clamp_probs(p: Tensor, *, eps: float) -> Tensor:
+    """
+    Clamp a probability tensor to the open interval (eps, 1-eps).
+
+    Notes
+    -----
+    We clamp for numerical stability in both forward (log) and backward (1/p).
+    This assumes `Tensor.clamp(min=..., max=...)` exists and is differentiable.
+    """
+    return p.clamp(min=eps, max=(1.0 - eps))
+
+
 class SSEFn(Function):
     """
     Sum of Squared Errors (SSE) loss function.
@@ -263,12 +275,16 @@ class BinaryCrossEntropyFn(Function):
         The total number of elements is stored in the context to support
         correct gradient scaling during the backward pass.
         """
-        # Save for backward
-        ctx.save_for_backward(pred, target)
+        eps = 1e-7
+        pred_c = _clamp_probs(pred, eps=eps)
+
+        # Save for backward (use clamped pred to match forward math)
+        ctx.save_for_backward(pred_c, target)
         ctx.saved_meta["n"] = pred.numel()
+        ctx.saved_meta["eps"] = eps
 
         # BCE elementwise loss then mean reduction
-        loss = -(target * pred.log() + (1.0 - target) * (1.0 - pred).log())
+        loss = -(target * pred_c.log() + (1.0 - target) * (1.0 - pred_c).log())
         return loss.mean()
 
     @staticmethod
@@ -298,20 +314,14 @@ class BinaryCrossEntropyFn(Function):
         where N is the total number of elements. The upstream gradient
         `grad_out` is applied as a scalar multiplier.
         """
-        pred, target = ctx.saved_tensors
+        pred_c, target = ctx.saved_tensors
         n = int(ctx.saved_meta["n"])
         g = _scalar_to_float(grad_out)
 
-        # numerator = pred - target
-        grad_pred = pred - target
-
-        # denom = pred * (1 - pred)
-        denom = pred * (1.0 - pred)
-
-        # grad_pred /= denom   (in-place div)
+        # grad = (pred - target) / (pred*(1-pred)) / n
+        grad_pred = pred_c - target
+        denom = pred_c * (1.0 - pred_c)
         grad_pred /= denom
-
-        # grad_pred *= g / n   (in-place scalar)
         grad_pred *= g / n
 
         return grad_pred, None
@@ -366,9 +376,13 @@ class CategoricalCrossEntropyFn(Function):
         -----
         The loss is reduced by averaging over the batch dimension (N).
         """
-        ctx.save_for_backward(pred, target)
+        eps = 1e-7
+        pred_c = _clamp_probs(pred, eps=eps)
 
-        loss = -(target * pred.log())
+        ctx.save_for_backward(pred_c, target)
+        ctx.saved_meta["eps"] = eps
+
+        loss = -(target * pred_c.log())
         return loss.sum() / pred.shape[0]
 
     @staticmethod
@@ -398,11 +412,11 @@ class CategoricalCrossEntropyFn(Function):
         where N is the batch size. The upstream gradient `grad_out` is applied
         as a scalar multiplier.
         """
-        pred, target = ctx.saved_tensors
+        pred_c, target = ctx.saved_tensors
         g = _scalar_to_float(grad_out)
-        n = pred.shape[0]
+        n = pred_c.shape[0]
 
-        grad_pred = target / pred  # alloc
-        grad_pred *= -(g / n)  # in-place negate + scale
+        grad_pred = target / pred_c
+        grad_pred *= -(g / n)
 
         return grad_pred, None
