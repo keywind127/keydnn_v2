@@ -111,12 +111,11 @@ class BackwardProfile:
 
 class _CudaEventTimer:
     """
-    Minimal CUDA event timing helper using your existing ctypes wrappers.
+    Minimal CUDA event timing helper using ctypes wrappers.
 
     Requires maxpool2d_ctypes to expose:
       - cuda_event_create, cuda_event_record, cuda_event_elapsed_ms, cuda_event_destroy
       - cuda_synchronize or cudaDeviceSynchronize equivalent
-    If you don't have these yet, see the fallback note below.
     """
 
     def __init__(self, lib, m):
@@ -364,7 +363,6 @@ class Tensor(
         storage.incref()
         obj._borrowed_devptr = False
 
-        # keep legacy pointer mirror if you want (optional, helps debugging)
         obj._data = int(storage.dev_ptr)
 
         obj._requires_grad = bool(requires_grad)
@@ -1032,7 +1030,6 @@ class Tensor(
                     f"matmul requires both tensors on the same device; got {self.device} and {other.device}"
                 )
 
-            # Enforce same CUDA device index if your Device encodes it
             if str(self.device) != str(other.device):
                 raise RuntimeError(
                     f"matmul requires both tensors on the same CUDA device; got {self.device} and {other.device}"
@@ -1044,7 +1041,6 @@ class Tensor(
             from ..ops.transpose_cuda import transpose2d_cuda  # used in backward
 
             def _cuda_device_index(dev: object) -> int:
-                # Prefer explicit attribute if you really have it
                 idx = getattr(dev, "index", None)
                 if idx is not None:
                     try:
@@ -1343,29 +1339,27 @@ class Tensor(
 
     def item(self) -> float:
         """
-        Return the value of a scalar (or single-element) CPU tensor as a Python float.
+        Return the value of a scalar (or single-element) tensor as a Python float.
 
-        Raises
-        ------
-        RuntimeError
-            If called on a non-CPU tensor.
-        ValueError
-            If the tensor is not scalar and does not contain exactly 1 element.
+        Notes
+        -----
+        - CPU: reads from `_data`.
+        - CUDA: uses `to_numpy()` (D2H) to fetch the scalar.
         """
-        if not self.device.is_cpu():
-            self._raise_device_not_supported("item")
-
-        # Accept scalar shape () OR any shape with exactly one element.
-        if self.shape == ():
-            # _data is a 0-d ndarray on CPU
-            return float(self._data)  # type: ignore[arg-type]
-        if self.numel() != 1:
+        if self.shape != () and self.numel() != 1:
             raise ValueError(
                 f"Tensor.item() requires a scalar/1-element tensor, got shape={self.shape}"
             )
 
-        # For (1,) or (1,1,...) tensors
-        return float(self._data.reshape(-1)[0])
+        if self.device.is_cpu():
+            if self.shape == ():
+                return float(self._data)  # type: ignore[arg-type]
+            return float(self._data.reshape(-1)[0])
+
+        # CUDA (or other non-CPU): D2H scalar fetch
+        x = self.to_numpy()
+        return float(x.reshape(-1)[0])
+
 
     def _accumulate_grad_(self, g: "Tensor") -> None:
         """
@@ -1596,7 +1590,7 @@ class Tensor(
             return
 
         # ---------------------------------------------------------------------
-        # CUDA path (your existing profiler)
+        # CUDA path
         # ---------------------------------------------------------------------
         if not self.device.is_cuda():
             self._raise_device_not_supported("backward")
@@ -1705,7 +1699,6 @@ class Tensor(
                         dtype=np.float32,
                     )
 
-                    # If _from_storage() does incref(), then you MUST drop local ref:
                     # storage.decref()
 
                 except Exception:
@@ -2060,7 +2053,6 @@ class Tensor(
         # ============================================================
         if dev.is_cpu():
             arrs = [t.to_numpy() for t in tensors]
-            # preserve your existing behavior: float32 output
             out_np = np.concatenate(arrs, axis=axis).astype(np.float32, copy=False)
 
             out = Tensor(shape=out_np.shape, device=dev, requires_grad=req, ctx=None)
@@ -2231,7 +2223,6 @@ class Tensor(
             return False
 
         # Keep dtype handling consistent across CPU/CUDA paths.
-        # (Many of your kernels/tests assume float32; if you later support float64,
         # this will follow `self.dtype`.)
         dt = np.dtype(getattr(self, "dtype", np.float32))
 
@@ -2527,11 +2518,9 @@ class Tensor(
             return
 
         # Optional: transitional ownership flag for devptr-only tensors.
-        # Only free if you *explicitly* marked this tensor as owning the devptr.
         if bool(getattr(self, "_owns_devptr", False)):
             try:
                 lib = self._get_cuda_lib()
-                # Use your canonical wrapper (pick the one you standardized on)
                 from ..native_cuda.python import maxpool2d_ctypes as m
 
                 # Ensure correct device before free (Windows correctness)
@@ -2544,6 +2533,59 @@ class Tensor(
                 self._data = 0
             return
 
-        # Default safest behavior: do not free unknown devptr ownership.
-        # Detach so we don't keep referencing it.
         self._data = 0
+
+    def clamp(
+        self: Tensor,
+        *,
+        min: float | None = None,
+        max: float | None = None,
+    ) -> "Tensor":
+        """
+        Clamp tensor values elementwise between `min` and `max`.
+
+        Parameters
+        ----------
+        min : float, optional
+            Minimum value. If None, no lower bound is applied.
+        max : float, optional
+            Maximum value. If None, no upper bound is applied.
+
+        Returns
+        -------
+        Tensor
+            A new Tensor with values clamped to the specified range.
+
+        Notes
+        -----
+        - Gradients pass through unchanged for values within the range.
+        - Gradients are zeroed for values clipped by `min` or `max`.
+        """
+        if min is None and max is None:
+            return self
+
+        x = self
+
+        if min is not None:
+            min_t = Tensor(
+                shape=self.shape,
+                device=self.device,
+                requires_grad=False,
+            )
+            min_t.fill(float(min))
+
+            mask = x >= min_t
+            x = mask * x + (1.0 - mask) * min_t
+
+        if max is not None:
+            max_t = Tensor(
+                shape=self.shape,
+                device=self.device,
+                requires_grad=False,
+            )
+            max_t.fill(float(max))
+
+            mask = x <= max_t
+            x = mask * x + (1.0 - mask) * max_t
+
+        return x

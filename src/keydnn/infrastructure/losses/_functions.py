@@ -27,10 +27,11 @@ These losses return scalar tensors and are intended to be used as the final
 operation before invoking backpropagation.
 """
 
-from typing import Tuple
+from typing import Callable, Tuple
 
 from ..tensor._tensor_context import Context
 from ..activations._functions import Function
+from ._apply_mixin import _ApplyMixin
 from ..tensor._tensor import Tensor
 
 
@@ -38,10 +39,44 @@ def _scalar_to_float(t: Tensor) -> float:
     """
     Extract a Python scalar from a scalar Tensor.
     """
-    return t.item()
+    import numpy as np
+
+    a = np.asarray(t.to_numpy())
+    if a.size != 1:
+        raise ValueError(f"Expected scalar/1-element grad, got shape={a.shape}")
+    return float(a.reshape(-1)[0])
 
 
-class SSEFn(Function):
+def _clamp_probs(p: Tensor, *, eps: float) -> Tensor:
+    """
+    Clamp a probability tensor to the open interval (eps, 1-eps).
+
+    Notes
+    -----
+    We clamp for numerical stability in both forward (log) and backward (1/p).
+    This assumes `Tensor.clamp(min=..., max=...)` exists and is differentiable.
+    """
+    return p.clamp(min=eps, max=(1.0 - eps))
+
+
+class _LossFnMixin(_ApplyMixin):
+    """
+    Helper mixin for loss `Function` classes.
+
+    Provides a common, copy/paste-friendly way to expose a `Callable` loss
+    suitable for `Model.fit(loss=...)`, without repeating boilerplate.
+
+    """
+
+    @classmethod
+    def as_loss(cls) -> Callable[[Tensor, Tensor], Tensor]:
+        """
+        Return a `(y_pred, y_true) -> scalar Tensor` callable using `cls.apply`.
+        """
+        return lambda y_pred, y_true: cls.apply(y_pred, y_true)
+
+
+class SSEFn(_LossFnMixin, Function):
     """
     Sum of Squared Errors (SSE) loss function.
 
@@ -86,7 +121,9 @@ class SSEFn(Function):
         """
         diff = pred - target
         ctx.save_for_backward(diff)
-        return (diff * diff).sum()
+        sq = diff * diff
+        scalar = sq.sum()
+        return scalar
 
     @staticmethod
     def backward(ctx: Context, grad_out: Tensor) -> Tuple[Tensor, Tensor]:
@@ -127,7 +164,7 @@ class SSEFn(Function):
         return grad_pred, grad_target
 
 
-class MSEFn(Function):
+class MSEFn(_LossFnMixin, Function):
     """
     Mean Squared Error (MSE) loss function.
 
@@ -216,7 +253,7 @@ class MSEFn(Function):
         return grad_pred, grad_target
 
 
-class BinaryCrossEntropyFn(Function):
+class BinaryCrossEntropyFn(_LossFnMixin, Function):
     """
     Binary Cross Entropy (BCE) loss function.
 
@@ -263,12 +300,16 @@ class BinaryCrossEntropyFn(Function):
         The total number of elements is stored in the context to support
         correct gradient scaling during the backward pass.
         """
-        # Save for backward
-        ctx.save_for_backward(pred, target)
+        eps = 1e-7
+        pred_c = _clamp_probs(pred, eps=eps)
+
+        # Save for backward (use clamped pred to match forward math)
+        ctx.save_for_backward(pred_c, target)
         ctx.saved_meta["n"] = pred.numel()
+        ctx.saved_meta["eps"] = eps
 
         # BCE elementwise loss then mean reduction
-        loss = -(target * pred.log() + (1.0 - target) * (1.0 - pred).log())
+        loss = -(target * pred_c.log() + (1.0 - target) * (1.0 - pred_c).log())
         return loss.mean()
 
     @staticmethod
@@ -298,26 +339,20 @@ class BinaryCrossEntropyFn(Function):
         where N is the total number of elements. The upstream gradient
         `grad_out` is applied as a scalar multiplier.
         """
-        pred, target = ctx.saved_tensors
+        pred_c, target = ctx.saved_tensors
         n = int(ctx.saved_meta["n"])
         g = _scalar_to_float(grad_out)
 
-        # numerator = pred - target
-        grad_pred = pred - target
-
-        # denom = pred * (1 - pred)
-        denom = pred * (1.0 - pred)
-
-        # grad_pred /= denom   (in-place div)
+        # grad = (pred - target) / (pred*(1-pred)) / n
+        grad_pred = pred_c - target
+        denom = pred_c * (1.0 - pred_c)
         grad_pred /= denom
-
-        # grad_pred *= g / n   (in-place scalar)
         grad_pred *= g / n
 
         return grad_pred, None
 
 
-class CategoricalCrossEntropyFn(Function):
+class CategoricalCrossEntropyFn(_LossFnMixin, Function):
     """
     Categorical Cross Entropy (CCE) loss function.
 
@@ -366,9 +401,13 @@ class CategoricalCrossEntropyFn(Function):
         -----
         The loss is reduced by averaging over the batch dimension (N).
         """
-        ctx.save_for_backward(pred, target)
+        eps = 1e-7
+        pred_c = _clamp_probs(pred, eps=eps)
 
-        loss = -(target * pred.log())
+        ctx.save_for_backward(pred_c, target)
+        ctx.saved_meta["eps"] = eps
+
+        loss = -(target * pred_c.log())
         return loss.sum() / pred.shape[0]
 
     @staticmethod
@@ -398,11 +437,11 @@ class CategoricalCrossEntropyFn(Function):
         where N is the batch size. The upstream gradient `grad_out` is applied
         as a scalar multiplier.
         """
-        pred, target = ctx.saved_tensors
+        pred_c, target = ctx.saved_tensors
         g = _scalar_to_float(grad_out)
-        n = pred.shape[0]
+        n = pred_c.shape[0]
 
-        grad_pred = target / pred  # alloc
-        grad_pred *= -(g / n)  # in-place negate + scale
+        grad_pred = target / pred_c
+        grad_pred *= -(g / n)
 
         return grad_pred, None

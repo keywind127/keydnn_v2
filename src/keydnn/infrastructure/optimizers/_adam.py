@@ -174,10 +174,6 @@ class Adam(_Optimizer):
             if g is None:
                 continue
 
-            # Keep legacy behavior: CPU-only for now
-            if not p.device.is_cpu() or not g.device.is_cpu():
-                p._raise_device_not_supported("adam_step")
-
             pid = id(p)
             st = self._state.get(pid)
             if st is None:

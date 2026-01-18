@@ -306,6 +306,7 @@ def main() -> int:
 
     # One-hot targets for MSE demo loss
     y_train_oh = _one_hot(y_train_int, 10)
+    y_test_oh = _one_hot(y_test_int, 10)
 
     model = _build_mnist_cnn(device)
     opt = SGD(model.parameters(), lr=float(cfg.lr))
@@ -328,16 +329,19 @@ def main() -> int:
         print(
             f"epochs={cfg.epochs} batch={cfg.batch_size} lr={cfg.lr} shuffle={cfg.shuffle}"
         )
-        print("Loss: MSE(one-hot) | Metric: acc(argmax softmax)")
+        print("Loss: CCE(one-hot) | Metric: acc(argmax softmax)")
 
     # Train using Model.fit (so Dropout/BN training-mode semantics are exercised)
     x_t = _tensor_from_numpy(x_train, device=device, requires_grad=False)
     y_t = _tensor_from_numpy(y_train_oh, device=device, requires_grad=False)
 
+    x_val_t = _tensor_from_numpy(x_test, device=device, requires_grad=False)
+    y_val_t = _tensor_from_numpy(y_test_oh, device=device, requires_grad=False)
+
     history = model.fit(
         x_t,
         y_t,
-        loss=_mse_loss,
+        loss="cce",
         optimizer=opt,
         metrics=[acc_metric],
         metric_names=["acc"],
@@ -345,6 +349,7 @@ def main() -> int:
         epochs=int(cfg.epochs),
         shuffle=bool(cfg.shuffle),
         verbose=int(cfg.verbose),
+        validation_data=(x_val_t, y_val_t),
     )
 
     # Quick eval (forward only)

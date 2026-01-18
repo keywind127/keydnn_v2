@@ -10,6 +10,13 @@ from ._functions import (
     CategoricalCrossEntropyFn,
     BinaryCrossEntropyFn,
 )
+from ._wrappers import (
+    LossFromFn,
+    sse_loss,
+    mse_loss,
+    bce_loss,
+    cce_loss,
+)
 
 __all__ = [
     SSE.__name__,
@@ -20,4 +27,9 @@ __all__ = [
     MSEFn.__name__,
     CategoricalCrossEntropyFn.__name__,
     BinaryCrossEntropyFn.__name__,
+    LossFromFn.__name__,
+    sse_loss.__name__,
+    mse_loss.__name__,
+    bce_loss.__name__,
+    cce_loss.__name__,
 ]
