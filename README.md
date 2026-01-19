@@ -51,8 +51,7 @@ pip install -e .
 ### Minimal Tensor + autograd
 
 ```python
-from keydnn.presentation.apis.tensors import Tensor
-from keydnn.presentation.apis.tensors.device import Device
+from keydnn.tensors import Tensor, Device
 
 x = Tensor(shape=(2, 3), device=Device("cpu"), requires_grad=True)
 y = (x * 2.0).sum()
@@ -64,8 +63,7 @@ print(x.grad.to_numpy())
 ### CUDA example (device-resident ops)
 
 ```python
-from keydnn.presentation.apis.tensors import Tensor
-from keydnn.presentation.apis.tensors.device import Device
+from keydnn.tensors import Tensor, Device
 
 x = Tensor.rand((1024, 1024), device=Device("cuda:0"), requires_grad=True)
 y = (x @ x.T).mean()
@@ -126,12 +124,12 @@ from __future__ import annotations
 
 import numpy as np
 
-from keydnn.presentation.apis.callbacks import EarlyStopping, ModelCheckpoint
-from keydnn.presentation.apis.backend.ops import cuda_available
-from keydnn.presentation.apis.tensors import Tensor, Device
-from keydnn.presentation.apis.activations import Sigmoid
-from keydnn.presentation.apis.models import Sequential
-from keydnn.presentation.apis.layers import Linear
+from keydnn.callbacks import EarlyStopping, ModelCheckpoint
+from keydnn.backend import cuda_available
+from keydnn.tensors import Tensor, Device
+from keydnn.activations import Sigmoid
+from keydnn.models import Sequential
+from keydnn.layers import Linear
 
 
 def _tensor_from_numpy(arr: np.ndarray, device, requires_grad=False) -> Tensor:
@@ -677,12 +675,9 @@ A checkpoint JSON has the form:
 ### Usage
 
 ```python
-from keydnn.presentation.apis.models import Sequential
-from keydnn.presentation.apis.layers import Conv2d
-from keydnn.presentation.apis.layers import Linear
-from keydnn.presentation.apis.layers import MaxPool2d
-from keydnn.presentation.apis.layers import Flatten
-from keydnn.presentation.apis.activations import ReLU, Softmax
+from keydnn.layers import Conv2d, Linear, MaxPool2d, Flatten
+from keydnn.activations import ReLU, Softmax
+from keydnn.models import Sequential
 
 model = Sequential(
     Conv2d(in_channels=1, out_channels=8, kernel_size=3, padding=1),
@@ -778,8 +773,7 @@ The test suite is split into two categories:
   - Gradient propagation across time and both directions
 
   ```python
-  from keydnn.presentation.apis.layers import Bidirectional
-  from keydnn.presentation.apis.layers import LSTM
+  from keydnn.layers import Bidirectional, LSTM
 
   model = Bidirectional(
       LSTM(input_size=16, hidden_size=32, return_sequences=True), return_sequences=True
