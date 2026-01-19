@@ -11,7 +11,7 @@ It is designed to be both:
 - a **learning-friendly** implementation of modern DL abstractions (Tensor, autograd, modules), and
 - a **performance-oriented sandbox** for building real backends (native CPU kernels, CUDA kernels, vendor libraries).
 
-> ⚠️ **Status:** Pre-stable (v2 alpha). APIs may change.
+> ⚠️ **Status:** Pre-stable (v2 beta). APIs may change.
 
 ---
 
@@ -69,8 +69,7 @@ pip install -e .
 ## Quickstart
 
 ```python
-from keydnn.presentation.apis.tensors.tensor import Tensor
-from keydnn.presentation.apis.tensors.device import Device
+from keydnn.tensors import Tensor, Device
 
 x = Tensor(shape=(2, 3), device=Device("cpu"), requires_grad=True)
 y = (x * 2.0).sum()
