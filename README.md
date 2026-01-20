@@ -87,10 +87,10 @@ python -m keydnn test --train_mnist_example --device cuda:0 --epochs 4 --limit-t
 # Train samples: 50000 | Test samples: 1000
 # MLP: 784 -> 256 -> 10 | lr=0.1 | batch=128 | epochs=4
 # Loss: MSE(one-hot) | Metric: acc(argmax logits)
-# Epoch 01/4 | train_loss=0.0561 train_acc=0.7499 | test_acc=0.8440 | 2.39s
-# Epoch 02/4 | train_loss=0.0357 train_acc=0.8824 | test_acc=0.8800 | 2.24s
-# Epoch 03/4 | train_loss=0.0302 train_acc=0.9057 | test_acc=0.8940 | 2.15s
-# Epoch 04/4 | train_loss=0.0270 train_acc=0.9180 | test_acc=0.9090 | 2.15s
+# Epoch 01/4 | train_loss=0.0552 train_acc=0.7640 | test_acc=0.8530 | 2.12s
+# Epoch 02/4 | train_loss=0.0353 train_acc=0.8843 | test_acc=0.8810 | 2.15s
+# Epoch 03/4 | train_loss=0.0302 train_acc=0.9060 | test_acc=0.8990 | 2.20s
+# Epoch 04/4 | train_loss=0.0272 train_acc=0.9169 | test_acc=0.9080 | 2.08s
 ```
 
 ```bash
@@ -104,10 +104,10 @@ python -m keydnn test --train_cifar_example --device cuda:0 --epochs 4 --limit-t
 # Train samples: 50000 | Test samples: 1000
 # CNN CIFAR-10 | lr=0.1 | batch=128 | epochs=4 | normalize=False
 # Loss: MSE(one-hot) | Metric: acc(argmax logits)
-# Epoch 01/4 | train_loss=0.0894 train_acc=0.2341 | test_acc=0.3100 | 25.59s
-# Epoch 02/4 | train_loss=0.0810 train_acc=0.3402 | test_acc=0.3780 | 25.90s
-# Epoch 03/4 | train_loss=0.0782 train_acc=0.3873 | test_acc=0.4060 | 26.44s
-# Epoch 04/4 | train_loss=0.0763 train_acc=0.4163 | test_acc=0.4390 | 26.66s
+# Epoch 01/4 | train_loss=0.0945 train_acc=0.2231 | test_acc=0.3160 | 19.25s
+# Epoch 02/4 | train_loss=0.0809 train_acc=0.3413 | test_acc=0.4040 | 19.50s
+# Epoch 03/4 | train_loss=0.0781 train_acc=0.3973 | test_acc=0.4270 | 19.66s
+# Epoch 04/4 | train_loss=0.0763 train_acc=0.4250 | test_acc=0.4370 | 19.91s
 ```
 
 #### Notes:
