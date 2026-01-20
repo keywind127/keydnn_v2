@@ -140,7 +140,14 @@ def bias_add_forward(
 
     lib = _load_cuda_lib()
     cuda_set_device(lib, int(device))
-    y_dev = cuda_malloc(lib, nbytes)
+
+    from ..tensor._cuda_memory_pool import GLOBAL_CUDA_MEMORY_POOL
+
+    y_dev = GLOBAL_CUDA_MEMORY_POOL.malloc(
+        lib=lib,
+        device_index=x.device.index,
+        nbytes=nbytes,
+    )
 
     from ..tensor._cuda_storage import _CudaStorage
 

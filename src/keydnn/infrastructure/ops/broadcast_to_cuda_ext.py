@@ -158,10 +158,15 @@ def broadcast_to_forward(
     lib = _load_cuda_lib()
     cuda_set_device(lib, int(device))
 
-    # If output is empty, we still want to return a valid Tensor.
-    # Allocate at least 1 byte to keep cuda_malloc happy; Tensor will treat shape as empty anyway.
     nbytes_y = int(max(out_numel, 1) * np.dtype(dt).itemsize)
-    y_dev = cuda_malloc(lib, nbytes_y)
+
+    from ..tensor._cuda_memory_pool import GLOBAL_CUDA_MEMORY_POOL
+
+    y_dev = GLOBAL_CUDA_MEMORY_POOL.malloc(
+        lib=lib,
+        device_index=x.device.index,
+        nbytes=nbytes_y,
+    )
 
     from ..tensor._cuda_storage import _CudaStorage
 
@@ -195,7 +200,7 @@ def broadcast_to_forward(
             device=x.device,
             requires_grad=False,
         )
-    
+
     except Exception:
         cuda_free(lib, y_dev)
         raise

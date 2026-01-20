@@ -241,7 +241,13 @@ def _from_numpy_to_cuda_tensor(
             dtype=dt,
         )
 
-    dev_ptr = int(cuda_malloc(lib, nbytes))
+    from ..tensor._cuda_memory_pool import GLOBAL_CUDA_MEMORY_POOL
+
+    dev_ptr = GLOBAL_CUDA_MEMORY_POOL.malloc(
+        lib=lib,
+        device_index=device_index,
+        nbytes=nbytes,
+    )
 
     from ..tensor._cuda_storage import _CudaStorage
 

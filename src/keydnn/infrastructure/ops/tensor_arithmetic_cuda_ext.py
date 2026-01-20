@@ -262,7 +262,14 @@ def neg(x: Tensor, *, device: int = 0) -> Tensor:
     cuda_set_device(lib, int(device))
 
     nbytes = int(n * np.dtype(dt).itemsize)
-    y_dev = cuda_malloc(lib, nbytes)
+
+    from ..tensor._cuda_memory_pool import GLOBAL_CUDA_MEMORY_POOL
+
+    y_dev = GLOBAL_CUDA_MEMORY_POOL.malloc(
+        lib=lib,
+        device_index=device_index,
+        nbytes=nbytes,
+    )
 
     storage_yd = _CudaStorage(
         lib=lib,
@@ -324,7 +331,14 @@ def add(a: Tensor, b: Tensor, *, device: int = 0) -> Tensor:
     cuda_set_device(lib, int(device))
 
     nbytes = int(n * np.dtype(dt).itemsize)
-    y_dev = cuda_malloc(lib, nbytes)
+
+    from ..tensor._cuda_memory_pool import GLOBAL_CUDA_MEMORY_POOL
+
+    y_dev = GLOBAL_CUDA_MEMORY_POOL.malloc(
+        lib=lib,
+        device_index=device_index,
+        nbytes=nbytes,
+    )
 
     storage_yd = _CudaStorage(
         lib=lib,
@@ -381,7 +395,14 @@ def sub(a: Tensor, b: Tensor, *, device: int = 0) -> Tensor:
     cuda_set_device(lib, int(device))
 
     nbytes = int(n * np.dtype(dt).itemsize)
-    y_dev = cuda_malloc(lib, nbytes)
+
+    from ..tensor._cuda_memory_pool import GLOBAL_CUDA_MEMORY_POOL
+
+    y_dev = GLOBAL_CUDA_MEMORY_POOL.malloc(
+        lib=lib,
+        device_index=device_index,
+        nbytes=nbytes,
+    )
 
     storage_yd = _CudaStorage(
         lib=lib,
@@ -438,8 +459,14 @@ def div(a: Tensor, b: Tensor, *, device: int = 0) -> Tensor:
     cuda_set_device(lib, int(device))
 
     nbytes = int(n * np.dtype(dt).itemsize)
-    y_dev = cuda_malloc(lib, nbytes)
 
+    from ..tensor._cuda_memory_pool import GLOBAL_CUDA_MEMORY_POOL
+
+    y_dev = GLOBAL_CUDA_MEMORY_POOL.malloc(
+        lib=lib,
+        device_index=device_index,
+        nbytes=nbytes,
+    )
     storage_yd = _CudaStorage(
         lib=lib,
         device_index=device_index,
@@ -499,7 +526,13 @@ def gt(a: Tensor, b: Tensor, *, device: int = 0) -> Tensor:
     lib = _get_lib()
     cuda_set_device(lib, int(device))
 
-    y_dev = cuda_malloc(lib, int(n * np.dtype(out_dt).itemsize))
+    from ..tensor._cuda_memory_pool import GLOBAL_CUDA_MEMORY_POOL
+
+    y_dev = GLOBAL_CUDA_MEMORY_POOL.malloc(
+        lib=lib,
+        device_index=device_index,
+        nbytes=int(n * np.dtype(out_dt).itemsize),
+    )
 
     storage_yd = _CudaStorage(
         lib=lib,
@@ -649,7 +682,13 @@ def sub_scalar(a: Tensor, alpha: float, *, device: int = 0) -> Tensor:
     lib = _get_lib()
     cuda_set_device(lib, int(device))
 
-    y_dev = cuda_malloc(lib, int(n * np.dtype(dt).itemsize))
+    from ..tensor._cuda_memory_pool import GLOBAL_CUDA_MEMORY_POOL
+
+    y_dev = GLOBAL_CUDA_MEMORY_POOL.malloc(
+        lib=lib,
+        device_index=device_index,
+        nbytes=int(n * np.dtype(dt).itemsize),
+    )
 
     storage_yd = _CudaStorage(
         lib=lib,
@@ -697,7 +736,13 @@ def div_scalar(a: Tensor, alpha: float, *, device: int = 0) -> Tensor:
     lib = _get_lib()
     cuda_set_device(lib, int(device))
 
-    y_dev = cuda_malloc(lib, int(n * np.dtype(dt).itemsize))
+    from ..tensor._cuda_memory_pool import GLOBAL_CUDA_MEMORY_POOL
+
+    y_dev = GLOBAL_CUDA_MEMORY_POOL.malloc(
+        lib=lib,
+        device_index=device_index,
+        nbytes=int(n * np.dtype(dt).itemsize),
+    )
 
     storage_yd = _CudaStorage(
         lib=lib,
