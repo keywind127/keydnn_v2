@@ -532,11 +532,55 @@ def gt(a: Tensor, b: Tensor, *, device: int = 0) -> Tensor:
 
 def add_scalar(a: Tensor, alpha: float, *, device: int = 0) -> Tensor:
     """
-    Elementwise scalar addition on CUDA.
+    Elementwise scalar addition on CUDA (out-of-place, pool-backed).
 
-    Computes `y = a + alpha`.
+    Computes::
+
+        y = a + alpha
+
+    where `a` is a CUDA-resident Tensor and `alpha` is a Python scalar.
+
+    This function allocates the output buffer using KeyDNN's global CUDA
+    memory pool (`GLOBAL_CUDA_MEMORY_POOL`) with an **exact-size allocation**
+    (no bucket rounding). The resulting device pointer is wrapped in a
+    `_CudaStorage` instance, which manages lifetime via reference counting
+    and returns the memory to the pool when released.
+
+    Parameters
+    ----------
+    a : Tensor
+        Input CUDA tensor. Must reside on a CUDA device and have dtype
+        float32 or float64.
+    alpha : float
+        Scalar value to add to each element of `a`.
+    device : int, optional
+        CUDA device index. Defaults to the device associated with `a`.
+
+    Returns
+    -------
+    Tensor
+        A new CUDA tensor containing the result of `a + alpha`.
+        The output tensor owns exactly one reference to the underlying
+        CUDA storage.
+
+    Raises
+    ------
+    TypeError
+        If `a` is not a CUDA tensor or its dtype is not float32/float64.
+    RuntimeError
+        If CUDA memory allocation fails.
+
+    Notes
+    -----
+    - This operation is strictly out-of-place; the input tensor `a` is not
+      modified.
+    - For tensors with `numel == 0`, no CUDA allocation is performed and an
+      empty CUDA tensor is returned.
+    - Memory reuse assumes default-stream semantics or correct external
+      synchronization before reuse.
     """
-    device_index: int = a.device.index
+
+    device_index = int(getattr(a.device, "index", 0) or 0)
     _require_cuda(a, "a")
     dt = _require_f32_f64(a, "a")
 
@@ -544,16 +588,26 @@ def add_scalar(a: Tensor, alpha: float, *, device: int = 0) -> Tensor:
     if n == 0:
         return _empty_cuda_tensor_like(a, dtype=dt)
 
-    lib = _get_lib()
-    cuda_set_device(lib, int(device))
+    nbytes = int(n * np.dtype(dt).itemsize)
 
-    y_dev = cuda_malloc(lib, int(n * np.dtype(dt).itemsize))
+    lib = _get_lib()
+    cuda_set_device(lib, int(device_index))
+
+    from ..tensor._cuda_memory_pool import GLOBAL_CUDA_MEMORY_POOL
+
+    y_dev = int(
+        GLOBAL_CUDA_MEMORY_POOL.malloc(
+            lib=lib, device_index=device_index, nbytes=nbytes
+        )
+    )
+    if y_dev == 0:
+        raise RuntimeError(f"CUDA malloc failed (pool) for nbytes={nbytes}")
 
     storage_yd = _CudaStorage(
         lib=lib,
         device_index=device_index,
         dev_ptr=int(y_dev),
-        nbytes=int(n * np.dtype(dt).itemsize),
+        nbytes=int(nbytes),
         dtype=dt,
     )
 

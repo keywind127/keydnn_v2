@@ -165,28 +165,33 @@ class _CudaStorage:
         """
         # Lazily bind finalizer to avoid __del__ pitfalls.
         # We capture only plain values, not self, to avoid cycles.
-        import ctypes
 
-        # Import your cuda_free wrapper (use the same module family you already use)
         from ...infrastructure.native_cuda.python.avgpool2d_ctypes import (
             cuda_set_device,
-            cuda_free,
         )
+        from ._cuda_memory_pool import GLOBAL_CUDA_MEMORY_POOL
 
         lib = self.lib
         device_index = int(self.device_index)
         dev_ptr = int(self.dev_ptr)
+        nbytes = int(self.nbytes)
 
         def _free_ptr() -> None:
-            # Best-effort: at interpreter shutdown modules may be None
             try:
+                # IMPORTANT: set device before freeing/caching.
                 cuda_set_device(lib, device_index)
-                cuda_free(lib, dev_ptr)
+
+                # Return to pool instead of cuda_free
+                GLOBAL_CUDA_MEMORY_POOL.free(
+                    lib=lib,
+                    device_index=device_index,
+                    dev_ptr=dev_ptr,
+                    nbytes=nbytes,
+                )
             except Exception:
-                # Never raise in finalizers
                 pass
 
-        if dev_ptr != 0 and int(self.nbytes) > 0:
+        if dev_ptr != 0 and nbytes > 0:
             self._finalizer = weakref.finalize(self, _free_ptr)
 
     def incref(self) -> None:
@@ -229,11 +234,19 @@ class _CudaStorage:
         - After this call frees memory, the storage object should be considered
         logically invalid and must not be reused.
         """
+        fin = None
         with self._lock:
             self._refcnt -= 1
             if self._refcnt == 0:
-                # Trigger finalizer now (deterministic), if still alive.
-                if self._finalizer is not None and self._finalizer.alive:
-                    self._finalizer()
+                fin = self._finalizer
+                # Clear to prevent any later GC-time execution path
+                self._finalizer = None
+                # Invalidate metadata early
                 self.dev_ptr = 0
                 self.nbytes = 0
+
+        if fin is not None and fin.alive:
+            try:
+                fin()  # returns block to pool
+            except Exception:
+                pass
