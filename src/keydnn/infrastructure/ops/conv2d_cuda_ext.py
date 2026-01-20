@@ -362,7 +362,7 @@ def conv2d_forward_cuda_tensor(
         None if b is None else _to_numpy_via_d2h(b, lib=lib, device_index=device_index)
     )
 
-    # Call ops wrapper (pads on CPU, launches CUDA kernels internally)
+    # Call ops wrapper (now pads on GPU, launches CUDA kernels internally)
     y_np = _conv2d_forward_ops(
         lib,
         x=x_np,
