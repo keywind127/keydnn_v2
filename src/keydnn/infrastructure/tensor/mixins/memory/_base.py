@@ -713,7 +713,14 @@ class TensorMixinMemory(ABC):
         dev_index = int(self.device.index or 0)
         cuda_set_device(lib, dev_index)
 
-        dev_ptr = int(cuda_malloc(lib, required_nbytes))
+        from ..._cuda_memory_pool import GLOBAL_CUDA_MEMORY_POOL
+
+        dev_ptr = GLOBAL_CUDA_MEMORY_POOL.malloc(
+            lib=lib,
+            device_index=dev_index,
+            nbytes=required_nbytes,
+        )
+
         if dev_ptr == 0:
             raise RuntimeError("cuda_malloc returned 0")
 

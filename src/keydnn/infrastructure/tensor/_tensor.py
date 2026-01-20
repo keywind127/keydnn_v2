@@ -1674,7 +1674,14 @@ class Tensor(
                 if hasattr(m, "cuda_set_device"):
                     m.cuda_set_device(lib, device_index)
 
-                dev_ptr = int(m.cuda_malloc(lib, int(host.nbytes)))
+                from ._cuda_memory_pool import GLOBAL_CUDA_MEMORY_POOL
+
+                dev_ptr = GLOBAL_CUDA_MEMORY_POOL.malloc(
+                    lib=lib,
+                    device_index=device_index,
+                    nbytes=int(host.nbytes),
+                )
+
                 if dev_ptr == 0:
                     raise RuntimeError("cuda_malloc returned 0")
 
