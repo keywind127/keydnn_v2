@@ -118,13 +118,18 @@ class TestCudaMemoryPool(unittest.TestCase):
         pool.empty_cache(self.lib, device_index=0)
         self.assertEqual(len(self.fake.free_calls), 2)  # freed both cached blocks
 
-    def test_free_unknown_size_falls_back_to_cuda_free(self) -> None:
+    def test_free_unknown_size_still_works_for_pool_owned_ptr(self) -> None:
         pool = self.CudaMemoryPool(max_cached_bytes_per_device=1 << 30)
 
         p = pool.malloc(self.lib, device_index=0, nbytes=1024)
+
+        # nbytes is "unknown" to caller, but pool knows alloc size from ptr map,
+        # so it should NOT call cuda_free; it should cache safely.
         pool.free(self.lib, device_index=0, dev_ptr=p, nbytes=0)
 
-        self.assertEqual(len(self.fake.free_calls), 1)
+        self.assertEqual(len(self.fake.free_calls), 0)  # cached
+        p2 = pool.malloc(self.lib, device_index=0, nbytes=1024)
+        self.assertEqual(p2, p)  # reused
 
     def test_stats_smoke(self) -> None:
         pool = self.CudaMemoryPool(max_cached_bytes_per_device=1 << 30)
