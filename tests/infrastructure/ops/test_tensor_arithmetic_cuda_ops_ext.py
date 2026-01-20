@@ -23,6 +23,7 @@ from typing import Tuple
 
 import numpy as np
 
+import src.keydnn.infrastructure.tensor._tensor as tensor_mod
 from src.keydnn.domain.device._device import Device
 from src.keydnn.infrastructure.tensor._tensor import Tensor
 
@@ -155,6 +156,33 @@ class TestTensorArithmeticCudaExt(unittest.TestCase):
             cls.cuda_device = _get_cuda_device(cls.device_index)
         except Exception as e:
             raise unittest.SkipTest(f"Unable to construct CUDA Device: {e}") from e
+
+    def test_cuda_lib_handle_singleton_identity(self) -> None:
+        """
+        Verify we are not accidentally using multiple ctypes.CDLL handles for the same DLL.
+        This is a common cause of weird hangs / status=1 memcpy failures on Windows.
+        """
+        # Test's lib (loaded via pool2d_cuda._load_cuda_lib)
+        lib_test = self.lib
+
+        # Tensor singleton lib (loaded via Tensor._get_cuda_lib())
+        lib_tensor = Tensor._get_cuda_lib()
+
+        # If these differ, you have multiple CDLL objects floating around
+        # (even if they point to the same DLL path).
+        self.assertIs(
+            lib_tensor,
+            lib_test,
+            "Multiple CUDA DLL handles detected: Tensor._get_cuda_lib() != _load_cuda_lib(). "
+            "Unify all load paths to a single shared singleton.",
+        )
+
+        # Optional: also check the wrapper loader if it exists
+        if hasattr(tensor_mod, "_load_cuda_lib") and callable(
+            getattr(tensor_mod, "_load_cuda_lib")
+        ):
+            lib_other = tensor_mod._load_cuda_lib()
+            self.assertIs(lib_other, lib_test)
 
     # ----------------------------
     # Helpers

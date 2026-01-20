@@ -27,6 +27,8 @@ from typing import Tuple
 
 import numpy as np
 
+from keydnn.tensors import Tensor
+
 
 # --------------------------------------------------------------------------------------
 # Utilities (device + tensor conversion)
@@ -346,6 +348,11 @@ def main() -> int:
     test_acc = _accuracy_from_probs_np(y_test_int, probs_np)
 
     print(f"Final test_acc={test_acc:.4f}")
+
+    # from keydnn.infrastructure.tensor._cuda_memory_pool import GLOBAL_CUDA_MEMORY_POOL
+
+    # print(GLOBAL_CUDA_MEMORY_POOL.stats()[0])
+
     return 0
 
 
