@@ -348,7 +348,18 @@ def zeros_like(x: Tensor, *, device: int = 0, sync: bool = True) -> Tensor:
 
     n = _numel(tuple(x.shape))
     nbytes = int(n * np.dtype(dt).itemsize)
-    y_dev = int(cuda_malloc(lib, int(nbytes))) if nbytes != 0 else 0
+
+    from ..tensor._cuda_memory_pool import GLOBAL_CUDA_MEMORY_POOL
+
+    y_dev = 0
+
+    if nbytes != 0:
+        # Try to allocate from the global memory pool first
+        y_dev = GLOBAL_CUDA_MEMORY_POOL.malloc(
+            lib=lib,
+            device_index=x.device.index,
+            nbytes=nbytes,
+        )
 
     from ..tensor._cuda_storage import _CudaStorage
 
@@ -416,7 +427,17 @@ def ones_like(x: Tensor, *, device: int = 0, sync: bool = True) -> Tensor:
 
     n = _numel(tuple(x.shape))
     nbytes = int(n * np.dtype(dt).itemsize)
-    y_dev = int(cuda_malloc(lib, int(nbytes))) if nbytes != 0 else 0
+
+    from ..tensor._cuda_memory_pool import GLOBAL_CUDA_MEMORY_POOL
+
+    y_dev = 0
+
+    if nbytes != 0:
+        y_dev = GLOBAL_CUDA_MEMORY_POOL.malloc(
+            lib=lib,
+            device_index=x.device.index,
+            nbytes=nbytes,
+        )
 
     from ..tensor._cuda_storage import _CudaStorage
 
@@ -486,7 +507,17 @@ def full_like(x: Tensor, value: float, *, device: int = 0, sync: bool = True) ->
 
     n = _numel(tuple(x.shape))
     nbytes = int(n * np.dtype(dt).itemsize)
-    y_dev = int(cuda_malloc(lib, int(nbytes))) if nbytes != 0 else 0
+
+    from ..tensor._cuda_memory_pool import GLOBAL_CUDA_MEMORY_POOL
+
+    y_dev = 0
+
+    if nbytes != 0:
+        y_dev = GLOBAL_CUDA_MEMORY_POOL.malloc(
+            lib=lib,
+            device_index=x.device.index,
+            nbytes=nbytes,
+        )
 
     from ..tensor._cuda_storage import _CudaStorage
 
@@ -570,7 +601,17 @@ def zeros(
 
     n = _numel(shp)
     nbytes = int(n * np.dtype(dt).itemsize)
-    y_dev = int(cuda_malloc(lib, int(nbytes))) if nbytes != 0 else 0
+
+    from ..tensor._cuda_memory_pool import GLOBAL_CUDA_MEMORY_POOL
+
+    y_dev = 0
+
+    if nbytes != 0:
+        y_dev = GLOBAL_CUDA_MEMORY_POOL.malloc(
+            lib=lib,
+            device_index=int(device),
+            nbytes=nbytes,
+        )
 
     from ..tensor._cuda_storage import _CudaStorage
 
@@ -646,7 +687,17 @@ def ones(
 
     n = _numel(shp)
     nbytes = int(n * np.dtype(dt).itemsize)
-    y_dev = int(cuda_malloc(lib, int(nbytes))) if nbytes != 0 else 0
+
+    from ..tensor._cuda_memory_pool import GLOBAL_CUDA_MEMORY_POOL
+
+    y_dev = 0
+
+    if nbytes != 0:
+        y_dev = GLOBAL_CUDA_MEMORY_POOL.malloc(
+            lib=lib,
+            device_index=int(device),
+            nbytes=nbytes,
+        )
 
     from ..tensor._cuda_storage import _CudaStorage
 
