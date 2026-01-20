@@ -101,7 +101,14 @@ def transpose2d_forward(x: Tensor, *, device: int = 0, sync: bool = True) -> Ten
     cuda_set_device(lib, int(device))
 
     nbytes_y = int(rows * cols * np.dtype(dt).itemsize)
-    y_dev = cuda_malloc(lib, nbytes_y)
+
+    from ..tensor._cuda_memory_pool import GLOBAL_CUDA_MEMORY_POOL
+
+    y_dev = GLOBAL_CUDA_MEMORY_POOL.malloc(
+        lib=lib,
+        device_index=device_index,
+        nbytes=nbytes_y,
+    )
 
     storage_yd = _CudaStorage(
         lib=lib,

@@ -288,7 +288,14 @@ def stack_forward(
 
     # allocate y
     nbytes_y = int(_prod(out_shape) * np.dtype(dt).itemsize)
-    y_dev = cuda_malloc(lib, nbytes_y)
+
+    from ..tensor._cuda_memory_pool import GLOBAL_CUDA_MEMORY_POOL
+
+    y_dev = GLOBAL_CUDA_MEMORY_POOL.malloc(
+        lib=lib,
+        device_index=device_index,
+        nbytes=nbytes_y,
+    )
 
     storage_yd = _CudaStorage(
         lib=lib,
@@ -415,9 +422,18 @@ def stack_backward(
     nbytes_dx = int(_prod(x_shape) * np.dtype(dt).itemsize)
     dx_devs: List[DevPtr] = []
     storage_dx_devs: List[_CudaStorage] = []
+
+    from ..tensor._cuda_memory_pool import GLOBAL_CUDA_MEMORY_POOL
+
     try:
         for _ in range(int(K)):
-            dx_devs.append(cuda_malloc(lib, nbytes_dx))
+            dx_devs.append(
+                GLOBAL_CUDA_MEMORY_POOL.malloc(
+                    lib=lib,
+                    device_index=device_index,
+                    nbytes=nbytes_dx,
+                )
+            )
             storage_dx_devs.append(
                 _CudaStorage(
                     lib=lib,
