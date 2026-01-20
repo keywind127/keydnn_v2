@@ -237,14 +237,20 @@ def sum(self: ITensor, axis: Optional[int] = None, keepdims: bool = False) -> "I
                 from ....ops.pool2d_cuda import (
                     _load_cuda_lib,
                     cuda_set_device,
-                    cuda_malloc,
                 )
 
                 lib = _load_cuda_lib()
                 cuda_set_device(lib, 0)
 
                 nbytes = int(n) * int(np.dtype(dtype).itemsize)
-                go_dev = int(cuda_malloc(lib, int(nbytes)))
+
+                from ..._cuda_memory_pool import GLOBAL_CUDA_MEMORY_POOL
+
+                go_dev = GLOBAL_CUDA_MEMORY_POOL.malloc(
+                    lib=lib,
+                    device_index=device_index,
+                    nbytes=int(nbytes),
+                )
 
                 from ....tensor._cuda_storage import _CudaStorage
 

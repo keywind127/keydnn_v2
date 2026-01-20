@@ -163,18 +163,18 @@ def _require_same_dtype(a: Tensor, b: Tensor) -> np.dtype:
     return dt_a
 
 
-def _alloc_mask_out_like(x: Tensor, *, n: int, device: int) -> int:
-    """
-    Allocate a float32 mask output buffer on CUDA.
+# def _alloc_mask_out_like(x: Tensor, *, n: int, device: int) -> int:
+#     """
+#     Allocate a float32 mask output buffer on CUDA.
 
-    Returns
-    -------
-    int
-        Device pointer to float32 buffer of length `n`.
-    """
-    lib = _get_lib()
-    cuda_set_device(lib, int(device))
-    return int(cuda_malloc(lib, int(n * np.dtype(np.float32).itemsize)))
+#     Returns
+#     -------
+#     int
+#         Device pointer to float32 buffer of length `n`.
+#     """
+#     lib = _get_lib()
+#     cuda_set_device(lib, int(device))
+#     return int(cuda_malloc(lib, int(n * np.dtype(np.float32).itemsize)))
 
 
 def _cmp_binary_out_of_place(
@@ -201,7 +201,16 @@ def _cmp_binary_out_of_place(
 
     lib = _get_lib()
     cuda_set_device(lib, int(device))
-    y_dev = int(cuda_malloc(lib, int(n * np.dtype(out_dt).itemsize)))
+
+    from ..tensor._cuda_memory_pool import GLOBAL_CUDA_MEMORY_POOL
+
+    y_dev = int(
+        GLOBAL_CUDA_MEMORY_POOL.malloc(
+            lib=lib,
+            device_index=device_index,
+            nbytes=int(n * np.dtype(out_dt).itemsize),
+        )
+    )
 
     storage_yd = _CudaStorage(
         lib=lib,
@@ -253,7 +262,16 @@ def _cmp_scalar_out_of_place(
 
     lib = _get_lib()
     cuda_set_device(lib, int(device))
-    y_dev = int(cuda_malloc(lib, int(n * np.dtype(out_dt).itemsize)))
+
+    from ..tensor._cuda_memory_pool import GLOBAL_CUDA_MEMORY_POOL
+
+    y_dev = int(
+        GLOBAL_CUDA_MEMORY_POOL.malloc(
+            lib=lib,
+            device_index=device_index,
+            nbytes=int(n * np.dtype(out_dt).itemsize),
+        )
+    )
 
     storage_yd = _CudaStorage(
         lib=lib,

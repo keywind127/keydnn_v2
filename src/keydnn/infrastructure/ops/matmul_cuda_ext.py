@@ -114,9 +114,15 @@ def matmul2d_forward(
     lib = _load_cuda_lib()
     cuda_set_device(lib, int(device))
 
-    # Allocate output C on device
     nbytes_c = int(M * N * np.dtype(dt_a).itemsize)
-    c_dev = cuda_malloc(lib, nbytes_c)
+
+    from ..tensor._cuda_memory_pool import GLOBAL_CUDA_MEMORY_POOL
+
+    c_dev = GLOBAL_CUDA_MEMORY_POOL.malloc(
+        lib=lib,
+        device_index=a.device.index,
+        nbytes=nbytes_c,
+    )
 
     from ..tensor._cuda_storage import _CudaStorage
 

@@ -65,6 +65,11 @@ from ..native_cuda.python.ops.conv2d_ctypes import (
     conv2d_backward_cuda as _conv2d_backward_ctypes,
 )
 
+from ..native_cuda.python.pad2d_cuda_ctypes import (
+    pad2d_cuda,
+    crop2d_cuda,
+)
+
 
 def _is_cdll(obj: object) -> bool:
     """
@@ -311,15 +316,16 @@ def conv2d_forward_cuda(*args: Any, **kwargs: Any) -> np.ndarray:
             f"conv2d_forward_cuda supports float32/float64 only, got {dtype}"
         )
 
-    x = x.astype(dtype, copy=False)
-    w = w.astype(dtype, copy=False)
+    x = np.ascontiguousarray(x.astype(dtype, copy=False))
+    w = np.ascontiguousarray(w.astype(dtype, copy=False))
+
     b_arr: Optional[np.ndarray]
     if b is None:
         b_arr = None
     else:
         if not isinstance(b, np.ndarray):
             raise TypeError("b must be a numpy array or None")
-        b_arr = b.astype(dtype, copy=False)
+        b_arr = np.ascontiguousarray(b.astype(dtype, copy=False))
 
     if x.ndim != 4:
         raise ValueError(f"x must be 4D NCHW, got shape {x.shape}")
@@ -341,34 +347,50 @@ def conv2d_forward_cuda(*args: Any, **kwargs: Any) -> np.ndarray:
     if H_out < 0 or W_out < 0:
         raise ValueError(f"invalid output size: H_out={H_out}, W_out={W_out}")
 
-    # CPU padding (caller-has-padded semantics for the CUDA kernel)
-    x_pad = np.pad(
-        x,
-        pad_width=((0, 0), (0, 0), (p_h, p_h), (p_w, p_w)),
-        mode="constant",
-        constant_values=0.0,
-    )
-    H_pad, W_pad = x_pad.shape[2], x_pad.shape[3]
+    # Padded input dimensions (padding is done on GPU)
+    H_pad = H + 2 * p_h
+    W_pad = W + 2 * p_w
 
     # Set device (optional)
     if device_index is not None:
         cuda_set_device(lib, int(device_index))
 
     # Allocate device buffers
-    nbytes_x = int(x_pad.nbytes)
+    nbytes_x = int(x.nbytes)  # unpadded x
+    nbytes_xpad = int(N * C_in * H_pad * W_pad * x.itemsize)
     nbytes_w = int(w.nbytes)
     nbytes_b = int(0 if b_arr is None else b_arr.nbytes)
+
     y = np.empty((N, C_out, H_out, W_out), dtype=dtype)
     nbytes_y = int(y.nbytes)
 
-    x_dev = int(cuda_malloc(lib, nbytes_x if nbytes_x > 0 else 1))
+    x_unpad_dev = int(cuda_malloc(lib, nbytes_x if nbytes_x > 0 else 1))
+    x_pad_dev = int(cuda_malloc(lib, nbytes_xpad if nbytes_xpad > 0 else 1))
     w_dev = int(cuda_malloc(lib, nbytes_w if nbytes_w > 0 else 1))
     y_dev = int(cuda_malloc(lib, nbytes_y if nbytes_y > 0 else 1))
     b_dev = 0
 
     try:
-        cudaMemcpyHtoD(lib, x_dev, x_pad, nbytes_x)
+        # H2D copies (unpadded input)
+        cudaMemcpyHtoD(lib, x_unpad_dev, x, nbytes_x)
         cudaMemcpyHtoD(lib, w_dev, w, nbytes_w)
+
+        # Create padded x on device via pad2d CUDA kernel
+        pad2d_cuda(
+            lib,
+            x_dev=x_unpad_dev,
+            y_pad_dev=x_pad_dev,
+            N=N,
+            C=C_in,
+            H=H,
+            W=W,
+            p_h=p_h,
+            p_w=p_w,
+            pad_value=0.0,
+            dtype=dtype,
+            device=(int(device_index) if device_index is not None else 0),
+            sync=False,
+        )
 
         if b_arr is not None:
             b_dev = int(cuda_malloc(lib, nbytes_b if nbytes_b > 0 else 1))
@@ -376,7 +398,7 @@ def conv2d_forward_cuda(*args: Any, **kwargs: Any) -> np.ndarray:
 
         # Optional probes (catch obvious mismatched allocations)
         itemsize = _dtype_itemsize(dtype)
-        _probe_dev_range(lib, x_dev, N * C_in * H_pad * W_pad * itemsize)
+        _probe_dev_range(lib, x_pad_dev, N * C_in * H_pad * W_pad * itemsize)
         _probe_dev_range(lib, w_dev, C_out * C_in * K_h * K_w * itemsize)
         _probe_dev_range(
             lib, y_dev, N * C_out * max(H_out, 0) * max(W_out, 0) * itemsize
@@ -386,7 +408,7 @@ def conv2d_forward_cuda(*args: Any, **kwargs: Any) -> np.ndarray:
 
         _conv2d_forward_ctypes(
             lib,
-            x_pad_dev=x_dev,
+            x_pad_dev=x_pad_dev,
             w_dev=w_dev,
             b_dev=(b_dev if b_arr is not None else None),
             y_dev=y_dev,
@@ -411,7 +433,8 @@ def conv2d_forward_cuda(*args: Any, **kwargs: Any) -> np.ndarray:
         return y
 
     finally:
-        cuda_free(lib, x_dev)
+        cuda_free(lib, x_unpad_dev)
+        cuda_free(lib, x_pad_dev)
         cuda_free(lib, w_dev)
         cuda_free(lib, y_dev)
         if b_dev:
@@ -529,9 +552,9 @@ def conv2d_backward_cuda(
             f"conv2d_backward_cuda supports float32/float64 only, got {dtype}"
         )
 
-    x = x.astype(dtype, copy=False)
-    w = w.astype(dtype, copy=False)
-    grad_out = grad_out.astype(dtype, copy=False)
+    x = np.ascontiguousarray(x.astype(dtype, copy=False))
+    w = np.ascontiguousarray(w.astype(dtype, copy=False))
+    grad_out = np.ascontiguousarray(grad_out.astype(dtype, copy=False))
 
     b_arr: Optional[np.ndarray]
     if b is None:
@@ -539,7 +562,7 @@ def conv2d_backward_cuda(
     else:
         if not isinstance(b, np.ndarray):
             raise TypeError("b must be a numpy array or None")
-        b_arr = b.astype(dtype, copy=False)
+        b_arr = np.ascontiguousarray(b.astype(dtype, copy=False))
 
     if x.ndim != 4:
         raise ValueError(f"x must be 4D NCHW, got shape {x.shape}")
@@ -560,58 +583,82 @@ def conv2d_backward_cuda(
             f"grad_out shape mismatch: expected (N={N}, C_out={C_out}, H_out, W_out), got {grad_out.shape}"
         )
 
-    # Prepare padded input (same as forward)
-    x_pad = np.pad(
-        x,
-        pad_width=((0, 0), (0, 0), (p_h, p_h), (p_w, p_w)),
-        mode="constant",
-        constant_values=0.0,
-    )
-    H_pad, W_pad = x_pad.shape[2], x_pad.shape[3]
+    # Prepare padded input dimensions (same as forward), but padding is done on GPU.
+    H_pad = H + 2 * p_h
+    W_pad = W + 2 * p_w
 
     # Bias grad (CPU path) matches your CPU kernel semantics
     grad_b = None
     if b_arr is not None:
         grad_b = grad_out.sum(axis=(0, 2, 3)).astype(dtype, copy=False)
 
-    grad_x_pad = np.zeros_like(x_pad)
+    # Host outputs
+    grad_x = np.empty_like(x)
     grad_w = np.zeros_like(w)
 
     # Set device (optional)
     if device_index is not None:
         cuda_set_device(lib, int(device_index))
 
-    # Allocate device buffers
-    x_dev = int(cuda_malloc(lib, int(x_pad.nbytes) if int(x_pad.nbytes) > 0 else 1))
+    # Allocate device buffers:
+    # - x_unpad_dev: unpadded input x (H2D)
+    # - x_pad_dev: padded input created via pad2d CUDA kernel
+    # - grad_x_pad_dev: accumulated by native backward kernel
+    # - grad_x_dev: cropped unpadded grad_x created via crop2d CUDA kernel
+    x_unpad_dev = int(cuda_malloc(lib, int(x.nbytes) if int(x.nbytes) > 0 else 1))
+    x_pad_bytes = int(N * C_in * H_pad * W_pad * x.itemsize)
+    gx_pad_bytes = int(N * C_in * H_pad * W_pad * x.itemsize)
+
+    x_pad_dev = int(cuda_malloc(lib, x_pad_bytes if x_pad_bytes > 0 else 1))
     w_dev = int(cuda_malloc(lib, int(w.nbytes) if int(w.nbytes) > 0 else 1))
     go_dev = int(
         cuda_malloc(lib, int(grad_out.nbytes) if int(grad_out.nbytes) > 0 else 1)
     )
-    gx_dev = int(
-        cuda_malloc(lib, int(grad_x_pad.nbytes) if int(grad_x_pad.nbytes) > 0 else 1)
-    )
+    gx_pad_dev = int(cuda_malloc(lib, gx_pad_bytes if gx_pad_bytes > 0 else 1))
+    gx_dev = int(cuda_malloc(lib, int(grad_x.nbytes) if int(grad_x.nbytes) > 0 else 1))
     gw_dev = int(cuda_malloc(lib, int(grad_w.nbytes) if int(grad_w.nbytes) > 0 else 1))
 
     try:
-        cudaMemcpyHtoD(lib, x_dev, x_pad, int(x_pad.nbytes))
+        # Copy unpadded x to device (no CPU np.pad)
+        cudaMemcpyHtoD(lib, x_unpad_dev, x, int(x.nbytes))
         cudaMemcpyHtoD(lib, w_dev, w, int(w.nbytes))
         cudaMemcpyHtoD(lib, go_dev, grad_out, int(grad_out.nbytes))
-        cudaMemcpyHtoD(lib, gx_dev, grad_x_pad, int(grad_x_pad.nbytes))  # zeros
+
+        # Create padded x on device via pad2d CUDA kernel
+        pad2d_cuda(
+            lib,
+            x_dev=x_unpad_dev,
+            y_pad_dev=x_pad_dev,
+            N=N,
+            C=C_in,
+            H=H,
+            W=W,
+            p_h=p_h,
+            p_w=p_w,
+            pad_value=0.0,
+            dtype=dtype,
+            device=(int(device_index) if device_index is not None else 0),
+            sync=False,  # defer sync to the existing sync flag below
+        )
+
+        # Zero-init grad_x_pad and grad_w on device (native kernel accumulates into them).
+        grad_x_pad_zeros = np.zeros((N, C_in, H_pad, W_pad), dtype=dtype)
+        cudaMemcpyHtoD(lib, gx_pad_dev, grad_x_pad_zeros, int(grad_x_pad_zeros.nbytes))
         cudaMemcpyHtoD(lib, gw_dev, grad_w, int(grad_w.nbytes))  # zeros
 
         itemsize = _dtype_itemsize(dtype)
-        _probe_dev_range(lib, x_dev, N * C_in * H_pad * W_pad * itemsize)
+        _probe_dev_range(lib, x_pad_dev, N * C_in * H_pad * W_pad * itemsize)
         _probe_dev_range(lib, w_dev, C_out * C_in * K_h * K_w * itemsize)
         _probe_dev_range(lib, go_dev, N * C_out * H_out * W_out * itemsize)
-        _probe_dev_range(lib, gx_dev, N * C_in * H_pad * W_pad * itemsize)
+        _probe_dev_range(lib, gx_pad_dev, N * C_in * H_pad * W_pad * itemsize)
         _probe_dev_range(lib, gw_dev, C_out * C_in * K_h * K_w * itemsize)
 
         _conv2d_backward_ctypes(
             lib,
-            x_pad_dev=x_dev,
+            x_pad_dev=x_pad_dev,
             w_dev=w_dev,
             grad_out_dev=go_dev,
-            grad_x_pad_dev=gx_dev,
+            grad_x_pad_dev=gx_pad_dev,
             grad_w_dev=gw_dev,
             N=N,
             C_in=C_in,
@@ -627,20 +674,39 @@ def conv2d_backward_cuda(
             dtype=dtype,
         )
 
+        # Crop grad_x from grad_x_pad on device (no CPU slicing)
+        crop2d_cuda(
+            lib,
+            x_pad_dev=gx_pad_dev,
+            y_dev=gx_dev,
+            N=N,
+            C=C_in,
+            H_pad=H_pad,
+            W_pad=W_pad,
+            p_h=p_h,
+            p_w=p_w,
+            H=H,
+            W=W,
+            dtype=dtype,
+            device=(int(device_index) if device_index is not None else 0),
+            sync=False,
+        )
+
         if sync:
             cuda_synchronize(lib)
 
-        cudaMemcpyDtoH(lib, grad_x_pad, gx_dev, int(grad_x_pad.nbytes))
+        # Copy results back to host
+        cudaMemcpyDtoH(lib, grad_x, gx_dev, int(grad_x.nbytes))
         cudaMemcpyDtoH(lib, grad_w, gw_dev, int(grad_w.nbytes))
 
-        # Unpad grad_x
-        grad_x = grad_x_pad[:, :, p_h : p_h + H, p_w : p_w + W]
         return grad_x, grad_w, grad_b
 
     finally:
-        cuda_free(lib, x_dev)
+        cuda_free(lib, x_unpad_dev)
+        cuda_free(lib, x_pad_dev)
         cuda_free(lib, w_dev)
         cuda_free(lib, go_dev)
+        cuda_free(lib, gx_pad_dev)
         cuda_free(lib, gx_dev)
         cuda_free(lib, gw_dev)
 

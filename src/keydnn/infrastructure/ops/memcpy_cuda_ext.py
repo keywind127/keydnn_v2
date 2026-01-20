@@ -93,11 +93,17 @@ def copy_host_to_cuda(
     lib = _load_cuda_lib()
     cuda_set_device(lib, int(device))
 
+    from ..tensor._cuda_memory_pool import GLOBAL_CUDA_MEMORY_POOL
+
     if nbytes == 0:
         # Represent empty tensor without allocating.
         dev_ptr = 0
     else:
-        dev_ptr = int(cuda_malloc(lib, nbytes))
+        dev_ptr = GLOBAL_CUDA_MEMORY_POOL.malloc(
+            lib=lib,
+            device_index=device_tensor.index,
+            nbytes=nbytes,
+        )
 
         from ..tensor._cuda_storage import _CudaStorage
 
@@ -241,10 +247,16 @@ def copy_cuda_to_cuda(x: Tensor, *, device: int = 0, sync: bool = True) -> Tenso
     lib = _load_cuda_lib()
     cuda_set_device(lib, int(device))
 
+    from ..tensor._cuda_memory_pool import GLOBAL_CUDA_MEMORY_POOL
+
     if nbytes == 0:
         dev_ptr = 0
     else:
-        dev_ptr = int(cuda_malloc(lib, nbytes))
+        dev_ptr = GLOBAL_CUDA_MEMORY_POOL.malloc(
+            lib=lib,
+            device_index=x.device.index,
+            nbytes=nbytes,
+        )
 
         from ..tensor._cuda_storage import _CudaStorage
 

@@ -233,7 +233,14 @@ def mul_forward(a: Tensor, b: Tensor, *, device: int = 0, sync: bool = True) -> 
     cuda_set_device(lib, int(device))
 
     nbytes_y = int(numel * np.dtype(dt).itemsize)
-    y_dev = cuda_malloc(lib, nbytes_y)
+
+    from ..tensor._cuda_memory_pool import GLOBAL_CUDA_MEMORY_POOL
+
+    y_dev = GLOBAL_CUDA_MEMORY_POOL.malloc(
+        lib=lib,
+        device_index=a.device.index,
+        nbytes=nbytes_y,
+    )
 
     from ..tensor._cuda_storage import _CudaStorage
 
@@ -320,7 +327,14 @@ def mul_scalar_forward(
     cuda_set_device(lib, int(device))
 
     nbytes_y = int(numel * np.dtype(dt).itemsize)
-    y_dev = cuda_malloc(lib, nbytes_y)
+
+    from ..tensor._cuda_memory_pool import GLOBAL_CUDA_MEMORY_POOL
+
+    y_dev = GLOBAL_CUDA_MEMORY_POOL.malloc(
+        lib=lib,
+        device_index=a.device.index,
+        nbytes=nbytes_y,
+    )
 
     from ..tensor._cuda_storage import _CudaStorage
 
