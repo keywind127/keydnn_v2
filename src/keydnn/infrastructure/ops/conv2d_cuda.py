@@ -316,20 +316,16 @@ def conv2d_forward_cuda(*args: Any, **kwargs: Any) -> np.ndarray:
             f"conv2d_forward_cuda supports float32/float64 only, got {dtype}"
         )
 
-    x = x.astype(dtype, copy=False)
-    w = w.astype(dtype, copy=False)
+    x = np.ascontiguousarray(x.astype(dtype, copy=False))
+    w = np.ascontiguousarray(w.astype(dtype, copy=False))
+
     b_arr: Optional[np.ndarray]
     if b is None:
         b_arr = None
     else:
         if not isinstance(b, np.ndarray):
             raise TypeError("b must be a numpy array or None")
-        b_arr = b.astype(dtype, copy=False)
-
-    x = np.ascontiguousarray(x)
-    w = np.ascontiguousarray(w)
-    if b_arr is not None:
-        b_arr = np.ascontiguousarray(b_arr)
+        b_arr = np.ascontiguousarray(b.astype(dtype, copy=False))
 
     if x.ndim != 4:
         raise ValueError(f"x must be 4D NCHW, got shape {x.shape}")
@@ -355,20 +351,6 @@ def conv2d_forward_cuda(*args: Any, **kwargs: Any) -> np.ndarray:
     H_pad = H + 2 * p_h
     W_pad = W + 2 * p_w
 
-    # ----------------------------
-    # Debug asserts (shape invariants)
-    # ----------------------------
-    assert H_pad == H + 2 * p_h, "H_pad invariant violated"
-    assert W_pad == W + 2 * p_w, "W_pad invariant violated"
-    assert H_out == (H_pad - K_h) // s_h + 1, (
-        f"H_out mismatch: got {H_out}, expected {(H_pad - K_h) // s_h + 1} "
-        f"(H_pad={H_pad}, K_h={K_h}, s_h={s_h})"
-    )
-    assert W_out == (W_pad - K_w) // s_w + 1, (
-        f"W_out mismatch: got {W_out}, expected {(W_pad - K_w) // s_w + 1} "
-        f"(W_pad={W_pad}, K_w={K_w}, s_w={s_w})"
-    )
-
     # Set device (optional)
     if device_index is not None:
         cuda_set_device(lib, int(device_index))
@@ -378,6 +360,7 @@ def conv2d_forward_cuda(*args: Any, **kwargs: Any) -> np.ndarray:
     nbytes_xpad = int(N * C_in * H_pad * W_pad * x.itemsize)
     nbytes_w = int(w.nbytes)
     nbytes_b = int(0 if b_arr is None else b_arr.nbytes)
+
     y = np.empty((N, C_out, H_out, W_out), dtype=dtype)
     nbytes_y = int(y.nbytes)
 
@@ -408,24 +391,6 @@ def conv2d_forward_cuda(*args: Any, **kwargs: Any) -> np.ndarray:
             device=(int(device_index) if device_index is not None else 0),
             sync=False,
         )
-
-        # ----------------------------
-        # Debug assert: pad2d matches NumPy exactly
-        # (only do this when padding is non-trivial; avoids unnecessary overhead)
-        # ----------------------------
-        if (p_h > 0 or p_w > 0) and (N * C_in * H_pad * W_pad) > 0:
-            x_pad_host = np.empty((N, C_in, H_pad, W_pad), dtype=dtype)
-            cudaMemcpyDtoH(lib, x_pad_host, x_pad_dev, int(x_pad_host.nbytes))
-            x_pad_np = np.pad(
-                x,
-                pad_width=((0, 0), (0, 0), (p_h, p_h), (p_w, p_w)),
-                mode="constant",
-                constant_values=0.0,
-            )
-            assert x_pad_host.shape == x_pad_np.shape
-            assert np.array_equal(
-                x_pad_host, x_pad_np
-            ), "pad2d_cuda mismatch vs np.pad (expected exact match)"
 
         if b_arr is not None:
             b_dev = int(cuda_malloc(lib, nbytes_b if nbytes_b > 0 else 1))
@@ -465,14 +430,6 @@ def conv2d_forward_cuda(*args: Any, **kwargs: Any) -> np.ndarray:
             cuda_synchronize(lib)
 
         cudaMemcpyDtoH(lib, y, y_dev, nbytes_y)
-
-        # ----------------------------
-        # Debug assert: output is finite
-        # ----------------------------
-        assert np.isfinite(
-            y
-        ).all(), "conv2d_forward_cuda produced non-finite output (NaN/Inf)"
-
         return y
 
     finally:
@@ -595,9 +552,9 @@ def conv2d_backward_cuda(
             f"conv2d_backward_cuda supports float32/float64 only, got {dtype}"
         )
 
-    x = x.astype(dtype, copy=False)
-    w = w.astype(dtype, copy=False)
-    grad_out = grad_out.astype(dtype, copy=False)
+    x = np.ascontiguousarray(x.astype(dtype, copy=False))
+    w = np.ascontiguousarray(w.astype(dtype, copy=False))
+    grad_out = np.ascontiguousarray(grad_out.astype(dtype, copy=False))
 
     b_arr: Optional[np.ndarray]
     if b is None:
@@ -605,15 +562,7 @@ def conv2d_backward_cuda(
     else:
         if not isinstance(b, np.ndarray):
             raise TypeError("b must be a numpy array or None")
-        b_arr = b.astype(dtype, copy=False)
-
-    x = np.ascontiguousarray(x)
-    w = np.ascontiguousarray(w)
-    grad_out = np.ascontiguousarray(grad_out)
-
-    assert x.flags["C_CONTIGUOUS"]
-    assert w.flags["C_CONTIGUOUS"]
-    assert grad_out.flags["C_CONTIGUOUS"]  # backward only
+        b_arr = np.ascontiguousarray(b.astype(dtype, copy=False))
 
     if x.ndim != 4:
         raise ValueError(f"x must be 4D NCHW, got shape {x.shape}")
@@ -637,22 +586,6 @@ def conv2d_backward_cuda(
     # Prepare padded input dimensions (same as forward), but padding is done on GPU.
     H_pad = H + 2 * p_h
     W_pad = W + 2 * p_w
-
-    # ----------------------------
-    # Debug asserts (shape invariants)
-    # ----------------------------
-    assert H_pad == H + 2 * p_h, "H_pad invariant violated"
-    assert W_pad == W + 2 * p_w, "W_pad invariant violated"
-    assert H_out == (H_pad - K_h) // s_h + 1, (
-        f"H_out mismatch: grad_out has H_out={H_out}, expected {(H_pad - K_h) // s_h + 1} "
-        f"(H_pad={H_pad}, K_h={K_h}, s_h={s_h})"
-    )
-    assert W_out == (W_pad - K_w) // s_w + 1, (
-        f"W_out mismatch: grad_out has W_out={W_out}, expected {(W_pad - K_w) // s_w + 1} "
-        f"(W_pad={W_pad}, K_w={K_w}, s_w={s_w})"
-    )
-
-    assert np.isfinite(grad_out).all(), "grad_out already contains NaN/Inf before conv2d backward"
 
     # Bias grad (CPU path) matches your CPU kernel semantics
     grad_b = None
@@ -708,28 +641,8 @@ def conv2d_backward_cuda(
             sync=False,  # defer sync to the existing sync flag below
         )
 
-        # ----------------------------
-        # Debug assert: pad2d matches NumPy exactly
-        # ----------------------------
-        if (p_h > 0 or p_w > 0) and (N * C_in * H_pad * W_pad) > 0:
-            x_pad_host = np.empty((N, C_in, H_pad, W_pad), dtype=dtype)
-            cudaMemcpyDtoH(lib, x_pad_host, x_pad_dev, int(x_pad_host.nbytes))
-            x_pad_np = np.pad(
-                x,
-                pad_width=((0, 0), (0, 0), (p_h, p_h), (p_w, p_w)),
-                mode="constant",
-                constant_values=0.0,
-            )
-            assert x_pad_host.shape == x_pad_np.shape
-            assert np.array_equal(
-                x_pad_host, x_pad_np
-            ), "pad2d_cuda mismatch vs np.pad (expected exact match)"
-
         # Zero-init grad_x_pad and grad_w on device (native kernel accumulates into them).
         grad_x_pad_zeros = np.zeros((N, C_in, H_pad, W_pad), dtype=dtype)
-        assert (
-            int(grad_x_pad_zeros.nbytes) == gx_pad_bytes
-        ), f"gx_pad zero-init bytes mismatch: host={int(grad_x_pad_zeros.nbytes)} vs dev={gx_pad_bytes}"
         cudaMemcpyHtoD(lib, gx_pad_dev, grad_x_pad_zeros, int(grad_x_pad_zeros.nbytes))
         cudaMemcpyHtoD(lib, gw_dev, grad_w, int(grad_w.nbytes))  # zeros
 
@@ -785,16 +698,6 @@ def conv2d_backward_cuda(
         # Copy results back to host
         cudaMemcpyDtoH(lib, grad_x, gx_dev, int(grad_x.nbytes))
         cudaMemcpyDtoH(lib, grad_w, gw_dev, int(grad_w.nbytes))
-
-        # ----------------------------
-        # Debug asserts: grads are finite
-        # ----------------------------
-        assert np.isfinite(
-            grad_w
-        ).all(), "conv2d_backward_cuda produced non-finite grad_w (NaN/Inf)"
-        assert np.isfinite(
-            grad_x
-        ).all(), "conv2d_backward_cuda produced non-finite grad_x (NaN/Inf)"
 
         return grad_x, grad_w, grad_b
 
