@@ -711,8 +711,8 @@ class Model(Module):
             shape=tuple(shape),
             device=device,
             dtype=dtype,
+            init_zeros=True,
         )
-        t.copy_from_numpy(np.zeros(shape, dtype=dtype))
         return t
 
     def build(
