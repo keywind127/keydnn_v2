@@ -67,6 +67,8 @@ LossLike = Union[str, Callable[[Any, Any], Any]]
 OptimizerLike = Union[str, Any]
 MetricLike = Union[str, Callable[..., Any]]
 
+ShapeLike = Union[Sequence[int], Tuple[int, ...]]
+
 
 def _normalize_key(s: str) -> str:
     return s.strip().lower().replace("-", "").replace("_", "")
@@ -635,6 +637,188 @@ class Model(Module):
         initialization; `Model` itself does not add extra fields.
         """
         super().__init__()
+        # "Built" means: all lazy layers have materialized parameters and
+        # the optimizer can safely be created from model.parameters().
+        self._is_built: bool = False
+        # Internal flag used only to allow build() to run forward once.
+        self._building: bool = False
+
+    @property
+    def is_built(self) -> bool:
+        """
+        Return whether the model has been built (lazy layers materialized).
+
+        A model is considered built once `build()` has successfully executed
+        a forward pass on a representative input and all lazy layers have
+        created their parameters.
+
+        Returns
+        -------
+        bool
+            True if built, else False.
+        """
+        return bool(getattr(self, "_is_built", False))
+
+    def _make_dummy_input(
+        self, shape: Tuple[int, ...], *, device=None, dtype=np.float32
+    ) -> Tensor:
+        """
+        Create a dummy input tensor for model building.
+
+        This helper is used by `Model.build()` when the user provides an input
+        *shape* instead of a real Tensor. It constructs a zero-filled Tensor with
+        the requested shape, device, and dtype, sufficient to trigger a forward
+        pass and materialize all lazy modules.
+
+        Device resolution follows this order:
+        1. Explicit `device` argument (if provided)
+        2. `self.device` attribute on the model (if present)
+        3. CPU fallback (`Device("cpu")`)
+
+        Parameters
+        ----------
+        shape : Tuple[int, ...]
+            Full input shape, including batch dimension
+            (e.g., `(1, 3, 224, 224)`).
+        device : optional
+            Device on which to create the dummy Tensor. If None, inferred from the
+            model or defaulted to CPU.
+        dtype : Any, optional
+            Data type of the dummy Tensor. Defaults to `np.float32`.
+
+        Returns
+        -------
+        Tensor
+            A zero-initialized Tensor suitable for triggering model build.
+
+        Notes
+        -----
+        - The contents of the tensor are not semantically meaningful.
+        - This method exists purely to support lazy initialization paths.
+        """
+
+        # Prefer: infer device from model parameters/modules if possible
+        if device is None:
+            device = getattr(self, "device", None)
+        if device is None:
+            # or fallback to CPU explicitly
+            from ...domain.device._device import Device
+
+            device = Device("cpu")
+
+        # Create Tensor without needing numpy data
+        t = Tensor(
+            shape=tuple(shape),
+            device=device,
+            dtype=dtype,
+            init_zeros=True,
+        )
+        return t
+
+    def build(
+        self,
+        x: Union[Tensor, ShapeLike],
+        *,
+        device: Optional[Any] = None,
+        dtype: Any = np.float32,
+    ) -> None:
+        """
+        Build (materialize) the model using a representative input.
+
+        This method performs a single forward pass to force initialization of all
+        lazy modules (e.g., `Dense` inferring `in_features` and allocating
+        parameters). After `build()`, calls to `model.parameters()` will return a
+        complete and stable parameter set suitable for optimizer construction.
+
+        The build input may be provided either as:
+        - a real `Tensor`, or
+        - a shape-like object (tuple/list), in which case a dummy Tensor is
+        internally constructed.
+
+        Parameters
+        ----------
+        x : Tensor or ShapeLike
+            Representative model input.
+            - If a `Tensor`, it is used directly.
+            - If a shape (e.g., `(1, 784)`), a zero-filled Tensor is created
+            internally to trigger the forward pass.
+        device : optional
+            Device to use when constructing a dummy Tensor from a shape.
+            Ignored if `x` is already a Tensor.
+        dtype : Any, optional
+            Data type to use for a dummy Tensor created from a shape.
+            Ignored if `x` is already a Tensor.
+
+        Raises
+        ------
+        TypeError
+            If `x` is neither a Tensor nor a valid shape-like object.
+        RuntimeError
+            If the forward pass fails during model building.
+
+        Notes
+        -----
+        - Calling `build()` multiple times is safe; subsequent calls are no-ops.
+        - This method must be called before inference, training, or optimizer
+        creation when the model contains lazy layers.
+        """
+
+        if isinstance(x, (list, tuple)):
+            x = self._make_dummy_input(
+                shape=tuple(x),
+                device=device,
+                dtype=dtype,
+            )
+
+        if not isinstance(x, Tensor):
+            raise TypeError("Model.build(x) expects x to be a Tensor")
+
+        # If already built, no-op.
+        if self.is_built:
+            return
+
+        self._building = True
+        try:
+            # Run one forward pass. We call `self(x)` so we follow the normal
+            # call path, but __call__ will allow execution while _building=True.
+            _ = self.forward(x)
+        except Exception as e:
+            # Keep state as unbuilt on failure.
+            self._is_built = False
+            raise RuntimeError(f"Model.build() failed during forward: {e!r}") from e
+        finally:
+            self._building = False
+
+        self._is_built = True
+
+    def _assert_built(self, where: str) -> None:
+        """
+        Raise a clear error if the model has not been built.
+
+        Parameters
+        ----------
+        where : str
+            Name of the public API that requires a built model.
+        """
+        if not self.is_built:
+            raise RuntimeError(
+                f"{where} requires a built model, but this model is not built yet. "
+                "Call `model.build(x_sample)` (e.g., `model.build(x[:1])`) before "
+                "calling training/inference APIs or creating an optimizer."
+            )
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        """
+        Invoke the model.
+
+        This override enforces that the model must be built before any normal
+        forward usage, except while inside `build()` itself.
+        """
+        if not getattr(self, "_building", False) and not self.is_built:
+            raise RuntimeError(
+                "Model is not built yet. Call `model.build(x_sample)` before calling the model."
+            )
+        return super().__call__(*args, **kwargs)
 
     def predict(self, x: Tensor, *, requires_grad: bool = False):
         """
@@ -660,6 +844,8 @@ class Model(Module):
         - If the model implements `eval()` and `train()`, they may be used here.
         - Gradient suppression (`no_grad`) is not yet implemented.
         """
+
+        self._assert_built("Model.predict")
 
         if not isinstance(x, Tensor):
             raise TypeError("Input x must be a Tensor")
@@ -741,6 +927,8 @@ class Model(Module):
         model = module_from_config(payload["arch"])
         load_state_payload_(model, payload["state"])
 
+        setattr(model, "_is_built", True)
+
         if not isinstance(model, cls):
             raise TypeError(
                 f"Loaded object is {type(model).__name__}, expected {cls.__name__}."
@@ -772,6 +960,8 @@ class Model(Module):
 
         See Model.fit() for full semantics.
         """
+
+        self._assert_built("Model.train_on_batch")
 
         if isinstance(x_batch, np.ndarray):
             raise TypeError("x_batch must be a Tensor")
@@ -931,6 +1121,9 @@ class Model(Module):
         Per-epoch metric values are computed as weighted means over batches,
         using `_batch_size_of()` to determine the weight for each batch.
         """
+
+        self._assert_built("Model.fit")
+
         if epochs < 1:
             raise ValueError("epochs must be >= 1")
         if batch_size < 1:
@@ -1173,3 +1366,5 @@ class Model(Module):
 
         # Only restore weights into this instance.
         load_state_payload_(self, payload["state"])
+
+        self._is_built = True

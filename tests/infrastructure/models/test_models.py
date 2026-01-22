@@ -34,6 +34,11 @@ class DummyParamModule(Module):
 class TestSequential(unittest.TestCase):
     def test_forward_chaining_order(self):
         model = Sequential(AddOne(), MulTwo())
+        dummy_x = numpy_to_tensor(
+            np.array([[0.0]], dtype=np.float32),
+            device=Device("cpu"),
+        )
+        model.build(dummy_x[:1])
         self.assertEqual(model(3), 8)
 
     def test_len_getitem_iter(self):
@@ -45,6 +50,11 @@ class TestSequential(unittest.TestCase):
 
     def test_add_appends_and_affects_forward(self):
         model = Sequential(AddOne())
+        dummy_x = numpy_to_tensor(
+            np.array([[0.0]], dtype=np.float32),
+            device=Device("cpu"),
+        )
+        model.build(dummy_x[:1])
         self.assertEqual(model(0), 1)
         model.add(MulTwo())
         self.assertEqual(model(0), 2)
@@ -89,6 +99,15 @@ class TestModelPredict(unittest.TestCase):
                 return x
 
         m = Identity()
+
+        # NEW: provide a minimal forward so build() can run
+        m.forward = lambda x: x  # type: ignore[method-assign]
+
+        dummy_x = numpy_to_tensor(
+            np.array([[0.0]], dtype=np.float32),
+            device=Device("cpu"),
+        )
+        m.build(dummy_x[:1])
 
         device = Device("cpu")
         x = numpy_to_tensor(

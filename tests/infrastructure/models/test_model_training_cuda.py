@@ -118,7 +118,9 @@ class TestSequentialXORTrainingCUDA(unittest.TestCase):
 
         # ---------------- Training loop ----------------
         # CUDA can be numerically a bit different; allow more epochs if needed.
-        epochs = 2000
+        epochs = 800
+
+        model.build(x[:1])  # ensure built before training
 
         for _ in range(epochs):
             pred = model(x)

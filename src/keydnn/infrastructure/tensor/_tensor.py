@@ -495,6 +495,7 @@ class Tensor(
         requires_grad: bool = False,
         ctx: Optional[Context] = None,
         dtype: np.dtype = np.float32,
+        init_zeros: bool = False,
     ) -> None:
         """
         Construct a new Tensor with allocated storage.
@@ -511,12 +512,25 @@ class Tensor(
             Optional autograd context to attach to this tensor.
         dtype : np.dtype, optional
             Element dtype for this tensor. Defaults to np.float32.
+        init_zeros : bool, optional
+            If True, explicitly initialize tensor storage with zeros.
+            Defaults to False to preserve backward-compatible behavior.
         """
-        self._shape = shape
+
+        import numpy as np
+
+        self._shape = tuple(shape)
         self._device = device
         self._dtype = np.dtype(dtype)
+
+        # Allocate storage (existing behavior)
         self.__initialize_data()
         self._storage: Optional[_CudaStorage] = None
+
+        # Optional explicit zero initialization
+        if init_zeros:
+            zeros = np.zeros(self._shape, dtype=self._dtype)
+            self.copy_from_numpy(zeros)
 
         # --- autograd fields (optional) ---
         self._requires_grad: bool = bool(requires_grad)

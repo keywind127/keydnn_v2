@@ -150,6 +150,7 @@ class _FitTrainOnBatchMixin:
         x_np, y_np, x, y = self._xor_tensors(device)
 
         model = self._build_model(device)
+        model.build(x[:1])
         opt = self._optimizer(model)
 
         def acc_metric(y_true, y_pred):
@@ -217,6 +218,7 @@ class _FitTrainOnBatchMixin:
         x_np, y_np, x, y = self._xor_tensors(device)
 
         model = self._build_model(device)
+        model.build(x[:1])
         opt = self._optimizer(model)
 
         def acc_metric(y_true, y_pred):
@@ -361,6 +363,8 @@ class TestModelTrainOnBatchContract(unittest.TestCase):
         x = _tensor_from_numpy(np.array([[0.0]]), device=Device("cpu"))
         y = _tensor_from_numpy(np.array([[1.0]]), device=Device("cpu"))
 
+        m.build(x[:1])  # ensure built
+
         # Call instance method
         logs = m.train_on_batch(
             x,
@@ -396,6 +400,15 @@ class TestModelFitHistoryContract(unittest.TestCase):
             self.skipTest(f"Missing imports: {e}")
 
         m = Model()
+
+        # NEW: provide a minimal forward so build() can run
+        m.forward = lambda x: x  # type: ignore[method-assign]
+
+        dummy_x = _tensor_from_numpy(
+            np.array([[0.0]], dtype=np.float32),
+            device=Device("cpu"),
+        )
+        m.build(dummy_x[:1])
 
         # Monkeypatch train_on_batch on the instance to be deterministic & fast.
         def fake_train_on_batch(*args, **kwargs):

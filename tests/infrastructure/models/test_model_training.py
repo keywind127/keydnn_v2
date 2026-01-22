@@ -63,7 +63,9 @@ class TestSequentialXORTraining(unittest.TestCase):
         self.assertTrue(hasattr(opt, "step"), "SGD must implement step().")
 
         # ---------------- Training loop ----------------
-        epochs = 2000
+        epochs = 800
+
+        model.build(x[:1])  # ensure built before training
 
         for _ in range(epochs):
             pred = model(x)

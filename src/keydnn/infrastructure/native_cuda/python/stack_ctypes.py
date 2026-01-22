@@ -843,7 +843,7 @@ class CudaLib:
         pre,
         post,
         dtype,
-        sync: bool = False,  # <- default False
+        sync: bool = True,  # <- default False
         debug_verify_ptrs: bool = False,
     ) -> DevPtr:
         self._bind_stack()
@@ -907,7 +907,7 @@ class CudaLib:
         pre,
         post,
         dtype,
-        sync: bool = False,  # <- default False
+        sync: bool = True,  # <- default False
         debug_verify_ptrs: bool = False,  # <- default False (perf)
     ) -> DevPtr:
         self._bind_stack()
