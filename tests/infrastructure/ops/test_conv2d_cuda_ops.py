@@ -300,3 +300,7 @@ class TestConv2dCudaOps(unittest.TestCase):
                 sync=True,
                 device_index=0,
             )
+
+
+if __name__ == "__main__":
+    unittest.main()
