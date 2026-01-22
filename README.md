@@ -104,10 +104,10 @@ python -m keydnn test --train_cifar_example --device cuda:0 --epochs 4 --limit-t
 # Train samples: 50000 | Test samples: 1000
 # CNN CIFAR-10 | lr=0.1 | batch=128 | epochs=4 | normalize=False
 # Loss: MSE(one-hot) | Metric: acc(argmax logits)
-# Epoch 01/4 | train_loss=0.0945 train_acc=0.2231 | test_acc=0.3160 | 19.25s
-# Epoch 02/4 | train_loss=0.0809 train_acc=0.3413 | test_acc=0.4040 | 19.50s
-# Epoch 03/4 | train_loss=0.0781 train_acc=0.3973 | test_acc=0.4270 | 19.66s
-# Epoch 04/4 | train_loss=0.0763 train_acc=0.4250 | test_acc=0.4370 | 19.91s
+# Epoch 01/4 | train_loss=0.0924 train_acc=0.2437 | test_acc=0.2960 | 12.73s
+# Epoch 02/4 | train_loss=0.0815 train_acc=0.3327 | test_acc=0.3590 | 12.47s
+# Epoch 03/4 | train_loss=0.0792 train_acc=0.3711 | test_acc=0.3650 | 12.95s
+# Epoch 04/4 | train_loss=0.0776 train_acc=0.3947 | test_acc=0.3880 | 12.60s
 ```
 
 #### Notes:
