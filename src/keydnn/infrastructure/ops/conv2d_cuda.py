@@ -70,6 +70,9 @@ from ..native_cuda.python.pad2d_cuda_ctypes import (
     crop2d_cuda,
 )
 
+from .fill_cuda import zeros_cuda
+from .reduce_cuda import sum_to_shape_cuda
+
 
 def _is_cdll(obj: object) -> bool:
     """
@@ -709,6 +712,374 @@ def conv2d_backward_cuda(
         cuda_free(lib, gx_pad_dev)
         cuda_free(lib, gx_dev)
         cuda_free(lib, gw_dev)
+
+def conv2d_forward_cuda_devptr(*args: Any, **kwargs: Any) -> None:
+    """
+    Run CUDA Conv2D forward using device pointers (NCHW/OIHW) and write to `y_dev`.
+
+    This is the devptr-facing ops entry point intended for the Tensor boundary layer.
+    It avoids any D2H/H2D copies and performs padding on-device via `pad2d_cuda`.
+
+    Expected usage
+    --------------
+    conv2d_forward_cuda_devptr(
+        lib,
+        x_dev=..., w_dev=..., b_dev=... or None,
+        y_dev=...,
+        N=..., C_in=..., H=..., W=...,
+        C_out=..., K_h=..., K_w=...,
+        stride=..., padding=...,
+        device_index=0, sync=True,
+        dtype=np.float32 or np.float64,
+    )
+
+    Notes
+    -----
+    - `x_dev` points to the *unpadded* input (N, C_in, H, W).
+    - Padding is applied on GPU into a temporary `x_pad_dev`.
+    - `y_dev` must be pre-allocated by the caller for shape (N, C_out, H_out, W_out).
+    """
+    if not args:
+        raise TypeError("conv2d_forward_cuda_devptr expected at least a lib argument")
+
+    # Handle bound-method injection
+    if _is_cdll(args[0]):
+        lib = args[0]
+        rest = args[1:]
+    else:
+        if len(args) < 2 or not _is_cdll(args[1]):
+            raise TypeError(
+                "conv2d_forward_cuda_devptr expected ctypes.CDLL as first arg (or second arg when bound as a method)"
+            )
+        lib = args[1]
+        rest = args[2:]
+    if rest:
+        raise TypeError(
+            "conv2d_forward_cuda_devptr does not accept positional args beyond lib"
+        )
+
+    # Required dev pointers
+    x_dev = int(kwargs.pop("x_dev", 0))
+    w_dev = int(kwargs.pop("w_dev", 0))
+    y_dev = int(kwargs.pop("y_dev", 0))
+    b_dev = kwargs.pop("b_dev", None)
+    b_dev = None if b_dev is None else int(b_dev)
+
+    # Required sizes
+    N = int(kwargs.pop("N"))
+    C_in = int(kwargs.pop("C_in"))
+    H = int(kwargs.pop("H"))
+    W = int(kwargs.pop("W"))
+    C_out = int(kwargs.pop("C_out"))
+    K_h = int(kwargs.pop("K_h"))
+    K_w = int(kwargs.pop("K_w"))
+
+    stride = kwargs.pop("stride", 1)
+    padding = kwargs.pop("padding", 0)
+    s_h, s_w = _pair(stride)
+    p_h, p_w = _pair(padding)
+
+    dtype = np.dtype(kwargs.pop("dtype"))
+    sync = bool(kwargs.pop("sync", True))
+
+    device_index = kwargs.pop("device_index", None)
+    if device_index is None:
+        device_index = kwargs.pop("device", None)
+    if device_index is None:
+        device_index = 0
+    device_index = int(device_index)
+
+    if kwargs:
+        extra = ", ".join(sorted(kwargs.keys()))
+        raise TypeError(f"conv2d_forward_cuda_devptr got unexpected kwargs: {extra}")
+
+    if dtype not in (np.float32, np.float64):
+        raise TypeError(
+            f"conv2d_forward_cuda_devptr supports float32/float64 only, got {dtype}"
+        )
+
+    itemsize = _dtype_itemsize(dtype)
+
+    # Output dims
+    H_out = (H + 2 * p_h - K_h) // s_h + 1
+    W_out = (W + 2 * p_w - K_w) // s_w + 1
+    if H_out < 0 or W_out < 0:
+        raise ValueError(f"invalid output size: H_out={H_out}, W_out={W_out}")
+
+    H_pad = H + 2 * p_h
+    W_pad = W + 2 * p_w
+
+    if device_index is not None:
+        cuda_set_device(lib, device_index)
+
+    # Temp padded input buffer
+    nbytes_xpad = int(N * C_in * H_pad * W_pad * itemsize)
+    x_pad_dev = int(cuda_malloc(lib, nbytes_xpad if nbytes_xpad > 0 else 1))
+
+    try:
+        # Optional probes
+        _probe_dev_range(lib, x_dev, int(N * C_in * H * W * itemsize))
+        _probe_dev_range(lib, w_dev, int(C_out * C_in * K_h * K_w * itemsize))
+        _probe_dev_range(lib, x_pad_dev, int(N * C_in * H_pad * W_pad * itemsize))
+        _probe_dev_range(
+            lib, y_dev, int(N * C_out * max(H_out, 0) * max(W_out, 0) * itemsize)
+        )
+        if b_dev is not None:
+            _probe_dev_range(lib, b_dev, int(C_out * itemsize))
+
+        # Pad on GPU
+        pad2d_cuda(
+            lib,
+            x_dev=x_dev,
+            y_pad_dev=x_pad_dev,
+            N=N,
+            C=C_in,
+            H=H,
+            W=W,
+            p_h=p_h,
+            p_w=p_w,
+            pad_value=0.0,
+            dtype=dtype,
+            device=device_index,
+            sync=False,
+        )
+
+        # Launch forward
+        _conv2d_forward_ctypes(
+            lib,
+            x_pad_dev=x_pad_dev,
+            w_dev=w_dev,
+            b_dev=b_dev,
+            y_dev=y_dev,
+            N=N,
+            C_in=C_in,
+            H_pad=H_pad,
+            W_pad=W_pad,
+            C_out=C_out,
+            H_out=H_out,
+            W_out=W_out,
+            K_h=K_h,
+            K_w=K_w,
+            s_h=s_h,
+            s_w=s_w,
+            dtype=dtype,
+        )
+
+        if sync:
+            cuda_synchronize(lib)
+
+    finally:
+        cuda_free(lib, x_pad_dev)
+
+
+def conv2d_backward_cuda_devptr(*args: Any, **kwargs: Any) -> None:
+    """
+    Run CUDA Conv2D backward using device pointers and write grads to output devptrs.
+
+    This is the devptr-facing ops entry point intended for the Tensor boundary layer.
+    It avoids any D2H/H2D copies.
+
+    Writes
+    ------
+    - `grad_x_dev` (N, C_in, H, W)  [unpadded]
+    - `grad_w_dev` (C_out, C_in, K_h, K_w)
+    - `grad_b_dev` (C_out,) if provided (see Notes)
+
+    Notes
+    -----
+    - The native backward kernel writes `grad_x_pad_dev` and `grad_w_dev` using
+      accumulation semantics. This wrapper zero-initializes both `grad_x_pad_dev`
+      and `grad_w_dev` on-device before launching the kernel.
+    - Bias grad is computed on GPU when `grad_b_dev` is provided by reducing
+      `grad_out_dev` across (N, H_out, W_out). This is implemented via
+      `sum_to_shape_cuda`, reducing:
+          (N, C_out, H_out, W_out) -> (1, C_out, 1, 1)
+      into the provided `(C_out,)` buffer (same element count as the reduced shape).
+    """
+    if not args:
+        raise TypeError("conv2d_backward_cuda_devptr expected at least a lib argument")
+
+    # Handle bound-method injection
+    if _is_cdll(args[0]):
+        lib = args[0]
+        rest = args[1:]
+    else:
+        if len(args) < 2 or not _is_cdll(args[1]):
+            raise TypeError(
+                "conv2d_backward_cuda_devptr expected ctypes.CDLL as first arg (or second arg when bound as a method)"
+            )
+        lib = args[1]
+        rest = args[2:]
+    if rest:
+        raise TypeError(
+            "conv2d_backward_cuda_devptr does not accept positional args beyond lib"
+        )
+
+    x_dev = int(kwargs.pop("x_dev", 0))
+    w_dev = int(kwargs.pop("w_dev", 0))
+    grad_out_dev = int(kwargs.pop("grad_out_dev", 0))
+
+    grad_x_dev = int(kwargs.pop("grad_x_dev", 0))
+    grad_w_dev = int(kwargs.pop("grad_w_dev", 0))
+    grad_b_dev = kwargs.pop("grad_b_dev", None)
+    grad_b_dev = None if grad_b_dev is None else int(grad_b_dev)
+
+    N = int(kwargs.pop("N"))
+    C_in = int(kwargs.pop("C_in"))
+    H = int(kwargs.pop("H"))
+    W = int(kwargs.pop("W"))
+    C_out = int(kwargs.pop("C_out"))
+    H_out = int(kwargs.pop("H_out"))
+    W_out = int(kwargs.pop("W_out"))
+    K_h = int(kwargs.pop("K_h"))
+    K_w = int(kwargs.pop("K_w"))
+
+    stride = kwargs.pop("stride", 1)
+    padding = kwargs.pop("padding", 0)
+    s_h, s_w = _pair(stride)
+    p_h, p_w = _pair(padding)
+
+    dtype = np.dtype(kwargs.pop("dtype"))
+    sync = bool(kwargs.pop("sync", True))
+
+    device_index = kwargs.pop("device_index", None)
+    if device_index is None:
+        device_index = kwargs.pop("device", None)
+    if device_index is None:
+        device_index = 0
+    device_index = int(device_index)
+
+    if kwargs:
+        extra = ", ".join(sorted(kwargs.keys()))
+        raise TypeError(f"conv2d_backward_cuda_devptr got unexpected kwargs: {extra}")
+
+    if dtype not in (np.float32, np.float64):
+        raise TypeError(
+            f"conv2d_backward_cuda_devptr supports float32/float64 only, got {dtype}"
+        )
+
+    itemsize = _dtype_itemsize(dtype)
+
+    H_pad = H + 2 * p_h
+    W_pad = W + 2 * p_w
+
+    if device_index is not None:
+        cuda_set_device(lib, device_index)
+
+    # Temp buffers:
+    # x_pad_dev: padded x
+    # gx_pad_dev: grad wrt padded x (written by native kernel), then cropped into grad_x_dev
+    x_pad_bytes = int(N * C_in * H_pad * W_pad * itemsize)
+    gx_pad_bytes = x_pad_bytes
+
+    x_pad_dev = int(cuda_malloc(lib, x_pad_bytes if x_pad_bytes > 0 else 1))
+    gx_pad_dev = int(cuda_malloc(lib, gx_pad_bytes if gx_pad_bytes > 0 else 1))
+
+    try:
+        # Optional probes
+        _probe_dev_range(lib, x_dev, int(N * C_in * H * W * itemsize))
+        _probe_dev_range(lib, w_dev, int(C_out * C_in * K_h * K_w * itemsize))
+        _probe_dev_range(lib, grad_out_dev, int(N * C_out * H_out * W_out * itemsize))
+        _probe_dev_range(lib, x_pad_dev, int(N * C_in * H_pad * W_pad * itemsize))
+        _probe_dev_range(lib, gx_pad_dev, int(N * C_in * H_pad * W_pad * itemsize))
+        _probe_dev_range(lib, grad_x_dev, int(N * C_in * H * W * itemsize))
+        _probe_dev_range(lib, grad_w_dev, int(C_out * C_in * K_h * K_w * itemsize))
+        if grad_b_dev is not None:
+            _probe_dev_range(lib, grad_b_dev, int(C_out * itemsize))
+
+        # Pad x on GPU
+        pad2d_cuda(
+            lib,
+            x_dev=x_dev,
+            y_pad_dev=x_pad_dev,
+            N=N,
+            C=C_in,
+            H=H,
+            W=W,
+            p_h=p_h,
+            p_w=p_w,
+            pad_value=0.0,
+            dtype=dtype,
+            device=device_index,
+            sync=False,
+        )
+
+        # Zero-init gx_pad_dev and grad_w_dev on device (native kernel accumulates into them).
+        zeros_cuda(
+            lib,
+            y_dev=gx_pad_dev,
+            numel=int(N * C_in * H_pad * W_pad),
+            dtype=dtype,
+            sync=False,
+        )
+        zeros_cuda(
+            lib,
+            y_dev=grad_w_dev,
+            numel=int(C_out * C_in * K_h * K_w),
+            dtype=dtype,
+            sync=False,
+        )
+
+        # Launch backward (writes gx_pad_dev and grad_w_dev)
+        _conv2d_backward_ctypes(
+            lib,
+            x_pad_dev=x_pad_dev,
+            w_dev=w_dev,
+            grad_out_dev=grad_out_dev,
+            grad_x_pad_dev=gx_pad_dev,
+            grad_w_dev=grad_w_dev,
+            N=N,
+            C_in=C_in,
+            H_pad=H_pad,
+            W_pad=W_pad,
+            C_out=C_out,
+            H_out=H_out,
+            W_out=W_out,
+            K_h=K_h,
+            K_w=K_w,
+            s_h=s_h,
+            s_w=s_w,
+            dtype=dtype,
+        )
+
+        # Crop gx_pad_dev -> grad_x_dev on device
+        crop2d_cuda(
+            lib,
+            x_pad_dev=gx_pad_dev,
+            y_dev=grad_x_dev,
+            N=N,
+            C=C_in,
+            H_pad=H_pad,
+            W_pad=W_pad,
+            p_h=p_h,
+            p_w=p_w,
+            H=H,
+            W=W,
+            dtype=dtype,
+            device=device_index,
+            sync=False,
+        )
+
+        # Optional: compute grad_b on GPU (sum over N, H_out, W_out)
+        # Reduce (N, C_out, H_out, W_out) -> (1, C_out, 1, 1).
+        if grad_b_dev is not None:
+            sum_to_shape_cuda(
+                lib,
+                x_dev=grad_out_dev,
+                y_dev=grad_b_dev,
+                in_shape=(N, C_out, H_out, W_out),
+                out_shape=(1, C_out, 1, 1),
+                dtype=dtype,
+                sync=False,
+                zero_y=True,
+            )
+
+        if sync:
+            cuda_synchronize(lib)
+
+    finally:
+        cuda_free(lib, x_pad_dev)
+        cuda_free(lib, gx_pad_dev)
 
 
 class _Conv2dCudaAliases:
