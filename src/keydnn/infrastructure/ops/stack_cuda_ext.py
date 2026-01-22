@@ -198,7 +198,7 @@ def stack_forward(
     *,
     axis: int = 0,
     device: int = 0,
-    sync: bool = False,
+    sync: bool = True,
     debug_verify_ptrs: bool = False,
 ) -> Tensor:
     """
@@ -348,7 +348,7 @@ def stack_backward(
     axis: int,
     K: int,
     device: int = 0,
-    sync: bool = False,
+    sync: bool = True,
     debug_verify_ptrs: bool = False,
 ) -> List[Tensor]:
     """

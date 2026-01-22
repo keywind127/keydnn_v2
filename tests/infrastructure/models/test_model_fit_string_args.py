@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import os
 import unittest
-from unittest.mock import Mock
 
 import numpy as np
+
+from src.keydnn.domain.device._device import Device
 
 RUN_SLOW = os.environ.get("KEYDNN_RUN_SLOW", "0") == "1"
 
@@ -258,6 +259,15 @@ class TestModelFitStringArgsContract(unittest.TestCase):
             self.skipTest(f"Missing imports: {e}")
 
         m = Model()
+
+        # NEW: provide a minimal forward so build() can run
+        m.forward = lambda x: x  # type: ignore[method-assign]
+
+        dummy_x = _tensor_from_numpy(
+            np.array([[0.0]], dtype=np.float32),
+            device=Device("cpu"),
+        )
+        m.build(dummy_x[:1])
 
         # Provide parameters() so optimizer resolver can construct SGD(model.parameters(), ...)
         # If Model already has parameters(), this override is harmless but not required.

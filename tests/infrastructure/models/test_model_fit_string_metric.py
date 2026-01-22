@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import os
 import unittest
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List
 
 import numpy as np
 
 RUN_SLOW = os.environ.get("KEYDNN_RUN_SLOW", "0") == "1"
+
+from src.keydnn.domain.device._device import Device
 
 
 def _cuda_available() -> bool:
@@ -65,6 +67,15 @@ class TestModelFitMetricStringArgsContract(unittest.TestCase):
             self.skipTest(f"Missing imports: {e}")
 
         m = Model()
+
+        # NEW: provide a minimal forward so build() can run
+        m.forward = lambda x: x  # type: ignore[method-assign]
+
+        dummy_x = _tensor_from_numpy(
+            np.array([[0.0]], dtype=np.float32),
+            device=Device("cpu"),
+        )
+        m.build(dummy_x[:1])
 
         calls: List[Dict[str, Any]] = []
 
@@ -134,6 +145,16 @@ class TestModelFitMetricStringArgsContract(unittest.TestCase):
             self.skipTest(f"Missing imports: {e}")
 
         m = Model()
+
+        # NEW: provide a minimal forward so build() can run
+        m.forward = lambda x: x  # type: ignore[method-assign]
+
+        dummy_x = _tensor_from_numpy(
+            np.array([[0.0]], dtype=np.float32),
+            device=Device("cpu"),
+        )
+        m.build(dummy_x[:1])
+        
         batches = [("xb", "yb")]
 
         with self.assertRaises(ValueError):
@@ -157,6 +178,16 @@ class TestModelFitMetricStringArgsContract(unittest.TestCase):
             self.skipTest(f"Missing imports: {e}")
 
         m = Model()
+
+        # NEW: provide a minimal forward so build() can run
+        m.forward = lambda x: x  # type: ignore[method-assign]
+
+        dummy_x = _tensor_from_numpy(
+            np.array([[0.0]], dtype=np.float32),
+            device=Device("cpu"),
+        )
+        m.build(dummy_x[:1])
+
         batches = [("xb", "yb")]
 
         with self.assertRaises(ValueError):

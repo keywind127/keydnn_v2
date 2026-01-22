@@ -287,6 +287,8 @@ class TestFitWithCallbacks(unittest.TestCase):
             monitor="val_loss", mode="min", patience=1, restore_best_weights=False
         )
 
+        model.build(x[:1])
+
         hist = model.fit(
             x,
             y,
@@ -357,6 +359,8 @@ class TestFitWithCallbacks(unittest.TestCase):
                 save_best_only=True,
                 verbose=0,
             )
+
+            model.build(x[:1])
 
             _ = model.fit(
                 x,

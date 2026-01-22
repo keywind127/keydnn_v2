@@ -39,6 +39,7 @@ from typing import (
     Union,
 )
 from pathlib import Path
+import itertools
 import json
 import math
 import sys
@@ -635,6 +636,99 @@ class Model(Module):
         initialization; `Model` itself does not add extra fields.
         """
         super().__init__()
+        # "Built" means: all lazy layers have materialized parameters and
+        # the optimizer can safely be created from model.parameters().
+        self._is_built: bool = False
+        # Internal flag used only to allow build() to run forward once.
+        self._building: bool = False
+
+    @property
+    def is_built(self) -> bool:
+        """
+        Return whether the model has been built (lazy layers materialized).
+
+        A model is considered built once `build()` has successfully executed
+        a forward pass on a representative input and all lazy layers have
+        created their parameters.
+
+        Returns
+        -------
+        bool
+            True if built, else False.
+        """
+        return bool(getattr(self, "_is_built", False))
+
+    def build(self, x: Tensor) -> None:
+        """
+        Build (materialize) the model using a representative input batch.
+
+        This performs a single forward pass to force initialization of any
+        lazy modules (e.g., Dense inferring in_features and allocating weight/bias).
+        After `build()`, optimizers created from `model.parameters()` will include
+        all parameters.
+
+        Parameters
+        ----------
+        x : Tensor
+            A representative input tensor (typically a single mini-batch slice
+            such as `x[:1]` or `x[:batch_size]`).
+
+        Raises
+        ------
+        TypeError
+            If `x` is not a Tensor.
+        RuntimeError
+            If the forward pass fails while building.
+        """
+        if not isinstance(x, Tensor):
+            raise TypeError("Model.build(x) expects x to be a Tensor")
+
+        # If already built, no-op.
+        if self.is_built:
+            return
+
+        self._building = True
+        try:
+            # Run one forward pass. We call `self(x)` so we follow the normal
+            # call path, but __call__ will allow execution while _building=True.
+            _ = self.forward(x)
+        except Exception as e:
+            # Keep state as unbuilt on failure.
+            self._is_built = False
+            raise RuntimeError(f"Model.build() failed during forward: {e!r}") from e
+        finally:
+            self._building = False
+
+        self._is_built = True
+
+    def _assert_built(self, where: str) -> None:
+        """
+        Raise a clear error if the model has not been built.
+
+        Parameters
+        ----------
+        where : str
+            Name of the public API that requires a built model.
+        """
+        if not self.is_built:
+            raise RuntimeError(
+                f"{where} requires a built model, but this model is not built yet. "
+                "Call `model.build(x_sample)` (e.g., `model.build(x[:1])`) before "
+                "calling training/inference APIs or creating an optimizer."
+            )
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        """
+        Invoke the model.
+
+        This override enforces that the model must be built before any normal
+        forward usage, except while inside `build()` itself.
+        """
+        if not getattr(self, "_building", False) and not self.is_built:
+            raise RuntimeError(
+                "Model is not built yet. Call `model.build(x_sample)` before calling the model."
+            )
+        return super().__call__(*args, **kwargs)
 
     def predict(self, x: Tensor, *, requires_grad: bool = False):
         """
@@ -660,6 +754,8 @@ class Model(Module):
         - If the model implements `eval()` and `train()`, they may be used here.
         - Gradient suppression (`no_grad`) is not yet implemented.
         """
+
+        self._assert_built("Model.predict")
 
         if not isinstance(x, Tensor):
             raise TypeError("Input x must be a Tensor")
@@ -741,6 +837,8 @@ class Model(Module):
         model = module_from_config(payload["arch"])
         load_state_payload_(model, payload["state"])
 
+        setattr(model, "_is_built", True)
+
         if not isinstance(model, cls):
             raise TypeError(
                 f"Loaded object is {type(model).__name__}, expected {cls.__name__}."
@@ -772,6 +870,8 @@ class Model(Module):
 
         See Model.fit() for full semantics.
         """
+
+        self._assert_built("Model.train_on_batch")
 
         if isinstance(x_batch, np.ndarray):
             raise TypeError("x_batch must be a Tensor")
@@ -931,6 +1031,9 @@ class Model(Module):
         Per-epoch metric values are computed as weighted means over batches,
         using `_batch_size_of()` to determine the weight for each batch.
         """
+
+        self._assert_built("Model.fit")
+
         if epochs < 1:
             raise ValueError("epochs must be >= 1")
         if batch_size < 1:
@@ -1173,3 +1276,5 @@ class Model(Module):
 
         # Only restore weights into this instance.
         load_state_payload_(self, payload["state"])
+
+        self._is_built = True

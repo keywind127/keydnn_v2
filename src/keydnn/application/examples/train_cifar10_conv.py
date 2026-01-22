@@ -419,6 +419,7 @@ def run_train_cifar10_conv(cfg: TrainCifar10Config) -> int:
     # Model / Optimizer
     # ------------------------------------------------------------------
     model = _build_cnn(device)
+    model.build(_tensor_from_numpy(x_train[:1], device=device))
     opt = SGD(model.parameters(), lr=float(cfg.lr))
 
     def acc_metric(y_true_batch, y_pred_batch):

@@ -33,3 +33,5 @@ _test.py
 test_deploy
 *.png
 *.puml
+data/*
+test1.py

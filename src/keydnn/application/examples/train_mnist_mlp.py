@@ -363,6 +363,7 @@ def run_train_mnist_mlp(cfg: TrainMnistConfig) -> int:
     y_test_oh = _one_hot(y_test, 10)
 
     model = _build_mlp(device, hidden_dim=cfg.hidden_dim)
+    model.build(_tensor_from_numpy(x_train[:1], device=device))
     opt = SGD(model.parameters(), lr=float(cfg.lr))
 
     def acc_metric(y_true_batch, y_pred_batch):

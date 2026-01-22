@@ -327,6 +327,8 @@ def main() -> int:
     x_val_t = _tensor_from_numpy(x_test, device=device, requires_grad=False)
     y_val_t = _tensor_from_numpy(y_test_oh, device=device, requires_grad=False)
 
+    model.build(x_t[:1])  # ensure built before training
+
     history = model.fit(
         x_t,
         y_t,
