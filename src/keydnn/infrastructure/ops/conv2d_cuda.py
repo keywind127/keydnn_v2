@@ -713,6 +713,7 @@ def conv2d_backward_cuda(
         cuda_free(lib, gx_dev)
         cuda_free(lib, gw_dev)
 
+
 def conv2d_forward_cuda_devptr(*args: Any, **kwargs: Any) -> None:
     """
     Run CUDA Conv2D forward using device pointers (NCHW/OIHW) and write to `y_dev`.
@@ -1099,17 +1100,25 @@ class _Conv2dCudaAliases:
         Alias for `conv2d_forward_cuda`.
     conv2d_backward : callable
         Alias for `conv2d_backward_cuda`.
+    conv2d_forward_devptr : callable
+        Alias for `conv2d_forward_cuda_devptr`.
+    conv2d_backward_devptr : callable
+        Alias for `conv2d_backward_cuda_devptr`.
     """
 
     conv2d_cuda = conv2d_forward_cuda
     conv2d_forward = conv2d_forward_cuda
     conv2d_backward = conv2d_backward_cuda
+    conv2d_forward_devptr = conv2d_forward_cuda_devptr
+    conv2d_backward_devptr = conv2d_backward_cuda_devptr
 
 
 # Aliases (similar to your matmul wrapper)
 conv2d_cuda = conv2d_forward_cuda
 conv2d_forward = conv2d_forward_cuda
 conv2d_backward = conv2d_backward_cuda
+conv2d_forward_devptr = conv2d_forward_cuda_devptr
+conv2d_backward_devptr = conv2d_backward_cuda_devptr
 
 __all__ = [
     "conv2d_forward_cuda",
@@ -1117,4 +1126,8 @@ __all__ = [
     "conv2d_cuda",
     "conv2d_forward",
     "conv2d_backward",
+    "conv2d_forward_cuda_devptr",
+    "conv2d_backward_cuda_devptr",
+    "conv2d_forward_devptr",
+    "conv2d_backward_devptr",
 ]
