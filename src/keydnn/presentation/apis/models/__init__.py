@@ -1,2 +1,2 @@
 from .sequential import *
-from .model import *
+from .history import *

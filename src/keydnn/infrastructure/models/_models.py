@@ -39,7 +39,6 @@ from typing import (
     Union,
 )
 from pathlib import Path
-import itertools
 import json
 import math
 import sys
@@ -67,6 +66,8 @@ from .callbacks import (
 LossLike = Union[str, Callable[[Any, Any], Any]]
 OptimizerLike = Union[str, Any]
 MetricLike = Union[str, Callable[..., Any]]
+
+ShapeLike = Union[Sequence[int], Tuple[int, ...]]
 
 
 def _normalize_key(s: str) -> str:
@@ -658,28 +659,117 @@ class Model(Module):
         """
         return bool(getattr(self, "_is_built", False))
 
-    def build(self, x: Tensor) -> None:
+    def _make_dummy_input(
+        self, shape: Tuple[int, ...], *, device=None, dtype=np.float32
+    ) -> Tensor:
         """
-        Build (materialize) the model using a representative input batch.
+        Create a dummy input tensor for model building.
 
-        This performs a single forward pass to force initialization of any
-        lazy modules (e.g., Dense inferring in_features and allocating weight/bias).
-        After `build()`, optimizers created from `model.parameters()` will include
-        all parameters.
+        This helper is used by `Model.build()` when the user provides an input
+        *shape* instead of a real Tensor. It constructs a zero-filled Tensor with
+        the requested shape, device, and dtype, sufficient to trigger a forward
+        pass and materialize all lazy modules.
+
+        Device resolution follows this order:
+        1. Explicit `device` argument (if provided)
+        2. `self.device` attribute on the model (if present)
+        3. CPU fallback (`Device("cpu")`)
 
         Parameters
         ----------
-        x : Tensor
-            A representative input tensor (typically a single mini-batch slice
-            such as `x[:1]` or `x[:batch_size]`).
+        shape : Tuple[int, ...]
+            Full input shape, including batch dimension
+            (e.g., `(1, 3, 224, 224)`).
+        device : optional
+            Device on which to create the dummy Tensor. If None, inferred from the
+            model or defaulted to CPU.
+        dtype : Any, optional
+            Data type of the dummy Tensor. Defaults to `np.float32`.
+
+        Returns
+        -------
+        Tensor
+            A zero-initialized Tensor suitable for triggering model build.
+
+        Notes
+        -----
+        - The contents of the tensor are not semantically meaningful.
+        - This method exists purely to support lazy initialization paths.
+        """
+
+        # Prefer: infer device from model parameters/modules if possible
+        if device is None:
+            device = getattr(self, "device", None)
+        if device is None:
+            # or fallback to CPU explicitly
+            from ...domain.device._device import Device
+
+            device = Device("cpu")
+
+        # Create Tensor without needing numpy data
+        t = Tensor(
+            shape=tuple(shape),
+            device=device,
+            dtype=dtype,
+        )
+        t.copy_from_numpy(np.zeros(shape, dtype=dtype))
+        return t
+
+    def build(
+        self,
+        x: Union[Tensor, ShapeLike],
+        *,
+        device: Optional[Any] = None,
+        dtype: Any = np.float32,
+    ) -> None:
+        """
+        Build (materialize) the model using a representative input.
+
+        This method performs a single forward pass to force initialization of all
+        lazy modules (e.g., `Dense` inferring `in_features` and allocating
+        parameters). After `build()`, calls to `model.parameters()` will return a
+        complete and stable parameter set suitable for optimizer construction.
+
+        The build input may be provided either as:
+        - a real `Tensor`, or
+        - a shape-like object (tuple/list), in which case a dummy Tensor is
+        internally constructed.
+
+        Parameters
+        ----------
+        x : Tensor or ShapeLike
+            Representative model input.
+            - If a `Tensor`, it is used directly.
+            - If a shape (e.g., `(1, 784)`), a zero-filled Tensor is created
+            internally to trigger the forward pass.
+        device : optional
+            Device to use when constructing a dummy Tensor from a shape.
+            Ignored if `x` is already a Tensor.
+        dtype : Any, optional
+            Data type to use for a dummy Tensor created from a shape.
+            Ignored if `x` is already a Tensor.
 
         Raises
         ------
         TypeError
-            If `x` is not a Tensor.
+            If `x` is neither a Tensor nor a valid shape-like object.
         RuntimeError
-            If the forward pass fails while building.
+            If the forward pass fails during model building.
+
+        Notes
+        -----
+        - Calling `build()` multiple times is safe; subsequent calls are no-ops.
+        - This method must be called before inference, training, or optimizer
+        creation when the model contains lazy layers.
         """
+
+        if isinstance(x, (list, tuple)):
+            x = self._make_dummy_input(
+                shape=tuple(x),
+                device=device,
+                dtype=dtype,
+            )
+
         if not isinstance(x, Tensor):
             raise TypeError("Model.build(x) expects x to be a Tensor")
 

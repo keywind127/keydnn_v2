@@ -34,4 +34,4 @@ test_deploy
 *.png
 *.puml
 data/*
-test1.py
+_test1.py
