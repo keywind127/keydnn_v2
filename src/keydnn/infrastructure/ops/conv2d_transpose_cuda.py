@@ -48,6 +48,11 @@ from ..native_cuda.python.ops.conv2d_transpose_ctypes import (
     conv2d_transpose_backward_cuda as _conv2d_t_backward_ctypes,
 )
 
+from .conv2d_cuda import (
+    zeros_cuda,
+    sum_to_shape_cuda,
+)
+
 
 def _is_cdll(obj: object) -> bool:
     return isinstance(obj, ctypes.CDLL)
@@ -503,6 +508,332 @@ def conv2d_transpose_backward_cuda(
         cuda_free(lib, gw_dev)
 
 
+def conv2d_transpose_forward_cuda_devptr(*args: Any, **kwargs: Any) -> None:
+    """
+    Run CUDA ConvTranspose2D forward using *device pointers* (NCHW / IOHW) and write to `y_dev`.
+
+    This is the devptr-facing ops entry point intended for the Tensor boundary layer.
+    It performs **no D2H/H2D copies** and assumes all buffers are device-resident.
+
+    Expected usage
+    --------------
+    conv2d_transpose_forward_cuda_devptr(
+        lib,
+        x_dev=..., w_dev=..., b_dev=... or None,
+        y_dev=...,
+        N=..., C_in=..., H_in=..., W_in=...,
+        C_out=..., K_h=..., K_w=...,
+        stride=..., padding=..., output_padding=...,
+        device_index=0, sync=True,
+        dtype=np.float32 or np.float64,
+    )
+
+    Notes
+    -----
+    - Layouts:
+        x_dev: NCHW  (N, C_in, H_in, W_in)
+        w_dev: IOHW  (C_in, C_out, K_h, K_w)
+        y_dev: NCHW  (N, C_out, H_out, W_out)
+    - `output_padding` is handled by choosing H_out/W_out on the caller side.
+      The native kernel interface does not take output_padding explicitly.
+    - `y_dev` must be pre-allocated by the caller.
+    """
+    if not args:
+        raise TypeError(
+            "conv2d_transpose_forward_cuda_devptr expected at least a lib argument"
+        )
+
+    # Handle bound-method injection
+    if _is_cdll(args[0]):
+        lib = args[0]
+        rest = args[1:]
+    else:
+        if len(args) < 2 or not _is_cdll(args[1]):
+            raise TypeError(
+                "conv2d_transpose_forward_cuda_devptr expected ctypes.CDLL as first arg "
+                "(or second arg when bound as a method)"
+            )
+        lib = args[1]
+        rest = args[2:]
+    if rest:
+        raise TypeError(
+            "conv2d_transpose_forward_cuda_devptr does not accept positional args beyond lib"
+        )
+
+    x_dev = int(kwargs.pop("x_dev", 0))
+    w_dev = int(kwargs.pop("w_dev", 0))
+    y_dev = int(kwargs.pop("y_dev", 0))
+    b_dev = kwargs.pop("b_dev", None)
+    b_dev = None if b_dev is None else int(b_dev)
+
+    N = int(kwargs.pop("N"))
+    C_in = int(kwargs.pop("C_in"))
+    H_in = int(kwargs.pop("H_in"))
+    W_in = int(kwargs.pop("W_in"))
+    C_out = int(kwargs.pop("C_out"))
+    K_h = int(kwargs.pop("K_h"))
+    K_w = int(kwargs.pop("K_w"))
+
+    stride = kwargs.pop("stride", 1)
+    padding = kwargs.pop("padding", 0)
+    output_padding = kwargs.pop("output_padding", 0)
+    s_h, s_w = _pair(stride)
+    p_h, p_w = _pair(padding)
+    op_h, op_w = _pair(output_padding)
+
+    dtype = np.dtype(kwargs.pop("dtype"))
+    sync = bool(kwargs.pop("sync", True))
+
+    device_index = kwargs.pop("device_index", None)
+    if device_index is None:
+        device_index = kwargs.pop("device", None)
+    if device_index is None:
+        device_index = 0
+    device_index = int(device_index)
+
+    if kwargs:
+        extra = ", ".join(sorted(kwargs.keys()))
+        raise TypeError(
+            f"conv2d_transpose_forward_cuda_devptr got unexpected kwargs: {extra}"
+        )
+
+    if dtype not in (np.float32, np.float64):
+        raise TypeError(
+            f"conv2d_transpose_forward_cuda_devptr supports float32/float64 only, got {dtype}"
+        )
+
+    if s_h <= 0 or s_w <= 0:
+        raise ValueError(f"stride must be positive, got stride=({s_h},{s_w})")
+    if op_h < 0 or op_w < 0:
+        raise ValueError(f"output_padding must be non-negative, got ({op_h},{op_w})")
+    if op_h >= s_h or op_w >= s_w:
+        raise ValueError(
+            f"output_padding must be < stride per dim, got output_padding=({op_h},{op_w}), "
+            f"stride=({s_h},{s_w})"
+        )
+
+    # Output sizing (caller-side)
+    H_out = (H_in - 1) * s_h - 2 * p_h + K_h + op_h
+    W_out = (W_in - 1) * s_w - 2 * p_w + K_w + op_w
+    if H_out < 0 or W_out < 0:
+        raise ValueError(f"invalid output size: H_out={H_out}, W_out={W_out}")
+
+    cuda_set_device(lib, int(device_index))
+
+    _conv2d_t_forward_ctypes(
+        lib,
+        x_dev=x_dev,
+        w_dev=w_dev,
+        b_dev=b_dev,
+        y_dev=y_dev,
+        N=N,
+        C_in=C_in,
+        H_in=H_in,
+        W_in=W_in,
+        C_out=C_out,
+        H_out=H_out,
+        W_out=W_out,
+        K_h=K_h,
+        K_w=K_w,
+        s_h=s_h,
+        s_w=s_w,
+        pad_h=p_h,
+        pad_w=p_w,
+        dtype=dtype,
+    )
+
+    if sync:
+        cuda_synchronize(lib)
+
+
+def conv2d_transpose_backward_cuda_devptr(*args: Any, **kwargs: Any) -> None:
+    """
+    Run CUDA ConvTranspose2D backward using *device pointers* and write grads to output devptrs.
+
+    This is the devptr-facing ops entry point intended for the Tensor boundary layer.
+    It performs **no D2H/H2D copies**.
+
+    Writes
+    ------
+    - `grad_x_dev` (N, C_in, H_in, W_in)   [NCHW]
+    - `grad_w_dev` (C_in, C_out, K_h, K_w) [IOHW]
+    - Optional: `grad_b_dev` (C_out,) if requested (GPU reduction)
+
+    Expected usage
+    --------------
+    conv2d_transpose_backward_cuda_devptr(
+        lib,
+        x_dev=..., w_dev=..., grad_out_dev=...,
+        grad_x_dev=..., grad_w_dev=...,
+        grad_b_dev=... or None,
+        N=..., C_in=..., H_in=..., W_in=...,
+        C_out=..., K_h=..., K_w=...,
+        stride=..., padding=..., output_padding=...,
+        device_index=0, sync=True,
+        dtype=np.float32 or np.float64,
+    )
+
+    Notes
+    -----
+    - Bias grad is a reduction over grad_out across (N, H_out, W_out).
+      If `grad_b_dev` is provided, this function attempts to compute it on GPU
+      via `sum_to_shape_cuda`. If your build does not expose `sum_to_shape_cuda`,
+      this will raise.
+    - For safety/consistency, if `zeros_cuda` exists we zero `grad_x_dev` and
+      `grad_w_dev` before launching the native kernel (covers accumulation-style kernels).
+    """
+    if not args:
+        raise TypeError(
+            "conv2d_transpose_backward_cuda_devptr expected at least a lib argument"
+        )
+
+    # Handle bound-method injection
+    if _is_cdll(args[0]):
+        lib = args[0]
+        rest = args[1:]
+    else:
+        if len(args) < 2 or not _is_cdll(args[1]):
+            raise TypeError(
+                "conv2d_transpose_backward_cuda_devptr expected ctypes.CDLL as first arg "
+                "(or second arg when bound as a method)"
+            )
+        lib = args[1]
+        rest = args[2:]
+    if rest:
+        raise TypeError(
+            "conv2d_transpose_backward_cuda_devptr does not accept positional args beyond lib"
+        )
+
+    x_dev = int(kwargs.pop("x_dev", 0))
+    w_dev = int(kwargs.pop("w_dev", 0))
+    grad_out_dev = int(kwargs.pop("grad_out_dev", 0))
+
+    grad_x_dev = int(kwargs.pop("grad_x_dev", 0))
+    grad_w_dev = int(kwargs.pop("grad_w_dev", 0))
+    grad_b_dev = kwargs.pop("grad_b_dev", None)
+    grad_b_dev = None if grad_b_dev is None else int(grad_b_dev)
+
+    N = int(kwargs.pop("N"))
+    C_in = int(kwargs.pop("C_in"))
+    H_in = int(kwargs.pop("H_in"))
+    W_in = int(kwargs.pop("W_in"))
+    C_out = int(kwargs.pop("C_out"))
+    K_h = int(kwargs.pop("K_h"))
+    K_w = int(kwargs.pop("K_w"))
+
+    stride = kwargs.pop("stride", 1)
+    padding = kwargs.pop("padding", 0)
+    output_padding = kwargs.pop("output_padding", 0)
+    s_h, s_w = _pair(stride)
+    p_h, p_w = _pair(padding)
+    op_h, op_w = _pair(output_padding)
+
+    dtype = np.dtype(kwargs.pop("dtype"))
+    sync = bool(kwargs.pop("sync", True))
+
+    device_index = kwargs.pop("device_index", None)
+    if device_index is None:
+        device_index = kwargs.pop("device", None)
+    if device_index is None:
+        device_index = 0
+    device_index = int(device_index)
+
+    if kwargs:
+        extra = ", ".join(sorted(kwargs.keys()))
+        raise TypeError(
+            f"conv2d_transpose_backward_cuda_devptr got unexpected kwargs: {extra}"
+        )
+
+    if dtype not in (np.float32, np.float64):
+        raise TypeError(
+            f"conv2d_transpose_backward_cuda_devptr supports float32/float64 only, got {dtype}"
+        )
+
+    if s_h <= 0 or s_w <= 0:
+        raise ValueError(f"stride must be positive, got stride=({s_h},{s_w})")
+    if op_h < 0 or op_w < 0:
+        raise ValueError(f"output_padding must be non-negative, got ({op_h},{op_w})")
+    if op_h >= s_h or op_w >= s_w:
+        raise ValueError(
+            f"output_padding must be < stride per dim, got output_padding=({op_h},{op_w}), "
+            f"stride=({s_h},{s_w})"
+        )
+
+    H_out = (H_in - 1) * s_h - 2 * p_h + K_h + op_h
+    W_out = (W_in - 1) * s_w - 2 * p_w + K_w + op_w
+    if H_out < 0 or W_out < 0:
+        raise ValueError(f"invalid output size: H_out={H_out}, W_out={W_out}")
+
+    cuda_set_device(lib, int(device_index))
+
+    # Optional safety: zero outputs before kernel (covers accumulation semantics).
+    if zeros_cuda is not None:
+        zeros_cuda(
+            lib,
+            y_dev=grad_x_dev,
+            numel=int(N * C_in * H_in * W_in),
+            dtype=dtype,
+            sync=False,
+        )
+        zeros_cuda(
+            lib,
+            y_dev=grad_w_dev,
+            numel=int(C_in * C_out * K_h * K_w),
+            dtype=dtype,
+            sync=False,
+        )
+
+    _conv2d_t_backward_ctypes(
+        lib,
+        x_dev=x_dev,
+        w_dev=w_dev,
+        grad_out_dev=grad_out_dev,
+        grad_x_dev=grad_x_dev,
+        grad_w_dev=grad_w_dev,
+        N=N,
+        C_in=C_in,
+        H_in=H_in,
+        W_in=W_in,
+        C_out=C_out,
+        H_out=H_out,
+        W_out=W_out,
+        K_h=K_h,
+        K_w=K_w,
+        s_h=s_h,
+        s_w=s_w,
+        pad_h=p_h,
+        pad_w=p_w,
+        dtype=dtype,
+    )
+
+    if grad_b_dev is not None:
+        if sum_to_shape_cuda is None:
+            raise RuntimeError(
+                "grad_b_dev requested, but sum_to_shape_cuda is not available. "
+                "Expose/wire sum_to_shape_cuda (or an equivalent reduction) and retry."
+            )
+
+        # Bias grad: sum over (N, H_out, W_out) for each output channel.
+        #
+        # IMPORTANT: sum_to_shape_cuda expects an NCHW-aligned out_shape where the
+        # channel dimension is axis=1. Therefore we reduce:
+        #   (N, C_out, H_out, W_out) -> (1, C_out, 1, 1)
+        # The total number of elements is still C_out, matching grad_b_dev allocation.
+        sum_to_shape_cuda(
+            lib,
+            x_dev=grad_out_dev,
+            y_dev=grad_b_dev,
+            in_shape=(N, C_out, H_out, W_out),
+            out_shape=(1, C_out, 1, 1),
+            dtype=dtype,
+            sync=False,
+            zero_y=True,
+        )
+
+    if sync:
+        cuda_synchronize(lib)
+
+
 class _Conv2dTransposeCudaAliases:
     """
     Public alias names exposed by this ops-layer module (documentation only).
@@ -511,11 +842,15 @@ class _Conv2dTransposeCudaAliases:
     conv2d_transpose_cuda = conv2d_transpose_forward_cuda
     conv2d_transpose_forward = conv2d_transpose_forward_cuda
     conv2d_transpose_backward = conv2d_transpose_backward_cuda
+    conv2d_transpose_forward_devptr = conv2d_transpose_forward_cuda_devptr
+    conv2d_transpose_backward_devptr = conv2d_transpose_backward_cuda_devptr
 
 
 conv2d_transpose_cuda = conv2d_transpose_forward_cuda
 conv2d_transpose_forward = conv2d_transpose_forward_cuda
 conv2d_transpose_backward = conv2d_transpose_backward_cuda
+conv2d_transpose_forward_devptr = conv2d_transpose_forward_cuda_devptr
+conv2d_transpose_backward_devptr = conv2d_transpose_backward_cuda_devptr
 
 __all__ = [
     "conv2d_transpose_forward_cuda",
@@ -523,4 +858,8 @@ __all__ = [
     "conv2d_transpose_cuda",
     "conv2d_transpose_forward",
     "conv2d_transpose_backward",
+    "conv2d_transpose_forward_cuda_devptr",
+    "conv2d_transpose_backward_cuda_devptr",
+    "conv2d_transpose_forward_devptr",
+    "conv2d_transpose_backward_devptr",
 ]

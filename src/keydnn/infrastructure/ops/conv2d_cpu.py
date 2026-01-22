@@ -332,6 +332,7 @@ def conv2d_backward_cpu(
         mode="constant",
         constant_values=0.0,
     )
+    x_pad = np.ascontiguousarray(x_pad, dtype=x.dtype)
     H_pad, W_pad = x_pad.shape[2], x_pad.shape[3]
 
     grad_x_pad = np.zeros_like(x_pad)

@@ -1406,3 +1406,19 @@ class ITensor(Protocol):
             Size of the first dimension.
         """
         ...
+
+    @property
+    def nbytes(self) -> int:
+        """
+        Total bytes required to store this tensor's elements.
+
+        Computed as:
+            numel() * itemsize(dtype)
+
+        Notes
+        -----
+        - This is metadata-only and does not require the underlying storage to
+          be allocated.
+        - For empty tensors (numel == 0), this returns 0.
+        """
+        ...

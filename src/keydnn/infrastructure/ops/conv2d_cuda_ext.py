@@ -49,9 +49,14 @@ from ..native_cuda.python.avgpool2d_ctypes import (
     cuda_synchronize,
 )
 
+# from .conv2d_cuda import (
+#     conv2d_forward_cuda as _conv2d_forward_ops,
+#     conv2d_backward_cuda as _conv2d_backward_ops,
+# )
+
 from .conv2d_cuda import (
-    conv2d_forward_cuda as _conv2d_forward_ops,
-    conv2d_backward_cuda as _conv2d_backward_ops,
+    conv2d_forward_cuda_devptr as _conv2d_forward_devptr_ops,
+    conv2d_backward_cuda_devptr as _conv2d_backward_devptr_ops,
 )
 
 
@@ -282,6 +287,313 @@ def _from_numpy_to_cuda_tensor(
     )
 
 
+# --- add near existing helpers in conv2d_cuda_ext.py ---
+
+
+def _alloc_cuda_tensor(
+    *,
+    shape: Tuple[int, ...],
+    dtype: np.dtype,
+    device,
+    requires_grad: bool,
+    lib,
+    device_index: int,
+) -> Tensor:
+    """
+    Allocate an uninitialized CUDA tensor (device memory only) and wrap it as Tensor.
+
+    This avoids any host allocation/copies and is intended for outputs of CUDA ops.
+    """
+    dt = np.dtype(dtype)
+    n_elems = 1
+    for d in shape:
+        n_elems *= int(d)
+    nbytes = int(n_elems * dt.itemsize)
+
+    from ..tensor._cuda_memory_pool import GLOBAL_CUDA_MEMORY_POOL
+    from ..tensor._cuda_storage import _CudaStorage
+
+    cuda_set_device(lib, int(device_index))
+
+    if nbytes == 0:
+        return Tensor._from_devptr(
+            dev_ptr=0,
+            shape=tuple(int(d) for d in shape),
+            device=device,
+            requires_grad=requires_grad,
+            ctx=None,
+            dtype=dt,
+        )
+
+    dev_ptr = GLOBAL_CUDA_MEMORY_POOL.malloc(
+        lib=lib,
+        device_index=device_index,
+        nbytes=nbytes,
+    )
+
+    storage = _CudaStorage(
+        lib=lib,
+        device_index=device_index,
+        dev_ptr=dev_ptr,
+        nbytes=nbytes,
+        dtype=dt,
+    )
+    if int(dev_ptr) == 0:
+        raise RuntimeError("CUDA alloc returned null device pointer (0)")
+
+    return Tensor._from_storage(
+        storage,
+        shape=tuple(int(d) for d in shape),
+        device=device,
+        requires_grad=requires_grad,
+        ctx=None,
+        dtype=dt,
+    )
+
+
+# def conv2d_forward_cuda_tensor(
+#     x: Tensor,
+#     w: Tensor,
+#     b: Optional[Tensor],
+#     *,
+#     stride: Tuple[int, int],
+#     padding: Tuple[int, int],
+#     out_requires_grad: bool,
+#     device_index: int = 0,
+#     sync: bool = True,
+# ) -> Tensor:
+#     """
+#     Run CUDA conv2d forward using `Tensor` inputs and return a CUDA `Tensor` output.
+
+#     This boundary helper:
+#     1) validates CUDA devices and dtype consistency,
+#     2) copies `Tensor` inputs from device to host NumPy (D2H),
+#     3) calls the NumPy-facing CUDA ops wrapper,
+#     4) copies the resulting NumPy output back to device (H2D) and wraps it as a
+#        new CUDA `Tensor`.
+
+#     Parameters
+#     ----------
+#     x : Tensor
+#         CUDA input tensor of shape (N, C_in, H, W), NCHW.
+#     w : Tensor
+#         CUDA weight tensor of shape (C_out, C_in, K_h, K_w), OIHW.
+#     b : Optional[Tensor]
+#         Optional CUDA bias tensor of shape (C_out,). If None, forward runs without bias.
+#     stride : (int, int)
+#         Stride along (height, width).
+#     padding : (int, int)
+#         Zero-padding along (height, width). Padding is applied symmetrically.
+#     out_requires_grad : bool
+#         `requires_grad` flag for the returned output tensor.
+#     device_index : int, default 0
+#         CUDA device index to execute on.
+#     sync : bool, default True
+#         Whether to synchronize in the underlying ops wrapper.
+
+#     Returns
+#     -------
+#     Tensor
+#         CUDA output tensor of shape (N, C_out, H_out, W_out).
+
+#     Raises
+#     ------
+#     TypeError
+#         If any input is not CUDA or if dtypes are inconsistent across x/w/b.
+#     RuntimeError
+#         If an input has data but lacks a valid device pointer.
+#     """
+#     _ensure_cuda_tensor(x, "x")
+#     _ensure_cuda_tensor(w, "w")
+#     if b is not None:
+#         _ensure_cuda_tensor(b, "b")
+
+#     # Enforce dtype consistency across inputs (tests expect TypeError)
+#     x_dt = np.dtype(x.dtype)
+#     w_dt = np.dtype(w.dtype)
+#     if x_dt != w_dt:
+#         raise TypeError(f"conv2d dtype mismatch: x={x_dt} vs w={w_dt}")
+#     if b is not None:
+#         b_dt = np.dtype(b.dtype)
+#         if b_dt != x_dt:
+#             raise TypeError(f"conv2d dtype mismatch: b={b_dt} vs x={x_dt}")
+
+#     stride = _pair(stride)
+#     padding = _pair(padding)
+
+#     lib = load_keydnn_cuda_native()
+#     cuda_set_device(lib, int(device_index))
+
+#     # D2H: bring tensors to NumPy for ops wrapper
+#     x_np = _to_numpy_via_d2h(x, lib=lib, device_index=device_index)
+#     w_np = _to_numpy_via_d2h(w, lib=lib, device_index=device_index)
+#     b_np = (
+#         None if b is None else _to_numpy_via_d2h(b, lib=lib, device_index=device_index)
+#     )
+
+#     # Call ops wrapper (now pads on GPU, launches CUDA kernels internally)
+#     y_np = _conv2d_forward_ops(
+#         lib,
+#         x=x_np,
+#         w=w_np,
+#         b=b_np,
+#         stride=stride,
+#         padding=padding,
+#         dtype=np.dtype(x_np.dtype),
+#         sync=sync,
+#         device_index=device_index,
+#     )
+
+#     # H2D: wrap result back into a CUDA Tensor
+#     out = _from_numpy_to_cuda_tensor(
+#         y_np,
+#         device=x.device,
+#         requires_grad=out_requires_grad,
+#         lib=lib,
+#         device_index=device_index,
+#     )
+#     return out
+
+
+# def conv2d_backward_cuda_tensor(
+#     x: Tensor,
+#     w: Tensor,
+#     b: Optional[Tensor],
+#     grad_out: Tensor,
+#     *,
+#     stride: Tuple[int, int],
+#     padding: Tuple[int, int],
+#     device_index: int = 0,
+#     sync: bool = True,
+# ) -> Tuple[Tensor, Tensor, Optional[Tensor]]:
+#     """
+#     Run CUDA conv2d backward using `Tensor` inputs and return CUDA gradients.
+
+#     This boundary helper:
+#     1) validates CUDA devices and dtype consistency,
+#     2) copies `Tensor` inputs from device to host NumPy (D2H),
+#     3) calls the NumPy-facing CUDA ops wrapper to compute gradients,
+#     4) copies gradient arrays back to device (H2D) and wraps them as CUDA `Tensor`s.
+
+#     Bias gradient behavior
+#     ----------------------
+#     The ops wrapper computes `grad_b` on CPU via reduction over grad_out, matching
+#     the CPU conv2d semantics. If `b` is None, `grad_b` will be None.
+
+#     Parameters
+#     ----------
+#     x : Tensor
+#         CUDA input tensor from forward.
+#     w : Tensor
+#         CUDA weight tensor from forward.
+#     b : Optional[Tensor]
+#         Optional CUDA bias tensor from forward.
+#     grad_out : Tensor
+#         CUDA gradient dL/dY with shape (N, C_out, H_out, W_out), NCHW.
+#     stride : (int, int)
+#         Stride along (height, width).
+#     padding : (int, int)
+#         Zero-padding along (height, width).
+#     device_index : int, default 0
+#         CUDA device index to execute on.
+#     sync : bool, default True
+#         Whether to synchronize in the underlying ops wrapper.
+
+#     Returns
+#     -------
+#     (grad_x, grad_w, grad_b)
+#         grad_x : Tensor
+#             CUDA Tensor of shape (N, C_in, H, W).
+#         grad_w : Tensor
+#             CUDA Tensor of shape (C_out, C_in, K_h, K_w).
+#         grad_b : Optional[Tensor]
+#             CUDA Tensor of shape (C_out,) if `b` is not None, else None.
+
+#     Raises
+#     ------
+#     TypeError
+#         If any input is not CUDA or if dtypes are inconsistent across x/w/grad_out/b.
+#     RuntimeError
+#         If an input has data but lacks a valid device pointer.
+#     """
+#     _ensure_cuda_tensor(x, "x")
+#     _ensure_cuda_tensor(w, "w")
+#     _ensure_cuda_tensor(grad_out, "grad_out")
+#     if b is not None:
+#         _ensure_cuda_tensor(b, "b")
+
+#         # Enforce dtype consistency (tests expect TypeError)
+#     x_dt = np.dtype(x.dtype)
+#     w_dt = np.dtype(w.dtype)
+#     go_dt = np.dtype(grad_out.dtype)
+#     if x_dt != w_dt or x_dt != go_dt:
+#         raise TypeError(f"conv2d dtype mismatch: x={x_dt}, w={w_dt}, grad_out={go_dt}")
+#     if b is not None:
+#         b_dt = np.dtype(b.dtype)
+#         if b_dt != x_dt:
+#             raise TypeError(f"conv2d dtype mismatch: b={b_dt} vs x={x_dt}")
+
+#     stride = _pair(stride)
+#     padding = _pair(padding)
+
+#     lib = load_keydnn_cuda_native()
+#     cuda_set_device(lib, int(device_index))
+
+#     # D2H: bring tensors to NumPy for ops wrapper
+#     x_np = _to_numpy_via_d2h(x, lib=lib, device_index=device_index)
+#     w_np = _to_numpy_via_d2h(w, lib=lib, device_index=device_index)
+#     b_np = (
+#         None if b is None else _to_numpy_via_d2h(b, lib=lib, device_index=device_index)
+#     )
+#     go_np = _to_numpy_via_d2h(grad_out, lib=lib, device_index=device_index)
+
+#     gx_np, gw_np, gb_np = _conv2d_backward_ops(
+#         lib,
+#         x=x_np,
+#         w=w_np,
+#         b=b_np,
+#         grad_out=go_np,
+#         stride=stride,
+#         padding=padding,
+#         dtype=np.dtype(x_np.dtype),
+#         sync=sync,
+#         device_index=device_index,
+#     )
+
+#     grad_x = _from_numpy_to_cuda_tensor(
+#         gx_np,
+#         device=x.device,
+#         requires_grad=False,
+#         lib=lib,
+#         device_index=device_index,
+#     )
+#     grad_w = _from_numpy_to_cuda_tensor(
+#         gw_np,
+#         device=w.device,
+#         requires_grad=False,
+#         lib=lib,
+#         device_index=device_index,
+#     )
+
+#     grad_b = None
+#     if gb_np is not None:
+#         grad_b = _from_numpy_to_cuda_tensor(
+#             gb_np,
+#             device=b.device if b is not None else x.device,
+#             requires_grad=False,
+#             lib=lib,
+#             device_index=device_index,
+#         )
+
+#     return grad_x, grad_w, grad_b
+
+
+from .conv2d_cuda import (
+    conv2d_forward_cuda_devptr as _conv2d_forward_devptr_ops,
+    conv2d_backward_cuda_devptr as _conv2d_backward_devptr_ops,
+)
+
+
 def conv2d_forward_cuda_tensor(
     x: Tensor,
     w: Tensor,
@@ -298,48 +610,16 @@ def conv2d_forward_cuda_tensor(
 
     This boundary helper:
     1) validates CUDA devices and dtype consistency,
-    2) copies `Tensor` inputs from device to host NumPy (D2H),
-    3) calls the NumPy-facing CUDA ops wrapper,
-    4) copies the resulting NumPy output back to device (H2D) and wraps it as a
-       new CUDA `Tensor`.
+    2) allocates the output CUDA Tensor on device,
+    3) calls the devptr-facing CUDA ops wrapper (no D2H/H2D).
 
-    Parameters
-    ----------
-    x : Tensor
-        CUDA input tensor of shape (N, C_in, H, W), NCHW.
-    w : Tensor
-        CUDA weight tensor of shape (C_out, C_in, K_h, K_w), OIHW.
-    b : Optional[Tensor]
-        Optional CUDA bias tensor of shape (C_out,). If None, forward runs without bias.
-    stride : (int, int)
-        Stride along (height, width).
-    padding : (int, int)
-        Zero-padding along (height, width). Padding is applied symmetrically.
-    out_requires_grad : bool
-        `requires_grad` flag for the returned output tensor.
-    device_index : int, default 0
-        CUDA device index to execute on.
-    sync : bool, default True
-        Whether to synchronize in the underlying ops wrapper.
-
-    Returns
-    -------
-    Tensor
-        CUDA output tensor of shape (N, C_out, H_out, W_out).
-
-    Raises
-    ------
-    TypeError
-        If any input is not CUDA or if dtypes are inconsistent across x/w/b.
-    RuntimeError
-        If an input has data but lacks a valid device pointer.
+    (Docstring updated: previous version described D2H/H2D copies, which is no longer true.)
     """
     _ensure_cuda_tensor(x, "x")
     _ensure_cuda_tensor(w, "w")
     if b is not None:
         _ensure_cuda_tensor(b, "b")
 
-    # Enforce dtype consistency across inputs (tests expect TypeError)
     x_dt = np.dtype(x.dtype)
     w_dt = np.dtype(w.dtype)
     if x_dt != w_dt:
@@ -351,39 +631,70 @@ def conv2d_forward_cuda_tensor(
 
     stride = _pair(stride)
     padding = _pair(padding)
+    s_h, s_w = stride
+    p_h, p_w = padding
 
     lib = load_keydnn_cuda_native()
     cuda_set_device(lib, int(device_index))
 
-    # D2H: bring tensors to NumPy for ops wrapper
-    x_np = _to_numpy_via_d2h(x, lib=lib, device_index=device_index)
-    w_np = _to_numpy_via_d2h(w, lib=lib, device_index=device_index)
-    b_np = (
-        None if b is None else _to_numpy_via_d2h(b, lib=lib, device_index=device_index)
-    )
+    # Shapes
+    if len(x.shape) != 4 or len(w.shape) != 4:
+        raise ValueError(f"expected x,w to be 4D; got x={x.shape}, w={w.shape}")
 
-    # Call ops wrapper (now pads on GPU, launches CUDA kernels internally)
-    y_np = _conv2d_forward_ops(
-        lib,
-        x=x_np,
-        w=w_np,
-        b=b_np,
-        stride=stride,
-        padding=padding,
-        dtype=np.dtype(x_np.dtype),
-        sync=sync,
-        device_index=device_index,
+    N, C_in, H, W = (int(x.shape[0]), int(x.shape[1]), int(x.shape[2]), int(x.shape[3]))
+    C_out, C_in2, K_h, K_w = (
+        int(w.shape[0]),
+        int(w.shape[1]),
+        int(w.shape[2]),
+        int(w.shape[3]),
     )
+    if C_in != C_in2:
+        raise ValueError(f"in_channels mismatch: x has {C_in}, weight has {C_in2}")
 
-    # H2D: wrap result back into a CUDA Tensor
-    out = _from_numpy_to_cuda_tensor(
-        y_np,
+    H_out = (H + 2 * p_h - K_h) // s_h + 1
+    W_out = (W + 2 * p_w - K_w) // s_w + 1
+    if H_out < 0 or W_out < 0:
+        raise ValueError(f"invalid output size: H_out={H_out}, W_out={W_out}")
+
+    # Allocate output directly on device
+    y = _alloc_cuda_tensor(
+        shape=(N, C_out, H_out, W_out),
+        dtype=x_dt,
         device=x.device,
         requires_grad=out_requires_grad,
         lib=lib,
         device_index=device_index,
     )
-    return out
+
+    x_dev = _get_tensor_dev_ptr(x)
+    w_dev = _get_tensor_dev_ptr(w)
+    b_dev = None if b is None else _get_tensor_dev_ptr(b)
+    y_dev = _get_tensor_dev_ptr(y)
+
+    if int(y.nbytes) > 0 and (x_dev == 0 or w_dev == 0 or y_dev == 0):
+        raise RuntimeError("CUDA tensor missing device pointer for non-empty buffer")
+
+    _conv2d_forward_devptr_ops(
+        lib,
+        x_dev=x_dev,
+        w_dev=w_dev,
+        b_dev=b_dev,
+        y_dev=y_dev,
+        N=N,
+        C_in=C_in,
+        H=H,
+        W=W,
+        C_out=C_out,
+        K_h=K_h,
+        K_w=K_w,
+        stride=stride,
+        padding=padding,
+        dtype=x_dt,
+        sync=sync,
+        device_index=device_index,
+    )
+
+    return y
 
 
 def conv2d_backward_cuda_tensor(
@@ -402,50 +713,15 @@ def conv2d_backward_cuda_tensor(
 
     This boundary helper:
     1) validates CUDA devices and dtype consistency,
-    2) copies `Tensor` inputs from device to host NumPy (D2H),
-    3) calls the NumPy-facing CUDA ops wrapper to compute gradients,
-    4) copies gradient arrays back to device (H2D) and wraps them as CUDA `Tensor`s.
+    2) allocates grad_x and grad_w on device,
+    3) calls the devptr-facing CUDA ops wrapper (no D2H/H2D).
 
-    Bias gradient behavior
-    ----------------------
-    The ops wrapper computes `grad_b` on CPU via reduction over grad_out, matching
-    the CPU conv2d semantics. If `b` is None, `grad_b` will be None.
-
-    Parameters
-    ----------
-    x : Tensor
-        CUDA input tensor from forward.
-    w : Tensor
-        CUDA weight tensor from forward.
-    b : Optional[Tensor]
-        Optional CUDA bias tensor from forward.
-    grad_out : Tensor
-        CUDA gradient dL/dY with shape (N, C_out, H_out, W_out), NCHW.
-    stride : (int, int)
-        Stride along (height, width).
-    padding : (int, int)
-        Zero-padding along (height, width).
-    device_index : int, default 0
-        CUDA device index to execute on.
-    sync : bool, default True
-        Whether to synchronize in the underlying ops wrapper.
-
-    Returns
-    -------
-    (grad_x, grad_w, grad_b)
-        grad_x : Tensor
-            CUDA Tensor of shape (N, C_in, H, W).
-        grad_w : Tensor
-            CUDA Tensor of shape (C_out, C_in, K_h, K_w).
-        grad_b : Optional[Tensor]
-            CUDA Tensor of shape (C_out,) if `b` is not None, else None.
-
-    Raises
-    ------
-    TypeError
-        If any input is not CUDA or if dtypes are inconsistent across x/w/grad_out/b.
-    RuntimeError
-        If an input has data but lacks a valid device pointer.
+    Bias gradient
+    ------------
+    Previously computed on CPU via `grad_out.sum(axis=(0,2,3))`. In the no-host
+    CUDA boundary, `grad_b` is computed on GPU via a reduction in the devptr ops
+    path (reducing `(N, C_out, H_out, W_out)` to `(1, C_out, 1, 1)` and writing
+    into a `(C_out,)` buffer).
     """
     _ensure_cuda_tensor(x, "x")
     _ensure_cuda_tensor(w, "w")
@@ -453,7 +729,6 @@ def conv2d_backward_cuda_tensor(
     if b is not None:
         _ensure_cuda_tensor(b, "b")
 
-        # Enforce dtype consistency (tests expect TypeError)
     x_dt = np.dtype(x.dtype)
     w_dt = np.dtype(w.dtype)
     go_dt = np.dtype(grad_out.dtype)
@@ -466,40 +741,45 @@ def conv2d_backward_cuda_tensor(
 
     stride = _pair(stride)
     padding = _pair(padding)
+    s_h, s_w = stride
+    p_h, p_w = padding
 
     lib = load_keydnn_cuda_native()
     cuda_set_device(lib, int(device_index))
 
-    # D2H: bring tensors to NumPy for ops wrapper
-    x_np = _to_numpy_via_d2h(x, lib=lib, device_index=device_index)
-    w_np = _to_numpy_via_d2h(w, lib=lib, device_index=device_index)
-    b_np = (
-        None if b is None else _to_numpy_via_d2h(b, lib=lib, device_index=device_index)
+    # Shapes
+    N, C_in, H, W = (int(x.shape[0]), int(x.shape[1]), int(x.shape[2]), int(x.shape[3]))
+    C_out, C_in2, K_h, K_w = (
+        int(w.shape[0]),
+        int(w.shape[1]),
+        int(w.shape[2]),
+        int(w.shape[3]),
     )
-    go_np = _to_numpy_via_d2h(grad_out, lib=lib, device_index=device_index)
+    if C_in != C_in2:
+        raise ValueError(f"in_channels mismatch: x has {C_in}, weight has {C_in2}")
 
-    gx_np, gw_np, gb_np = _conv2d_backward_ops(
-        lib,
-        x=x_np,
-        w=w_np,
-        b=b_np,
-        grad_out=go_np,
-        stride=stride,
-        padding=padding,
-        dtype=np.dtype(x_np.dtype),
-        sync=sync,
-        device_index=device_index,
+    N2, C_out2, H_out, W_out = (
+        int(grad_out.shape[0]),
+        int(grad_out.shape[1]),
+        int(grad_out.shape[2]),
+        int(grad_out.shape[3]),
     )
+    if N2 != N or C_out2 != C_out:
+        raise ValueError(
+            f"grad_out shape mismatch: got {grad_out.shape}, expected (N={N}, C_out={C_out}, H_out, W_out)"
+        )
 
-    grad_x = _from_numpy_to_cuda_tensor(
-        gx_np,
+    grad_x = _alloc_cuda_tensor(
+        shape=(N, C_in, H, W),
+        dtype=x_dt,
         device=x.device,
         requires_grad=False,
         lib=lib,
         device_index=device_index,
     )
-    grad_w = _from_numpy_to_cuda_tensor(
-        gw_np,
+    grad_w = _alloc_cuda_tensor(
+        shape=(C_out, C_in, K_h, K_w),
+        dtype=x_dt,
         device=w.device,
         requires_grad=False,
         lib=lib,
@@ -507,14 +787,47 @@ def conv2d_backward_cuda_tensor(
     )
 
     grad_b = None
-    if gb_np is not None:
-        grad_b = _from_numpy_to_cuda_tensor(
-            gb_np,
-            device=b.device if b is not None else x.device,
+    grad_b_dev = None
+    if b is not None:
+        grad_b = _alloc_cuda_tensor(
+            shape=(C_out,),
+            dtype=x_dt,
+            device=b.device,
             requires_grad=False,
             lib=lib,
             device_index=device_index,
         )
+        grad_b_dev = _get_tensor_dev_ptr(grad_b)
+
+    x_dev = _get_tensor_dev_ptr(x)
+    w_dev = _get_tensor_dev_ptr(w)
+    go_dev = _get_tensor_dev_ptr(grad_out)
+    gx_dev = _get_tensor_dev_ptr(grad_x)
+    gw_dev = _get_tensor_dev_ptr(grad_w)
+
+    _conv2d_backward_devptr_ops(
+        lib,
+        x_dev=x_dev,
+        w_dev=w_dev,
+        grad_out_dev=go_dev,
+        grad_x_dev=gx_dev,
+        grad_w_dev=gw_dev,
+        grad_b_dev=grad_b_dev,
+        N=N,
+        C_in=C_in,
+        H=H,
+        W=W,
+        C_out=C_out,
+        H_out=H_out,
+        W_out=W_out,
+        K_h=K_h,
+        K_w=K_w,
+        stride=stride,
+        padding=padding,
+        dtype=x_dt,
+        sync=sync,
+        device_index=device_index,
+    )
 
     return grad_x, grad_w, grad_b
 

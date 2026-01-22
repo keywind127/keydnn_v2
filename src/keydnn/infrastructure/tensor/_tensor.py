@@ -2627,3 +2627,31 @@ class Tensor(
         if len(self.shape) == 0:
             raise ValueError("len() of a scalar tensor is not defined")
         return int(self.shape[0])
+
+    @property
+    def nbytes(self) -> int:
+        """
+        Total bytes required to store this tensor's elements.
+
+        Computed as:
+            numel() * itemsize(dtype)
+
+        Notes
+        -----
+        - This is metadata-only and does not require the underlying storage to
+          be allocated.
+        - For empty tensors (numel == 0), this returns 0.
+        """
+        try:
+            numel = int(self.numel())
+        except Exception:
+            # Fallback if numel() is not available for some reason
+            numel = 0
+            for d in getattr(self, "shape", ()):
+                numel *= int(d) if numel != 0 else int(d)
+
+        if numel <= 0:
+            return 0
+
+        dt = np.dtype(self.dtype)
+        return int(numel) * int(dt.itemsize)
