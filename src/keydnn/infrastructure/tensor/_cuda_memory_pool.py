@@ -217,7 +217,7 @@ class CudaMemoryPool:
         """
         self._max_cached_bytes_per_device = int(max_cached_bytes_per_device)
         self._min_bucket = int(min_bucket)
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._dev: Dict[int, _DevicePool] = {}
 
     def _get_devpool(self, device_index: int) -> _DevicePool:
@@ -399,9 +399,9 @@ class CudaMemoryPool:
             if req > int(alloc):
                 # Do not cache inconsistent pointer; free immediately.
                 # best-effort counter update WITHOUT acquiring the pool lock
-                dp0 = self._dev.get(int(device_index))
-                if dp0 is not None:
-                    dp0.cuda_free_calls += 1
+                with self._lock:
+                    dp = self._get_devpool(device_index)
+                    dp.cuda_free_calls += 1
 
                 cuda_set_device(lib, int(device_index))
                 try:
@@ -421,10 +421,9 @@ class CudaMemoryPool:
                 return
 
         # Cache full => cudaFree
-        # best-effort counter update WITHOUT acquiring the pool lock
-        dp0 = self._dev.get(int(device_index))
-        if dp0 is not None:
-            dp0.cuda_free_calls += 1
+        with self._lock:
+            dp = self._get_devpool(device_index)
+            dp.cuda_free_calls += 1
 
         cuda_set_device(lib, int(device_index))
         try:
