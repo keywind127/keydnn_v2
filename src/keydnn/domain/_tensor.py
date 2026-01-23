@@ -1422,3 +1422,57 @@ class ITensor(Protocol):
         - For empty tensors (numel == 0), this returns 0.
         """
         ...
+
+    def to_(self: "ITensor", device, *, copy: bool = False) -> "ITensor":
+        """
+        Move this tensor to another device *in-place*.
+
+        This method performs an in-place device placement transition. Unlike
+        `to()`, which may return a newly allocated tensor on the target device,
+        `to_()` preserves the identity of `self` (i.e., `id(self)` is unchanged)
+        by migrating the underlying storage and updating device placement fields
+        on the same object.
+
+        Semantics
+        ---------
+        - If the target device matches the current device:
+            - returns `self` (no-op), unless `copy=True`, in which case the tensor's
+            storage is replaced with a cloned copy on the same device.
+        - If the target device differs:
+            - performs the transfer using `to(device, copy=True)` internally,
+            then swaps this tensor's backing storage to the transferred result.
+
+        Supported transfers
+        -------------------
+        - CPU -> CUDA: allocates device memory and performs host-to-device memcpy.
+        - CUDA -> CPU: allocates host buffer and performs device-to-host memcpy.
+        - CUDA -> CUDA (different device indices): currently implemented via an
+        intermediate CPU round-trip for simplicity.
+
+        Parameters
+        ----------
+        device : Device | str
+            Target device. If a string is provided, it is parsed as a `Device`
+            (e.g., "cpu", "cuda:0").
+        copy : bool, optional
+            If True, forces a copy even when the device is unchanged. This is the
+            in-place analogue of `to(..., copy=True)`. Defaults to False.
+
+        Returns
+        -------
+        ITensor
+            This tensor (`self`) after in-place migration.
+
+        Notes
+        -----
+        - This method intentionally *does not preserve autograd context* across
+        device transfers. If this tensor participates in autograd, you should
+        treat `to_()` as a graph break:
+            - `ctx` is cleared.
+            - `requires_grad` is left unchanged (you can still accumulate grads
+            going forward), but any prior graph history is discarded.
+        - If `self.grad` exists and is a Tensor-like object with `.to(...)`,
+        this method will attempt to move it to the same device as well.
+        If you do not want this behavior, remove that block below.
+        """
+        ...

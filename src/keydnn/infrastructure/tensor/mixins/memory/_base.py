@@ -557,6 +557,169 @@ class TensorMixinMemory(ABC):
 
         self._raise_device_not_supported("to")
 
+    def to_(self: "ITensor", device, *, copy: bool = False) -> "ITensor":
+        """
+        Move this tensor to another device *in-place*.
+
+        This method performs an in-place device placement transition. Unlike
+        `to()`, which may return a newly allocated tensor on the target device,
+        `to_()` preserves the identity of `self` (i.e., `id(self)` is unchanged)
+        by migrating the underlying storage and updating device placement fields
+        on the same object.
+
+        Semantics
+        ---------
+        - If the target device matches the current device:
+            - returns `self` (no-op), unless `copy=True`, in which case the tensor's
+            storage is replaced with a cloned copy on the same device.
+        - If the target device differs:
+            - performs the transfer using `to(device, copy=True)` internally,
+            then swaps this tensor's backing storage to the transferred result.
+
+        Supported transfers
+        -------------------
+        - CPU -> CUDA: allocates device memory and performs host-to-device memcpy.
+        - CUDA -> CPU: allocates host buffer and performs device-to-host memcpy.
+        - CUDA -> CUDA (different device indices): currently implemented via an
+        intermediate CPU round-trip for simplicity.
+
+        Parameters
+        ----------
+        device : Device | str
+            Target device. If a string is provided, it is parsed as a `Device`
+            (e.g., "cpu", "cuda:0").
+        copy : bool, optional
+            If True, forces a copy even when the device is unchanged. This is the
+            in-place analogue of `to(..., copy=True)`. Defaults to False.
+
+        Returns
+        -------
+        ITensor
+            This tensor (`self`) after in-place migration.
+
+        Notes
+        -----
+        - This method intentionally *does not preserve autograd context* across
+        device transfers. If this tensor participates in autograd, you should
+        treat `to_()` as a graph break:
+            - `ctx` is cleared.
+            - `requires_grad` is left unchanged (you can still accumulate grads
+            going forward), but any prior graph history is discarded.
+        - If `self.grad` exists and is a Tensor-like object with `.to(...)`,
+        this method will attempt to move it to the same device as well.
+        If you do not want this behavior, remove that block below.
+        """
+        from .....domain.device._device import Device
+
+        if isinstance(device, str):
+            device = Device(device)
+
+        # Same-device path
+        if str(device) == str(self.device):
+            if not copy:
+                return self
+
+            # Force a same-device copy by cloning then swapping storage.
+            out = self.clone()
+            self._swap_storage_from_(out)
+            # Graph break
+            if hasattr(self, "ctx"):
+                self.ctx = None  # type: ignore[attr-defined]
+            if hasattr(self, "_ctx"):
+                self._ctx = None  # type: ignore[attr-defined]
+            return self
+
+        # Cross-device: perform out-of-place transfer, then swap storage into self.
+        out = self.to(device, copy=True)
+        if out is self:
+            return self
+
+        self._swap_storage_from_(out)
+
+        # Graph break: match the transfer behavior described in `to()` docstring.
+        # (Your `to()` explicitly creates ctx=None and requires_grad=False on
+        # new tensors; for in-place we clear ctx but keep requires_grad as-is.)
+        if hasattr(self, "ctx"):
+            self.ctx = None  # type: ignore[attr-defined]
+        if hasattr(self, "_ctx"):
+            self._ctx = None  # type: ignore[attr-defined]
+
+        # Optional: move accumulated grad if present
+        g = getattr(self, "grad", None)
+        if g is not None and hasattr(g, "to"):
+            try:
+                self.grad = g.to(device, copy=True)  # type: ignore[attr-defined]
+            except Exception:
+                # If grad transfer fails, leave it as-is rather than crashing
+                pass
+
+        return self
+
+    def _swap_storage_from_(self, other: "ITensor") -> None:
+        """
+        Internal helper: replace this tensor's storage/device metadata with `other`'s.
+
+        KeyDNN storage model (from your code):
+        - CPU tensors: `_data` is a NumPy ndarray.
+        - CUDA tensors: `_storage` is authoritative; `_data` mirrors dev_ptr as an int.
+
+        This method swaps `_storage` AND `_data` in a device-aware manner so that
+        the tensor remains internally consistent across CPU/CUDA transitions.
+        """
+        import numpy as np
+
+        # --- device ---
+        if hasattr(self, "_device"):
+            object.__setattr__(self, "_device", other.device)
+
+        # --- shape ---
+        if hasattr(self, "_shape"):
+            object.__setattr__(self, "_shape", other.shape)
+
+        # --- dtype ---
+        if hasattr(self, "_dtype") and hasattr(other, "dtype"):
+            object.__setattr__(self, "_dtype", np.dtype(other.dtype))
+
+        # --- storage ---
+        # Always swap storage reference (CPU tensors will usually have _storage=None)
+        if hasattr(self, "_storage"):
+            object.__setattr__(self, "_storage", getattr(other, "_storage", None))
+
+        # --- _data ---
+        # CPU: ndarray; CUDA: int dev ptr mirror
+        if hasattr(self, "_data"):
+            other_data = getattr(other, "_data", None)
+
+            if other.device.is_cpu():
+                # Expect ndarray backing on CPU
+                if other_data is None:
+                    # Allow None for empty/uninitialized CPU tensors if your code permits it
+                    object.__setattr__(self, "_data", None)
+                else:
+                    # Must be ndarray-like; keep as-is (do NOT cast to int)
+                    object.__setattr__(self, "_data", other_data)
+
+            elif other.device.is_cuda():
+                # Expect int mirror of dev ptr; allow 0 for empty tensors
+                if other_data is None:
+                    object.__setattr__(self, "_data", 0)
+                elif isinstance(other_data, (int, np.integer)):
+                    object.__setattr__(self, "_data", int(other_data))
+                else:
+                    # If some CUDA tensors store ptr elsewhere, fall back to property `.data`
+                    object.__setattr__(self, "_data", int(getattr(other, "data")))
+            else:
+                # Unknown device type; be conservative
+                object.__setattr__(self, "_data", other_data)
+
+        # Clear backend caches that may be invalid after a storage swap
+        for name in ("_cuda_lib", "_cuda_handle", "_cpu_buffer", "_cache"):
+            if hasattr(self, name):
+                try:
+                    object.__setattr__(self, name, None)
+                except Exception:
+                    pass
+
     def _cuda_ensure_storage(self: ITensor) -> None:
         """
         Ensure that a CUDA tensor has an attached `_CudaStorage` wrapper.

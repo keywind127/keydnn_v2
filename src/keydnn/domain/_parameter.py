@@ -15,7 +15,7 @@ from ._tensor import ITensor
 
 
 @runtime_checkable
-class IParameter(Protocol):
+class IParameter(ITensor, Protocol):
     """
     Domain-level interface for trainable parameters.
 
