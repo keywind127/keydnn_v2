@@ -1,147 +1,174 @@
 """
-Presentation-layer Batch Normalization factories for KeyDNN.
+Presentation-layer Batch Normalization wrappers for KeyDNN.
 
-This module provides user-facing constructors for Batch Normalization layers
-that wrap the infrastructure-level implementations (`BatchNorm1d`,
-`BatchNorm2d`) and apply sensible defaults for high-level usage.
+This module defines user-facing `BatchNorm1d` and `BatchNorm2d` classes that
+subclass the infrastructure implementations while applying ergonomic defaults.
+
+Why subclasses (instead of factories)?
+--------------------------------------
+Using subclasses preserves *type-like behavior* and avoids accidentally hiding
+classmethod/staticmethod APIs that may exist now or be added later. In practice
+this means:
+
+- `BatchNorm1d.from_config(...)` and other class-level helpers continue to work.
+- The object remains a real class type for `isinstance` checks and tooling.
+- Documentation and introspection remain consistent.
 
 Design intent
 -------------
-- Default the device to CPU when not explicitly specified.
-- Accept flexible device specifications (e.g., Device, string, or None).
-- Preserve strict behavior and implementation details in the infrastructure
-  layer while offering a more ergonomic API to end users.
+- Default `device` to CPU when not explicitly specified.
+- Accept flexible `device` inputs (`Device`, string, or None).
+- Delegate all computation, parameter/buffer registration, autograd behavior,
+  and serialization logic to the infrastructure layer.
 
 Notes
 -----
-- These factory functions return infrastructure-layer module instances.
-- All numerical behavior, parameter registration, and autograd logic live in
-  the infrastructure implementation.
-- The presentation layer does not relax device mismatch checks performed during
-  forward execution.
+- These presentation classes do not override numerical behavior.
+- Device mismatch checks in the infrastructure `forward()` remain strict.
 """
 
 from __future__ import annotations
-from typing import Optional, Any
+
+from typing import Any, Optional
 
 from .....domain.device._device import Device
-from .....infrastructure.layers._batchnorm import BatchNorm1d as _BatchNorm1d
-from .....infrastructure.layers._batchnorm import BatchNorm2d as _BatchNorm2d
+from .....infrastructure.layers._batchnorm import BatchNorm1d as _InfraBatchNorm1d
+from .....infrastructure.layers._batchnorm import BatchNorm2d as _InfraBatchNorm2d
 
 
-def BatchNorm1d(
-    num_features: int,
-    *,
-    device: Optional[Any] = None,
-    eps: float = 1e-5,
-    momentum: float = 0.1,
-    affine: bool = True,
-) -> _BatchNorm1d:
+def _normalize_device(device: Optional[Any]) -> Device:
     """
-    Create a 1D Batch Normalization layer with a CPU default device.
-
-    This is a presentation-layer factory that constructs an infrastructure-level
-    `BatchNorm1d` module while providing a user-friendly default device
-    (`Device("cpu")`) when none is specified.
+    Normalize a user-facing device specification into a `Device`.
 
     Parameters
     ----------
-    num_features : int
-        Number of feature channels C (second dimension of input tensors).
-    device : Device | str | None, optional
-        Target device for parameters and buffers. If None, defaults to CPU.
-        If a string is provided (e.g., "cpu", "cuda:0"), it is parsed into a
-        `Device` instance.
-    eps : float, default=1e-5
-        Small constant added to variance for numerical stability.
-    momentum : float, default=0.1
-        Exponential moving average factor for running statistics.
-    affine : bool, default=True
-        Whether to include learnable affine parameters (gamma and beta).
+    device : Device | str | None
+        - If None, defaults to `Device("cpu")`.
+        - If str, parsed as `Device(device)`.
+        - If already a `Device`, returned as-is.
 
     Returns
     -------
-    BatchNorm1d
-        An infrastructure-layer `BatchNorm1d` module instance.
+    Device
+        Normalized device object.
 
-    Notes
-    -----
-    - This function does not alter or wrap the returned module; it only
-      normalizes constructor arguments.
-    - Device mismatches between inputs and the module are still treated as
-      errors during forward execution.
+    Raises
+    ------
+    TypeError
+        If `device` is not None/str/Device.
     """
     if device is None:
-        device = Device("cpu")
-    elif isinstance(device, str):
-        device = Device(device)
-
-    return _BatchNorm1d(
-        int(num_features),
-        device=device,
-        eps=float(eps),
-        momentum=float(momentum),
-        affine=bool(affine),
-    )
+        return Device("cpu")
+    if isinstance(device, Device):
+        return device
+    if isinstance(device, str):
+        return Device(device)
+    raise TypeError(f"`device` must be Device | str | None, got {type(device)!r}.")
 
 
-def BatchNorm2d(
-    num_features: int,
-    *,
-    device: Optional[Any] = None,
-    eps: float = 1e-5,
-    momentum: float = 0.1,
-    affine: bool = True,
-) -> _BatchNorm2d:
+class BatchNorm1d(_InfraBatchNorm1d):
     """
-    Create a 2D Batch Normalization layer with a CPU default device.
+    Presentation-layer BatchNorm1d with ergonomic defaults.
 
-    This is a presentation-layer factory that constructs an infrastructure-level
-    `BatchNorm2d` module while providing a user-friendly default device
-    (`Device("cpu")`) when none is specified.
+    This class subclasses the infrastructure `BatchNorm1d` implementation and
+    only adjusts constructor ergonomics:
 
-    Parameters
-    ----------
-    num_features : int
-        Number of channels C (second dimension of NCHW input tensors).
-    device : Device | str | None, optional
-        Target device for parameters and buffers. If None, defaults to CPU.
-        If a string is provided (e.g., "cpu", "cuda:0"), it is parsed into a
-        `Device` instance.
-    eps : float, default=1e-5
-        Small constant added to variance for numerical stability.
-    momentum : float, default=0.1
-        Exponential moving average factor for running statistics.
-    affine : bool, default=True
-        Whether to include learnable affine parameters (gamma and beta).
+    - `device` becomes optional and defaults to CPU.
+    - `device` may be provided as `Device` or a string like `"cuda:0"`.
 
-    Returns
-    -------
-    BatchNorm2d
-        An infrastructure-layer `BatchNorm2d` module instance.
-
-    Notes
-    -----
-    - This function exists purely for API ergonomics and does not modify
-      the behavior of the underlying BatchNorm implementation.
-    - All computation, parameter management, and autograd logic remain in
-      the infrastructure layer.
+    All numerical behavior, buffer updates, and autograd logic are inherited
+    unchanged from the infrastructure implementation.
     """
-    if device is None:
-        device = Device("cpu")
-    elif isinstance(device, str):
-        device = Device(device)
 
-    return _BatchNorm2d(
-        int(num_features),
-        device=device,
-        eps=float(eps),
-        momentum=float(momentum),
-        affine=bool(affine),
-    )
+    def __init__(
+        self,
+        num_features: int,
+        *,
+        device: Optional[Any] = None,
+        eps: float = 1e-5,
+        momentum: float = 0.1,
+        affine: bool = True,
+    ) -> None:
+        """
+        Initialize a BatchNorm1d layer.
+
+        Parameters
+        ----------
+        num_features : int
+            Number of feature channels C (the second dimension of input tensors).
+        device : Device | str | None, optional
+            Target device for parameters and buffers. Defaults to CPU if omitted.
+            If a string is provided (e.g., "cpu", "cuda:0"), it is parsed into a
+            `Device` instance.
+        eps : float, default=1e-5
+            Small constant added to variance for numerical stability.
+        momentum : float, default=0.1
+            Exponential moving average factor for running statistics.
+        affine : bool, default=True
+            Whether to include learnable affine parameters (gamma and beta).
+        """
+        dev = _normalize_device(device)
+        super().__init__(
+            int(num_features),
+            device=dev,
+            eps=float(eps),
+            momentum=float(momentum),
+            affine=bool(affine),
+        )
 
 
-# Backward-compatible aliases
+class BatchNorm2d(_InfraBatchNorm2d):
+    """
+    Presentation-layer BatchNorm2d with ergonomic defaults.
+
+    This class subclasses the infrastructure `BatchNorm2d` implementation and
+    only adjusts constructor ergonomics:
+
+    - `device` becomes optional and defaults to CPU.
+    - `device` may be provided as `Device` or a string like `"cuda:0"`.
+
+    All numerical behavior, buffer updates, and autograd logic are inherited
+    unchanged from the infrastructure implementation.
+    """
+
+    def __init__(
+        self,
+        num_features: int,
+        *,
+        device: Optional[Any] = None,
+        eps: float = 1e-5,
+        momentum: float = 0.1,
+        affine: bool = True,
+    ) -> None:
+        """
+        Initialize a BatchNorm2d layer.
+
+        Parameters
+        ----------
+        num_features : int
+            Number of channels C (the second dimension of NCHW input tensors).
+        device : Device | str | None, optional
+            Target device for parameters and buffers. Defaults to CPU if omitted.
+            If a string is provided (e.g., "cpu", "cuda:0"), it is parsed into a
+            `Device` instance.
+        eps : float, default=1e-5
+            Small constant added to variance for numerical stability.
+        momentum : float, default=0.1
+            Exponential moving average factor for running statistics.
+        affine : bool, default=True
+            Whether to include learnable affine parameters (gamma and beta).
+        """
+        dev = _normalize_device(device)
+        super().__init__(
+            int(num_features),
+            device=dev,
+            eps=float(eps),
+            momentum=float(momentum),
+            affine=bool(affine),
+        )
+
+
+# Backward-compatible aliases (optional)
 BatchNorm1D = BatchNorm1d
 BatchNorm2D = BatchNorm2d
 
