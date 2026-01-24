@@ -68,7 +68,7 @@ from keydnn.tensors import Tensor, Device
 x = Tensor.rand((1024, 1024), device=Device("cuda:0"), requires_grad=True)
 y = (x @ x.T).mean()
 y.backward()
-print(repr(y))
+print(y.item())
 
 ```
 
@@ -120,22 +120,15 @@ python -m keydnn test --train_cifar_example --device cuda:0 --epochs 4 --limit-t
 ### Training example (`Model.fit` + callbacks)
 
 ```python
-from __future__ import annotations
-
 import numpy as np
 
 from keydnn.callbacks import EarlyStopping, ModelCheckpoint
 from keydnn.backend import cuda_available
 from keydnn.tensors import Tensor, Device
+from keydnn.utils import numpy_to_tensor
 from keydnn.activations import Sigmoid
 from keydnn.models import Sequential
 from keydnn.layers import Linear
-
-
-def _tensor_from_numpy(arr: np.ndarray, device, requires_grad=False) -> Tensor:
-    t = Tensor(shape=arr.shape, device=device, requires_grad=requires_grad)
-    t.copy_from_numpy(np.asarray(arr, dtype=np.float32))
-    return t
 
 
 def _xor_data_numpy():
@@ -167,30 +160,26 @@ if __name__ == "__main__":
     x_np = np.repeat(x_base, repeats=repeats, axis=0)
     y_np = np.repeat(y_base, repeats=repeats, axis=0)
 
-    x = _tensor_from_numpy(x_np, device=device)
-    y = _tensor_from_numpy(y_np, device=device)
+    x = numpy_to_tensor(x_np, device=device)
+    y = numpy_to_tensor(y_np, device=device)
 
     # ------------------------------------------------------------------
     # Model
     # ------------------------------------------------------------------
     hidden_dim = 8
 
-    if str(device).startswith("cuda"):
-        model = Sequential(
-            Linear(2, hidden_dim, device=device),
-            Sigmoid(),
-            Linear(hidden_dim, 1, device=device),
-            Sigmoid(),
-        )
-    else:
-        model = Sequential(
-            Linear(2, hidden_dim),
-            Sigmoid(),
-            Linear(hidden_dim, 1),
-            Sigmoid(),
-        )
+    model = Sequential(
+        Linear(2, hidden_dim),
+        Sigmoid(),
+        Linear(hidden_dim, 1),
+        Sigmoid(),
+    )
 
-    model.build(x[:1])
+    if str(device).startswith("cuda"):
+        model.to_(device)
+
+    # (N, 2)
+    model.build((1, 2))
 
     # ------------------------------------------------------------------
     # Callbacks
@@ -232,7 +221,7 @@ if __name__ == "__main__":
     # ------------------------------------------------------------------
     # Evaluation
     # ------------------------------------------------------------------
-    x_eval = _tensor_from_numpy(x_base, device=device)
+    x_eval = numpy_to_tensor(x_base, device=device)
     pred: Tensor = model(x_eval)
     pred_np = np.asarray(pred.to_numpy(), dtype=np.float32)
 
