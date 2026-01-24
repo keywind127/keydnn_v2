@@ -241,17 +241,16 @@ class _BaseLinear(Module):
                 f"{type(self).__name__} expects in_features={self.in_features}, got {x_shape[1]}"
             )
 
-        if str(x.device) != str(self.device):
+        layer_dev = self.weight.device
+
+        if str(x.device) != str(layer_dev):
             raise RuntimeError(
-                f"{type(self).__name__}.forward device mismatch: x.device={x.device} vs layer.device={self.device}"
+                f"{type(self).__name__}.forward device mismatch: x.device={x.device} vs weight.device={layer_dev}"
             )
-        if str(self.weight.device) != str(self.device):
+
+        if self.bias is not None and str(self.bias.device) != str(layer_dev):
             raise RuntimeError(
-                f"{type(self).__name__}.forward device mismatch: weight.device={self.weight.device} vs layer.device={self.device}"
-            )
-        if self.bias is not None and str(self.bias.device) != str(self.device):
-            raise RuntimeError(
-                f"{type(self).__name__}.forward device mismatch: bias.device={self.bias.device} vs layer.device={self.device}"
+                f"{type(self).__name__}.forward device mismatch: bias.device={self.bias.device} vs weight.device={layer_dev}"
             )
 
         x_req = bool(x.requires_grad)
@@ -262,7 +261,7 @@ class _BaseLinear(Module):
         # -----------------------
         # CUDA path
         # -----------------------
-        if self.device.is_cuda():
+        if layer_dev.is_cuda():
             if __debug__ and int(getattr(x, "data")) == 0:
                 raise RuntimeError(
                     "Linear CUDA requires allocated x device buffer (x.data != 0)."
@@ -319,9 +318,10 @@ class _BaseLinear(Module):
                 """
                 if not grad_out.device.is_cuda():
                     raise RuntimeError("grad_out must be CUDA for Linear CUDA backward")
-                if str(grad_out.device) != str(self.device):
+                layer_dev = self.weight.device  # authoritative
+                if str(grad_out.device) != str(layer_dev):
                     raise RuntimeError(
-                        f"grad_out must be on same device as output; got {grad_out.device} vs {self.device}"
+                        f"grad_out must be on same device as output; got {grad_out.device} vs {layer_dev}"
                     )
                 if tuple(grad_out.shape) != (int(x_shape[0]), int(self.out_features)):
                     raise ValueError(

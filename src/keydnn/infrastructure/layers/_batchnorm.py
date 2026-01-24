@@ -410,6 +410,37 @@ class BatchNorm1d(Module):
             affine=bool(config["affine"]),
         )
 
+    def _to_extra_(self, device: Device) -> None:
+        """
+        Move non-parameter buffers of this module to `device` in-place.
+
+        This hook is invoked by `Module.to_()` during recursive device migration
+        and is intended for tensors that are **not registered as Parameters** but
+        must remain device-consistent with the module (e.g. running statistics).
+
+        For Batch Normalization layers, this migrates:
+        - `running_mean`
+        - `running_var`
+
+        Both buffers are updated **in-place** to preserve object identity and
+        avoid breaking references held by the module.
+
+        Parameters
+        ----------
+        device : Device
+            Target device to which the buffers should be moved.
+
+        Notes
+        -----
+        - This method must not allocate new tensors.
+        - Buffers are expected to have `requires_grad=False` and no active autograd
+        context.
+        - Modules that do not own non-parameter tensors do not need to implement
+        this hook.
+        """
+        self.running_mean.to_(device)
+        self.running_var.to_(device)
+
 
 @register_module()
 class BatchNorm2d(Module):
@@ -538,7 +569,7 @@ class BatchNorm2d(Module):
             If device mismatches, input rank is not 4D, or channel count does
             not match `num_features`.
         """
-        
+
         if x.device != self.device:
             raise ValueError(
                 f"Device mismatch: x is {x.device}, module is {self.device}"
@@ -731,3 +762,34 @@ class BatchNorm2d(Module):
             momentum=float(config["momentum"]),
             affine=bool(config["affine"]),
         )
+
+    def _to_extra_(self, device: Device) -> None:
+        """
+        Move non-parameter buffers of this module to `device` in-place.
+
+        This hook is invoked by `Module.to_()` during recursive device migration
+        and is intended for tensors that are **not registered as Parameters** but
+        must remain device-consistent with the module (e.g. running statistics).
+
+        For Batch Normalization layers, this migrates:
+        - `running_mean`
+        - `running_var`
+
+        Both buffers are updated **in-place** to preserve object identity and
+        avoid breaking references held by the module.
+
+        Parameters
+        ----------
+        device : Device
+            Target device to which the buffers should be moved.
+
+        Notes
+        -----
+        - This method must not allocate new tensors.
+        - Buffers are expected to have `requires_grad=False` and no active autograd
+        context.
+        - Modules that do not own non-parameter tensors do not need to implement
+        this hook.
+        """
+        self.running_mean.to_(device)
+        self.running_var.to_(device)

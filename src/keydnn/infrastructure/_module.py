@@ -264,6 +264,16 @@ class Module(IModule):
         for _, m in self._modules.items():
             m.to(device)
 
+        # Sync module metadata if the module stores `.device`
+        if hasattr(self, "device"):
+            try:
+                super().__setattr__("device", device)
+            except Exception:
+                # best-effort: some modules may expose read-only device properties
+                pass
+
+        self._to_extra_(device)
+
         return self
 
     def to_(self, device: Device) -> "Module":
@@ -325,4 +335,40 @@ class Module(IModule):
         for _, m in self._modules.items():
             m.to_(device)
 
+        # Sync module metadata if the module stores `.device`
+        if hasattr(self, "device"):
+            try:
+                super().__setattr__("device", device)
+            except Exception:
+                # best-effort: some modules may expose read-only device properties
+                pass
+
+        self._to_extra_(device)
+
         return self
+
+    def _to_extra_(self, device: Device) -> None:
+        """
+        Optional hook for migrating non-parameter tensors during `to_()`.
+
+        This method is called by `Module.to_()` after parameter migration and
+        allows subclasses to move additional tensors that are **not registered
+        as Parameters** (e.g., running statistics, buffers, cached tensors).
+
+        The default implementation is a no-op. Subclasses should override this
+        method only if they own such tensors and must ensure migration is done
+        **in-place** to preserve object identity.
+
+        Parameters
+        ----------
+        device : Device
+            Target device to which extra tensors should be moved.
+
+        Notes
+        -----
+        - This method must not allocate new tensors.
+        - Tensors handled here are expected to have `requires_grad=False`.
+        - Modules without extra non-parameter tensors do not need to override this.
+        """
+        # subclasses override if they own non-parameter tensors that must move
+        return
