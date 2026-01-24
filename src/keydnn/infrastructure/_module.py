@@ -21,6 +21,7 @@ from typing import Dict, Iterator, Optional, Any
 
 from ..domain._module import IModule
 from ..domain._parameter import IParameter
+from ..domain.device._device import Device
 
 
 class Module(IModule):
@@ -57,6 +58,8 @@ class Module(IModule):
         # Use super().__setattr__ to avoid triggering our __setattr__ logic.
         super().__setattr__("_parameters", {})  # type: ignore[assignment]
         super().__setattr__("_modules", {})  # type: ignore[assignment]
+        self._parameters: Dict[str, IParameter]
+        self._modules: Dict[str, "Module"]
 
     def __setattr__(self, name: str, value) -> None:
         """
@@ -229,3 +232,143 @@ class Module(IModule):
             f"{cls.__name__} does not implement from_config(). "
             "This module cannot be deserialized from JSON."
         )
+
+    def to(self, device: Device) -> "Module":
+        """
+        Move this module (recursively) to `device` by moving all registered Parameters.
+
+        Notes
+        -----
+        - Uses `_parameters` / `_modules` registries as the source of truth.
+          This avoids touching properties / methods / non-parameter attributes.
+        - Assumes each Parameter/Tensor implements `.to(Device) -> same-type-like`.
+        - Rebinds attributes so `self.weight`, etc. now point to the moved objects.
+        """
+        if not isinstance(device, Device):
+            raise TypeError(f"`device` must be a Device, got {type(device)!r}.")
+
+        # Move parameters on this module
+        for name, p in list(self._parameters.items()):
+            # Some registries may include None; be defensive
+            if p is None:
+                continue
+
+            moved = p.to(device)
+
+            # Update registry and attribute binding WITHOUT triggering __setattr__ logic
+            # (avoids double-registration / side effects).
+            self._parameters[name] = moved  # type: ignore[assignment]
+            super().__setattr__(name, moved)
+
+        # Recurse into submodules
+        for _, m in self._modules.items():
+            m.to(device)
+
+        # Sync module metadata if the module stores `.device`
+        if hasattr(self, "device"):
+            try:
+                super().__setattr__("device", device)
+            except Exception:
+                # best-effort: some modules may expose read-only device properties
+                pass
+
+        self._to_extra_(device)
+
+        return self
+
+    def to_(self, device: Device) -> "Module":
+        """
+        Move this module and all of its parameters to `device` *in-place*.
+
+        This method performs a recursive, in-place device migration of all
+        parameters registered on this module and its submodules. Unlike
+        `Module.to()`, which may rebind parameters to newly created objects,
+        `to_()` attempts to preserve the identity of each parameter whenever
+        possible.
+
+        Behavior
+        --------
+        - For each registered parameter:
+            - If the parameter implements `to_()`, it is migrated in-place
+            (object identity is preserved).
+            - Otherwise, the parameter is migrated out-of-place via `to(device)`
+            and rebound on the module as a fallback.
+        - All child modules are recursively migrated using the same rules.
+
+        Parameters
+        ----------
+        device : Device
+            Target device to which all parameters should be moved.
+
+        Returns
+        -------
+        Module
+            This module (`self`), after in-place migration.
+
+        Notes
+        -----
+        - This method relies exclusively on the `_parameters` and `_modules`
+        registries and does not inspect arbitrary attributes.
+        - In-place migration is best-effort and depends on parameter support
+        for `to_()`. Parameters that do not implement `to_()` will be replaced
+        by newly created objects.
+        - Autograd context is not preserved across device transfers; parameters
+        should be treated as graph breaks after migration.
+        - Optimizers that hold references to parameters remain valid only if
+        all parameters support true in-place migration.
+        """
+
+        if not isinstance(device, Device):
+            raise TypeError(f"`device` must be a Device, got {type(device)!r}.")
+
+        for name, p in self._parameters.items():
+            if p is None:
+                continue
+            if hasattr(p, "to_"):
+                p.to_(device)  # in-place
+            else:
+                # fallback: out-of-place then rebind
+                moved = p.to(device)
+                self._parameters[name] = moved  # type: ignore[assignment]
+                super().__setattr__(name, moved)
+
+        for _, m in self._modules.items():
+            m.to_(device)
+
+        # Sync module metadata if the module stores `.device`
+        if hasattr(self, "device"):
+            try:
+                super().__setattr__("device", device)
+            except Exception:
+                # best-effort: some modules may expose read-only device properties
+                pass
+
+        self._to_extra_(device)
+
+        return self
+
+    def _to_extra_(self, device: Device) -> None:
+        """
+        Optional hook for migrating non-parameter tensors during `to_()`.
+
+        This method is called by `Module.to_()` after parameter migration and
+        allows subclasses to move additional tensors that are **not registered
+        as Parameters** (e.g., running statistics, buffers, cached tensors).
+
+        The default implementation is a no-op. Subclasses should override this
+        method only if they own such tensors and must ensure migration is done
+        **in-place** to preserve object identity.
+
+        Parameters
+        ----------
+        device : Device
+            Target device to which extra tensors should be moved.
+
+        Notes
+        -----
+        - This method must not allocate new tensors.
+        - Tensors handled here are expected to have `requires_grad=False`.
+        - Modules without extra non-parameter tensors do not need to override this.
+        """
+        # subclasses override if they own non-parameter tensors that must move
+        return

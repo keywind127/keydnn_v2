@@ -24,6 +24,7 @@ Notes
 
 from typing import Any, Iterator, List, Tuple, Optional
 
+from ...domain.device._device import Device
 from ..module._serialization_core import register_module
 from .._module import Module
 from ._models import Model
@@ -314,3 +315,64 @@ class Sequential(Model):
         self._layers = [
             self._modules[k] for k in sorted(self._modules.keys(), key=_key_order)
         ]
+
+    def to(self, device: Device | str) -> "Sequential":
+        """
+        Move this model (recursively) to `device` by moving all registered parameters.
+
+        This is a model-level convenience wrapper around `Module.to()`. It migrates
+        parameters/buffers of all child layers registered in the module tree, so
+        users can transfer the entire model without rebuilding a new `Sequential`.
+
+        Parameters
+        ----------
+        device : Device
+            Target device for this model's parameters.
+
+        Returns
+        -------
+        Sequential
+            This model (`self`) after migration.
+
+        Notes
+        -----
+        - The authoritative traversal uses the `_modules` registry (built by `add()`),
+          ensuring all layers participate in device transfer.
+        - This method may rebind parameter objects (out-of-place transfer) depending
+          on parameter implementation; use `to_()` for best-effort identity preservation.
+        """
+        if isinstance(device, str):
+            device = Device(device)
+
+        super().to(device)  # Module.to()
+        return self
+
+    def to_(self, device: Device | str) -> "Sequential":
+        """
+        Move this model (recursively) to `device` *in-place*.
+
+        This is a model-level convenience wrapper around `Module.to_()`. It attempts
+        to migrate parameters in-place when supported (preserving parameter identity),
+        and falls back to out-of-place transfer + rebinding when necessary.
+
+        Parameters
+        ----------
+        device : Device
+            Target device for this model's parameters.
+
+        Returns
+        -------
+        Sequential
+            This model (`self`) after in-place migration.
+
+        Notes
+        -----
+        - In-place behavior is best-effort: parameters without `to_()` support will
+          be replaced via `to()` and rebound on the module.
+        - This method relies on the `_modules` registry to recurse into child layers.
+        """
+        if isinstance(device, str):
+            device = Device(device)
+
+        super().to_(device)  # Module.to_()
+        return self
