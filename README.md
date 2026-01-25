@@ -46,6 +46,32 @@ pip install -e .
 - Some backends may rely on vendor libraries (e.g., cuBLAS / cuDNN) depending on your build configuration.
 - If CUDA native libraries are unavailable, CUDA tests are skipped and CUDA execution paths will raise or fall back where explicitly documented.
 
+### CUDA setup (Windows)
+
+KeyDNN’s Windows CUDA backend loads a native DLL and relies on the CUDA runtime
+(and optionally cuDNN) being discoverable by the current process.
+
+#### Environment variables
+
+- `CUDA_PATH` (recommended): points to your CUDA install root, e.g.
+  `C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.2`
+- `CUDNN_PATH` (optional): points to your cuDNN root that contains `bin/`, `lib/`, `include/`,
+  e.g. `C:\cudnn`
+
+If you copied cuDNN DLLs into the CUDA install (common manual setup), you typically do **not**
+need `CUDNN_PATH` as long as `cudnn*.dll` exists in `<CUDA_PATH>\bin`.
+
+#### PowerShell examples
+
+```powershell
+# For the current terminal session only:
+$env:CUDA_PATH  = "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.2"
+$env:CUDNN_PATH = "C:\cudnn"   # optional (only needed if cuDNN is not in CUDA\bin)
+```
+
+> Note: If you change environment variables, restart the Python process (and sometimes the terminal)
+> before retrying.
+
 ## Quickstart
 
 ### Minimal Tensor + autograd
