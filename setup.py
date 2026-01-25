@@ -21,13 +21,12 @@ long_description = (ROOT / "README_PYPI.md").read_text(encoding="utf-8")
 
 setuptools.setup(
     name="keydnn",
-    version="2.0.0b5",  # PEP 440 compliant
+    version="2.0.0b6",  # PEP 440 compliant
     author="keywind",
     author_email="watersprayer127@gmail.com",
     description=(
-        "KeyDNN is a lightweight deep learning framework built from scratch "
-        "in Python with a strong focus on clean architecture, explicit interfaces, "
-        "and a practical CPU/CUDA execution stack."
+        "KeyDNN is a lightweight deep learning framework with explicit "
+        "CPU/CUDA execution and clean architectural boundaries."
     ),
     long_description=long_description,
     long_description_content_type="text/markdown",

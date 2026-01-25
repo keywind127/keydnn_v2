@@ -34,4 +34,4 @@ Notes
 from ...domain.utils._control_path import create_path_builder
 
 # Control-path manager that dispatches Tensor methods based on `self.device`
-tensor_control_path_manager = create_path_builder("device")
+tensor_control_path_manager = create_path_builder("device_type")

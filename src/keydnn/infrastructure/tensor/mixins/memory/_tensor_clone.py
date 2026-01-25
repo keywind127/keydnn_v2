@@ -30,7 +30,7 @@ Number = Union[int, float]
 """Scalar types accepted by Tensor arithmetic operators."""
 
 
-@tensor_control_path_manager(TMM, TMM.clone, Device("cuda:0"))
+@tensor_control_path_manager(TMM, TMM.clone, "cuda")
 def tensor_clone_gpu(self: ITensor) -> "ITensor":
     """
     Clone a CUDA tensor by allocating a new device buffer and copying bytes (D2D).
@@ -89,7 +89,7 @@ def tensor_clone_gpu(self: ITensor) -> "ITensor":
     return y
 
 
-@tensor_control_path_manager(TMM, TMM.clone, Device("cpu"))
+@tensor_control_path_manager(TMM, TMM.clone, "cpu")
 def tensor_clone_cpu(self: ITensor) -> "ITensor":
     """
     Clone a CPU tensor by deep-copying its NumPy buffer.

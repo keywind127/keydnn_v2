@@ -98,7 +98,7 @@ def _sum_to_shape_reduce_axes(
     return padded_tgt, reduce_axes, pad
 
 
-@tensor_control_path_manager(TMM, TMM.sum_to_shape, Device("cpu"))
+@tensor_control_path_manager(TMM, TMM.sum_to_shape, "cpu")
 def tensor_sum_to_shape_cpu(self: ITensor, target_shape: tuple[int, ...]) -> "ITensor":
     """
     Sum-reduce a CPU tensor to `target_shape` using NumPy.
@@ -190,7 +190,7 @@ def tensor_sum_to_shape_cpu(self: ITensor, target_shape: tuple[int, ...]) -> "IT
     return out
 
 
-@tensor_control_path_manager(TMM, TMM.sum_to_shape, Device("cuda:0"))
+@tensor_control_path_manager(TMM, TMM.sum_to_shape, "cuda")
 def tensor_sum_to_shape_gpu(self: ITensor, target_shape: tuple[int, ...]) -> "ITensor":
     """
     Sum-reduce a CUDA tensor to `target_shape` using a CUDA-native implementation.

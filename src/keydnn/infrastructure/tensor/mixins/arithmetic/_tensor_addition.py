@@ -30,7 +30,7 @@ Number = Union[int, float]
 """Scalar types accepted by Tensor arithmetic operators."""
 
 
-@tensor_control_path_manager(TMA, TMA.__add__, Device("cuda:0"))
+@tensor_control_path_manager(TMA, TMA.__add__, "cuda")
 def tensor_add_gpu(self: ITensor, other: Union["ITensor", Number]) -> "ITensor":
     """
     CUDA control path for elementwise tensor addition.
@@ -111,7 +111,7 @@ def tensor_add_gpu(self: ITensor, other: Union["ITensor", Number]) -> "ITensor":
     self._raise_device_not_supported("add")
 
 
-@tensor_control_path_manager(TMA, TMA.__add__, Device("cpu"))
+@tensor_control_path_manager(TMA, TMA.__add__, "cpu")
 def tensor_add_cpu(self: ITensor, other: Union["ITensor", Number]) -> "ITensor":
     """
     CPU control path for elementwise tensor addition.

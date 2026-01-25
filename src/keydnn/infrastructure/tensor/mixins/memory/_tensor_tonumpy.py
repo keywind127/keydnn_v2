@@ -38,7 +38,7 @@ Number = Union[int, float]
 """Scalar types accepted by Tensor arithmetic operators."""
 
 
-@tensor_control_path_manager(TMM, TMM.to_numpy, Device("cuda:0"))
+@tensor_control_path_manager(TMM, TMM.to_numpy, "cuda")
 def tensor_tonumpy_gpu(self: ITensor) -> np.ndarray:
     """
     Materialize a CUDA tensor as a NumPy ndarray by copying device memory to host.
@@ -118,7 +118,7 @@ def tensor_tonumpy_gpu(self: ITensor) -> np.ndarray:
     return out
 
 
-@tensor_control_path_manager(TMM, TMM.to_numpy, Device("cpu"))
+@tensor_control_path_manager(TMM, TMM.to_numpy, "cpu")
 def tensor_tonumpy_cpu(self: ITensor) -> np.ndarray:
     """
     Return the underlying NumPy storage for a CPU tensor.

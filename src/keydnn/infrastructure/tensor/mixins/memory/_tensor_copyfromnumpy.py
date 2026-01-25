@@ -43,7 +43,7 @@ Number = Union[int, float]
 """Scalar types accepted by Tensor arithmetic operators."""
 
 
-@tensor_control_path_manager(TMM, TMM.copy_from_numpy, Device("cuda:0"))
+@tensor_control_path_manager(TMM, TMM.copy_from_numpy, "cuda")
 def tensor_copyfromnumpy_gpu(self: ITensor, arr: np.ndarray) -> None:
     """
     Copy data from a NumPy array (or array-like / scalar) into a CUDA tensor.
@@ -119,7 +119,7 @@ def tensor_copyfromnumpy_gpu(self: ITensor, arr: np.ndarray) -> None:
     return
 
 
-@tensor_control_path_manager(TMM, TMM.copy_from_numpy, Device("cpu"))
+@tensor_control_path_manager(TMM, TMM.copy_from_numpy, "cpu")
 def tensor_copyfromnumpy_cpu(self: ITensor, arr: np.ndarray) -> None:
     """
     Copy data from a NumPy array (or array-like / scalar) into a CPU tensor.

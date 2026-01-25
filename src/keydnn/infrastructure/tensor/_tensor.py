@@ -487,6 +487,18 @@ class Tensor(
             )
         return f"Tensor(shape={self._shape}, device={d}, dtype={self.data.dtype})"
 
+    @property
+    def device_type(self) -> str:
+        """
+        Returns a string of the current device type. It may be either `cpu` or `cuda`.
+
+        Returns
+        -------
+        str
+            The device type. Either `cpu` or `cuda`.
+        """
+        return "cpu" if self.device.is_cpu() else "cuda"
+
     def __init__(
         self,
         shape: tuple[int, ...],

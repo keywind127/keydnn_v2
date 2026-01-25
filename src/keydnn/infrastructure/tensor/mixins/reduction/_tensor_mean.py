@@ -17,7 +17,7 @@ from .....domain._tensor import ITensor
 from ._base import TensorMixinReduction as TMR
 
 
-@tensor_control_path_manager(TMR, TMR.mean, Device("cpu"))
+@tensor_control_path_manager(TMR, TMR.mean, "cpu")
 def tensor_mean_cpu(self: ITensor) -> ITensor:
     """
     CPU implementation of Tensor.mean.
@@ -88,7 +88,7 @@ def tensor_mean_cpu(self: ITensor) -> ITensor:
     return out
 
 
-@tensor_control_path_manager(TMR, TMR.mean, Device("cuda:0"))
+@tensor_control_path_manager(TMR, TMR.mean, "cuda")
 def tensor_mean_gpu(self: ITensor) -> ITensor:
     """
     CUDA implementation of Tensor.mean using all-reduce kernels.
