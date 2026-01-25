@@ -72,6 +72,75 @@ print(y.item())
 
 ```
 
+### Reproducibility (random seed + determinism)
+
+KeyDNN provides two separate knobs for reproducibility:
+
+- **Random seeding** controls _random number generation_ used by Python/NumPy (e.g., weight initialization).
+- **Determinism policy** controls _execution nondeterminism_ that can arise from CPU parallelism (e.g., OpenMP/BLAS thread scheduling).
+
+#### (1) Seed Python + NumPy RNGs
+
+Call `seed()` once at the beginning of your script (before model construction / initialization):
+
+```python
+import keydnn as kd
+
+kd.utils.seed(42)
+
+# alternative: from keydnn.presentation.apis.utils.random import seed
+```
+
+This seeds:
+
+- Python `random`
+- NumPy global RNG (`np.random`)
+
+With no multiprocessing dataloader, this is typically sufficient for reproducible
+CPU/NumPy behavior (initializers, shuffling in user code, etc.).
+
+#### (2) Configure CPU determinism (threading)
+
+For CPU-only runs, numerical libraries may use multiple threads (OpenMP/MKL/OpenBLAS),
+which can introduce small run-to-run differences due to floating-point accumulation
+order. To reduce this nondeterminism:
+
+```python
+import keydnn as kd
+
+kd.utils.set_deterministic(True)  # defaults to cpu_threads=1
+# or explicitly:
+kd.utils.set_deterministic(True, cpu_threads=1)
+
+# alternative: from keydnn.presentation.apis.utils.determinism import set_deterministic
+```
+
+If you want KeyDNN to **not** modify thread-related environment variables:
+
+```python
+kd.utils.set_deterministic(True, cpu_threads=None)
+```
+
+> Note: Thread-related environment variables may need to be set **before importing NumPy**
+> (or any BLAS-backed library) to take full effect in the current process.
+
+#### (3) Recommended order
+
+```python
+import keydnn as kd
+
+kd.utils.seed(42)
+kd.utils.set_deterministic(True)
+
+# build / initialize model after reproducibility is configured
+model = ...
+```
+
+#### CUDA determinism
+
+CUDA determinism (cuDNN/cuBLAS) and device-side RNG seeding are handled separately
+and will be exposed once the native backend configuration surface is available.
+
 ### CLI demo (MNIST MLP & CIFAR10 CNN smoke test)
 
 KeyDNN includes a small runnable training example wired through the package CLI:
