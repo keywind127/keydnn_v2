@@ -19,7 +19,7 @@ from .....domain._tensor import ITensor
 from ._base import TensorMixinReduction as TMR
 
 
-@tensor_control_path_manager(TMR, TMR.max, Device("cuda:0"))
+@tensor_control_path_manager(TMR, TMR.max, "cuda")
 def tensor_max_gpu(self: ITensor, axis: int = -1, keepdims: bool = False) -> ITensor:
     """
     CUDA implementation of Tensor.max for 2D tensors.
@@ -169,7 +169,7 @@ def tensor_max_gpu(self: ITensor, axis: int = -1, keepdims: bool = False) -> ITe
     return out
 
 
-@tensor_control_path_manager(TMR, TMR.max, Device("cpu"))
+@tensor_control_path_manager(TMR, TMR.max, "cpu")
 def tensor_max_cpu(self: ITensor, axis: int = -1, keepdims: bool = False) -> ITensor:
     """
     CPU implementation of Tensor.max using NumPy.

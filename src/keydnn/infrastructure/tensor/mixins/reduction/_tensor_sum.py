@@ -20,8 +20,8 @@ from .....domain._tensor import ITensor
 from ._base import TensorMixinReduction as TMR
 
 
-@tensor_control_path_manager(TMR, TMR.sum, Device("cuda:0"))
-def sum(self: ITensor, axis: Optional[int] = None, keepdims: bool = False) -> "ITensor":
+@tensor_control_path_manager(TMR, TMR.sum, "cuda")
+def tensor_sum_cuda(self: ITensor, axis: Optional[int] = None, keepdims: bool = False) -> "ITensor":
     """
     CUDA implementation of Tensor.sum.
 
@@ -329,8 +329,8 @@ def sum(self: ITensor, axis: Optional[int] = None, keepdims: bool = False) -> "I
     return out
 
 
-@tensor_control_path_manager(TMR, TMR.sum, Device("cpu"))
-def sum(self: ITensor, axis: Optional[int] = None, keepdims: bool = False) -> "ITensor":
+@tensor_control_path_manager(TMR, TMR.sum, "cpu")
+def tensor_sum_cpu(self: ITensor, axis: Optional[int] = None, keepdims: bool = False) -> "ITensor":
     """
     CPU implementation of Tensor.sum.
 

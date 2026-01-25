@@ -25,7 +25,7 @@ from .....domain._tensor import ITensor
 from ._base import TensorMixinUnary as TMU
 
 
-@tensor_control_path_manager(TMU, TMU.__neg__, Device("cuda:0"))
+@tensor_control_path_manager(TMU, TMU.__neg__, "cuda")
 def tensor_neg_gpu(self: ITensor) -> "ITensor":
     """
     CUDA control path for elementwise negation (unary minus).
@@ -73,7 +73,7 @@ def tensor_neg_gpu(self: ITensor) -> "ITensor":
     return out
 
 
-@tensor_control_path_manager(TMU, TMU.__neg__, Device("cpu"))
+@tensor_control_path_manager(TMU, TMU.__neg__, "cpu")
 def tensor_neg_cpu(self: ITensor) -> "ITensor":
     """
     CPU control path for elementwise negation (unary minus).

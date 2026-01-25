@@ -37,7 +37,7 @@ Number = Union[int, float]
 """Scalar types accepted by Tensor comparison operators."""
 
 
-@tensor_control_path_manager(TMA, TMA.__ne__, Device("cuda:0"))
+@tensor_control_path_manager(TMA, TMA.__ne__, "cuda")
 def tensor_ne_gpu(self: ITensor, other: Union["ITensor", Number]) -> "ITensor":
     """
     CUDA control path for elementwise not-equal comparison (Tensor.__ne__).
@@ -120,7 +120,7 @@ def tensor_ne_gpu(self: ITensor, other: Union["ITensor", Number]) -> "ITensor":
     self._raise_device_not_supported("ne")
 
 
-@tensor_control_path_manager(TMA, TMA.__ne__, Device("cpu"))
+@tensor_control_path_manager(TMA, TMA.__ne__, "cpu")
 def tensor_ne_cpu(self: ITensor, other: Union["ITensor", Number]) -> "ITensor":
     """
     CPU control path for elementwise not-equal comparison (Tensor.__ne__).

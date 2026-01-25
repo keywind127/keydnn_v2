@@ -38,7 +38,7 @@ Number = Union[int, float]
 """Scalar types accepted by Tensor arithmetic operators."""
 
 
-@tensor_control_path_manager(TMM, TMM.transpose, Device("cuda:0"))
+@tensor_control_path_manager(TMM, TMM.transpose, "cuda")
 def tensor_transpose_gpu(self: ITensor) -> "ITensor":
     """
     Transpose a 2D CUDA tensor using a native CUDA kernel.
@@ -185,7 +185,7 @@ def tensor_transpose_gpu(self: ITensor) -> "ITensor":
     return out
 
 
-@tensor_control_path_manager(TMM, TMM.transpose, Device("cpu"))
+@tensor_control_path_manager(TMM, TMM.transpose, "cpu")
 def tensor_transpose_cpu(self: ITensor) -> "ITensor":
     """
     Transpose a 2D CPU tensor using NumPy and materialize the result.

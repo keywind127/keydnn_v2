@@ -30,7 +30,7 @@ Number = Union[int, float]
 """Scalar types accepted by Tensor arithmetic operators."""
 
 
-@tensor_control_path_manager(TMM, TMM.fill, Device("cuda:0"))
+@tensor_control_path_manager(TMM, TMM.fill, "cuda")
 def tensor_fill_gpu(self: ITensor, value: float) -> None:
     """
     Fill a CUDA tensor in-place with a scalar value.
@@ -60,7 +60,7 @@ def tensor_fill_gpu(self: ITensor, value: float) -> None:
     _fill_cuda_(self, float(value), device=int(self.device.index or 0), sync=True)
 
 
-@tensor_control_path_manager(TMM, TMM.fill, Device("cpu"))
+@tensor_control_path_manager(TMM, TMM.fill, "cpu")
 def tensor_fill_cpu(self: ITensor, value: float) -> None:
     """
     Fill a CPU tensor in-place with a scalar value.

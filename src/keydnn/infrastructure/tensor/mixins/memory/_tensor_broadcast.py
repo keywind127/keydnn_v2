@@ -59,7 +59,7 @@ Number = Union[int, float]
 """Scalar types accepted by Tensor arithmetic operators."""
 
 
-@tensor_control_path_manager(TMM, TMM.broadcast_to, Device("cuda:0"))
+@tensor_control_path_manager(TMM, TMM.broadcast_to, "cuda")
 def tensor_broadcast_gpu(self: ITensor, shape: tuple[int, ...]) -> "ITensor":
     """
     Broadcast a tensor to `shape` on CUDA by materializing an expanded copy on device.
@@ -150,7 +150,7 @@ def tensor_broadcast_gpu(self: ITensor, shape: tuple[int, ...]) -> "ITensor":
     return out
 
 
-@tensor_control_path_manager(TMM, TMM.broadcast_to, Device("cpu"))
+@tensor_control_path_manager(TMM, TMM.broadcast_to, "cpu")
 def tensor_broadcast_cpu(self: ITensor, shape: tuple[int, ...]) -> "ITensor":
     """
     Broadcast a tensor to `shape` on CPU by materializing a NumPy-broadcasted copy.

@@ -28,7 +28,7 @@ Number = Union[int, float]
 """Scalar types accepted by Tensor arithmetic operators."""
 
 
-@tensor_control_path_manager(TMA, TMA.__truediv__, Device("cuda:0"))
+@tensor_control_path_manager(TMA, TMA.__truediv__, "cuda")
 def tensor_truediv_gpu(self: ITensor, other: Union["ITensor", Number]) -> "ITensor":
     """
     CUDA control path for elementwise true division.
@@ -119,7 +119,7 @@ def tensor_truediv_gpu(self: ITensor, other: Union["ITensor", Number]) -> "ITens
     self._raise_device_not_supported("truediv")
 
 
-@tensor_control_path_manager(TMA, TMA.__truediv__, Device("cpu"))
+@tensor_control_path_manager(TMA, TMA.__truediv__, "cpu")
 def tensor_truediv_cpu(self: ITensor, other: Union["ITensor", Number]) -> "ITensor":
     """
     CPU control path for elementwise true division.

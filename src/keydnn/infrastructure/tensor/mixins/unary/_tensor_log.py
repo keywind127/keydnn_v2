@@ -29,7 +29,7 @@ from .....domain._tensor import ITensor
 from ._base import TensorMixinUnary as TMU
 
 
-@tensor_control_path_manager(TMU, TMU.log, Device("cuda:0"))
+@tensor_control_path_manager(TMU, TMU.log, "cuda")
 def tensor_log_gpu(self: ITensor) -> "ITensor":
     """
     CUDA control path for elementwise natural logarithm (Tensor.log).
@@ -129,7 +129,7 @@ def tensor_log_gpu(self: ITensor) -> "ITensor":
     return out
 
 
-@tensor_control_path_manager(TMU, TMU.log, Device("cpu"))
+@tensor_control_path_manager(TMU, TMU.log, "cpu")
 def tensor_log_cpu(self: ITensor) -> "ITensor":
     """
     CPU control path for elementwise natural logarithm (Tensor.log).

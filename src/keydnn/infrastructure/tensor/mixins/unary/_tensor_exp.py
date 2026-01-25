@@ -26,7 +26,7 @@ from .....domain._tensor import ITensor
 from ._base import TensorMixinUnary as TMU
 
 
-@tensor_control_path_manager(TMU, TMU.exp, Device("cuda:0"))
+@tensor_control_path_manager(TMU, TMU.exp, "cuda")
 def tensor_exp_gpu(self: ITensor) -> "ITensor":
     """
     CUDA control path for elementwise exponential (Tensor.exp).
@@ -80,7 +80,7 @@ def tensor_exp_gpu(self: ITensor) -> "ITensor":
     return out
 
 
-@tensor_control_path_manager(TMU, TMU.exp, Device("cpu"))
+@tensor_control_path_manager(TMU, TMU.exp, "cpu")
 def tensor_exp_cpu(self: ITensor) -> "ITensor":
     """
     CPU control path for elementwise exponential (Tensor.exp).

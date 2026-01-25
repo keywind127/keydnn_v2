@@ -1476,3 +1476,15 @@ class ITensor(Protocol):
         If you do not want this behavior, remove that block below.
         """
         ...
+
+    @property
+    def device_type(self: ITensor) -> str:
+        """
+        Returns a string of the current device type. It may be either `cpu` or `cuda`.
+
+        Returns
+        -------
+        str
+            The device type. Either `cpu` or `cuda`.
+        """
+        ...

@@ -30,7 +30,7 @@ from .....domain._tensor import ITensor
 from ._base import TensorMixinUnary as TMU
 
 
-@tensor_control_path_manager(TMU, TMU.sqrt, Device("cuda:0"))
+@tensor_control_path_manager(TMU, TMU.sqrt, "cuda")
 def tensor_sqrt_gpu(self: ITensor) -> "ITensor":
     """
     CUDA control path for elementwise square root (Tensor.sqrt).
@@ -130,7 +130,7 @@ def tensor_sqrt_gpu(self: ITensor) -> "ITensor":
     return out
 
 
-@tensor_control_path_manager(TMU, TMU.sqrt, Device("cpu"))
+@tensor_control_path_manager(TMU, TMU.sqrt, "cpu")
 def tensor_sqrt_cpu(self: ITensor) -> "ITensor":
     """
     CPU control path for elementwise square root (Tensor.sqrt).
