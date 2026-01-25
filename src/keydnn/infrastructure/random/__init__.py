@@ -1,1 +1,1 @@
-from .seed import *
+from ._seed import *

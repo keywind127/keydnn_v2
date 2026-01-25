@@ -53,6 +53,9 @@ def seed(seed: int) -> None:
       with respect to subsequent random number generation.
     - This function should typically be called once at the start of a script,
       test, or experiment to ensure reproducibility.
+    - This function does not control Python hash randomization
+      (PYTHONHASHSEED), which must be set before process startup
+      if required by the user.
     """
     if not isinstance(seed, int):
         raise TypeError(f"seed must be int, got {type(seed).__name__}")
