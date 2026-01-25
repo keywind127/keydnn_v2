@@ -19,6 +19,9 @@ It is designed to be both:
 
 > **Status:** Work in progress (pre-stable). APIs may change as the framework evolves.
 
+> **Documentation:** A comprehensive, module-level API reference is planned for future releases.  
+> Current documentation focuses on examples, architecture, and tested usage patterns.
+
 ---
 
 ## Project Goals
@@ -31,6 +34,9 @@ It is designed to be both:
 ---
 
 ## Installation
+
+> **Platform support (current):** Windows is the primary supported platform (CPU + CUDA).  
+> Linux/macOS builds are available for **CPU-only** (native CPU kernels), but are currently **experimental** and not yet officially supported/tested.
 
 ### From source (recommended for development)
 
@@ -190,10 +196,10 @@ python -m keydnn test --train_mnist_example --device cuda:0 --epochs 4 --limit-t
 
 ```bash
 # CPU (always available)
-python -m keydnn test --train_cifar_example --device cpu --epochs 4 --limit-test 1000
+python -m keydnn test --train_cifar_example --device cpu --epochs 4 --limit-train 50000 --limit-test 1000
 
 # CUDA (if CUDA backend + native libraries are available)
-python -m keydnn test --train_cifar_example --device cuda:0 --epochs 4 --limit-test 1000
+python -m keydnn test --train_cifar_example --device cuda:0 --epochs 4 --limit-train 50000 --limit-test 1000
 
 # Device: cuda:0
 # Train samples: 50000 | Test samples: 1000
@@ -205,12 +211,20 @@ python -m keydnn test --train_cifar_example --device cuda:0 --epochs 4 --limit-t
 # Epoch 04/4 | train_loss=0.0771 train_acc=0.4059 | test_acc=0.4090 | 10.45s
 ```
 
+> Tip: For CUDA runs, keep `--limit-test` modest or evaluate in batches (future releases aim to reduce remaining large-batch limitations).
+
 #### Notes:
 
 - The first run will download and cache MNIST under `~/.cache/keydnn/mnist/raw` (configurable via `--root`).
 - CUDA execution requires a compatible NVIDIA GPU and a working CUDA runtime (and may be skipped/raise if unavailable).
 
-###
+### Inference batching on CUDA (important)
+
+When running on CUDA, KeyDNN currently expects inference/evaluation to be performed in **mini-batches** (e.g., `batch_size=128`)
+rather than passing an entire dataset tensor (e.g., `N=10000`) through the model at once.
+
+This is both a standard deep-learning practice (memory/performance) and avoids current CUDA kernel launch limits in some ops
+(e.g., padding used by Pool2D). If you hit a runtime error during evaluation with a large `N`, rerun inference in batches.
 
 ### Training example (`Model.fit` + callbacks)
 
@@ -342,6 +356,7 @@ if __name__ == "__main__":
 | Indexing / slicing (`__getitem__`)            |  ✅ |   ⚠️ | CUDA path may use a correctness-first CPU fallback        |
 | RNN modules (RNN/LSTM/GRU)                    |  ✅ |   ⚠️ | implemented via Tensor ops; no fused CUDA RNN kernels yet |
 | Normalization (BatchNorm1d/2d, LayerNorm)     |  ✅ |   ⚠️ | LayerNorm is CPU; CUDA coverage varies by module          |
+| Concatenation (`Tensor.concat`)               |  ✅ |   ⚠️ | CUDA path may use a correctness-first CPU fallback        |
 | Training loop (`Model.fit`, `train_on_batch`) |  ✅ |   ✅ | Keras-like training APIs; works with CPU/CUDA tensors     |
 | Callbacks (EarlyStopping, ModelCheckpoint)    |  ✅ |   ✅ | hook wiring via CallbackList; JSON checkpoint integration |
 
@@ -456,6 +471,7 @@ portability or debuggability.
 ## CUDA Backend (Implemented)
 
 KeyDNN includes a CUDA execution backend with device-resident tensor storage and tested CUDA kernels.
+> Note: The CUDA backend is currently supported on **Windows**. Linux CUDA support will be added once cross-platform CUDA builds are finalized.
 
 ### Design principles
 
@@ -905,7 +921,7 @@ The test suite is split into two categories:
 
 ### Later
 
-- Cross-platform build support improvements (Linux-first for CUDA; Windows/macOS support as available)
+- Cross-platform build support improvements (formalize Linux/macOS support with CI and packaging; CUDA support beyond Windows as available)
 - Additional CUDA kernel coverage and optimizations (fusion opportunities, reduced allocations, async-friendly paths)
 - Import utilities (scoped): partial model/weight conversion from PyTorch/Keras (explicit supported subset)
 - Fused/faster RNN kernels (optional): device-optimized sequence ops beyond Tensor-op composition
