@@ -46,6 +46,32 @@ pip install -e .
 - Some backends may rely on vendor libraries (e.g., cuBLAS / cuDNN) depending on your build configuration.
 - If CUDA native libraries are unavailable, CUDA tests are skipped and CUDA execution paths will raise or fall back where explicitly documented.
 
+### CUDA setup (Windows)
+
+KeyDNN’s Windows CUDA backend loads a native DLL and relies on the CUDA runtime
+(and optionally cuDNN) being discoverable by the current process.
+
+#### Environment variables
+
+- `CUDA_PATH` (recommended): points to your CUDA install root, e.g.
+  `C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.2`
+- `CUDNN_PATH` (optional): points to your cuDNN root that contains `bin/`, `lib/`, `include/`,
+  e.g. `C:\cudnn`
+
+If you copied cuDNN DLLs into the CUDA install (common manual setup), you typically do **not**
+need `CUDNN_PATH` as long as `cudnn*.dll` exists in `<CUDA_PATH>\bin`.
+
+#### PowerShell examples
+
+```powershell
+# For the current terminal session only:
+$env:CUDA_PATH  = "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.2"
+$env:CUDNN_PATH = "C:\cudnn"   # optional (only needed if cuDNN is not in CUDA\bin)
+```
+
+> Note: If you change environment variables, restart the Python process (and sometimes the terminal)
+> before retrying.
+
 ## Quickstart
 
 ### Minimal Tensor + autograd
@@ -71,6 +97,75 @@ y.backward()
 print(y.item())
 
 ```
+
+### Reproducibility (random seed + determinism)
+
+KeyDNN provides two separate knobs for reproducibility:
+
+- **Random seeding** controls _random number generation_ used by Python/NumPy (e.g., weight initialization).
+- **Determinism policy** controls _execution nondeterminism_ that can arise from CPU parallelism (e.g., OpenMP/BLAS thread scheduling).
+
+#### (1) Seed Python + NumPy RNGs
+
+Call `seed()` once at the beginning of your script (before model construction / initialization):
+
+```python
+import keydnn as kd
+
+kd.utils.seed(42)
+
+# alternative: from keydnn.presentation.apis.utils.random import seed
+```
+
+This seeds:
+
+- Python `random`
+- NumPy global RNG (`np.random`)
+
+With no multiprocessing dataloader, this is typically sufficient for reproducible
+CPU/NumPy behavior (initializers, shuffling in user code, etc.).
+
+#### (2) Configure CPU determinism (threading)
+
+For CPU-only runs, numerical libraries may use multiple threads (OpenMP/MKL/OpenBLAS),
+which can introduce small run-to-run differences due to floating-point accumulation
+order. To reduce this nondeterminism:
+
+```python
+import keydnn as kd
+
+kd.utils.set_deterministic(True)  # defaults to cpu_threads=1
+# or explicitly:
+kd.utils.set_deterministic(True, cpu_threads=1)
+
+# alternative: from keydnn.presentation.apis.utils.determinism import set_deterministic
+```
+
+If you want KeyDNN to **not** modify thread-related environment variables:
+
+```python
+kd.utils.set_deterministic(True, cpu_threads=None)
+```
+
+> Note: Thread-related environment variables may need to be set **before importing NumPy**
+> (or any BLAS-backed library) to take full effect in the current process.
+
+#### (3) Recommended order
+
+```python
+import keydnn as kd
+
+kd.utils.seed(42)
+kd.utils.set_deterministic(True)
+
+# build / initialize model after reproducibility is configured
+model = ...
+```
+
+#### CUDA determinism
+
+CUDA determinism (cuDNN/cuBLAS) and device-side RNG seeding are handled separately
+and will be exposed once the native backend configuration surface is available.
 
 ### CLI demo (MNIST MLP & CIFAR10 CNN smoke test)
 
