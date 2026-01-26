@@ -23,8 +23,6 @@ def _unwrap_param_tensor(p):
     Supports:
       - Parameter is Tensor-like (has to_numpy/copy_from_numpy)
       - Parameter wraps Tensor in `.data` or `.tensor`
-
-    Adjust this helper if your Parameter uses a different attribute name.
     """
     if hasattr(p, "to_numpy") and hasattr(p, "copy_from_numpy"):
         return p

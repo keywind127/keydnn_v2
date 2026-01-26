@@ -163,7 +163,7 @@ def matmul2d_forward(
         raise
 
 
-# Convenience aliases (mirrors the style of your matmul_cuda module)
+# Convenience aliases
 matmul2d = matmul2d_forward
 gemm = matmul2d_forward
 

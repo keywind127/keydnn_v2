@@ -34,7 +34,7 @@ def main() -> None:
     x_np = np.array([[0, 0], [0, 1], [1, 0], [1, 1]], dtype=np.float32)
     y_np = np.array([[0], [1], [1], [0]], dtype=np.float32)
 
-    # model factory (same init seed => same weights if your init uses numpy RNG)
+    # model factory (same init seed => same weights if init uses numpy RNG)
     def make_model(device: Device):
         return Sequential(
             Linear(2, 8, device=device),

@@ -515,7 +515,7 @@ class RNN(Module):
         - The deserializer will attach child modules into `_modules` afterward.
           Since `RNN.__init__` creates `self.cell` already, the serializer should
           remain consistent: either rely on this default cell or overwrite it
-          via `_modules["cell"]` depending on your core deserialization design.
+          via `_modules["cell"]` depending on core deserialization design.
         """
         return cls(
             input_size=int(cfg["input_size"]),

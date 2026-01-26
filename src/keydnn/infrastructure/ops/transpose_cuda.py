@@ -167,7 +167,6 @@ def transpose2d_cuda(*args: Any, **kwargs: Any) -> None:
         if st != 0:
             raise RuntimeError(f"keydnn_cuda_memcpy_h2d failed with status={st}")
 
-    # Optional sync: keep API compatible, but not required for correctness in your tests.
     if _sync and hasattr(lib, "keydnn_cuda_synchronize"):
         fn = lib.keydnn_cuda_synchronize
         fn.argtypes = []

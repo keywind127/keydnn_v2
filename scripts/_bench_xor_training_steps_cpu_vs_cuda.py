@@ -55,7 +55,6 @@ SRC_DIR = os.path.join(ROOT_DIR, "src")
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
-# tracer utils (your local helper module)
 from _funct_call_debug_utils import trace_calls, timed_trace
 
 
@@ -358,7 +357,6 @@ def main() -> None:
             ):
                 yield
         else:
-            # trace_calls: your existing counts-only tracer
             with trace_calls(
                 only_modules=list(trace_only_modules),
                 limit=int(args.trace_limit),

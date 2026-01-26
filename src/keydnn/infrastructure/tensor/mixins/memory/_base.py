@@ -255,7 +255,6 @@ class TensorMixinMemory(ABC):
                 ctx=None,
                 dtype=np.float32,
             )
-            # Uses your already refactored fill(): ensures alloc + CUDA kernel fill
             t.fill(float(fill_value))
             return t
 
@@ -637,7 +636,6 @@ class TensorMixinMemory(ABC):
         self._swap_storage_from_(out)
 
         # Graph break: match the transfer behavior described in `to()` docstring.
-        # (Your `to()` explicitly creates ctx=None and requires_grad=False on
         # new tensors; for in-place we clear ctx but keep requires_grad as-is.)
         if hasattr(self, "ctx"):
             self.ctx = None  # type: ignore[attr-defined]
@@ -659,7 +657,7 @@ class TensorMixinMemory(ABC):
         """
         Internal helper: replace this tensor's storage/device metadata with `other`'s.
 
-        KeyDNN storage model (from your code):
+        KeyDNN storage model:
         - CPU tensors: `_data` is a NumPy ndarray.
         - CUDA tensors: `_storage` is authoritative; `_data` mirrors dev_ptr as an int.
 
@@ -693,7 +691,7 @@ class TensorMixinMemory(ABC):
             if other.device.is_cpu():
                 # Expect ndarray backing on CPU
                 if other_data is None:
-                    # Allow None for empty/uninitialized CPU tensors if your code permits it
+                    # Allow None for empty/uninitialized CPU tensors
                     object.__setattr__(self, "_data", None)
                 else:
                     # Must be ndarray-like; keep as-is (do NOT cast to int)
@@ -1109,7 +1107,7 @@ class TensorMixinMemory(ABC):
             - Shape must match.
             - dtype must match (no implicit casting).
             - Cross-GPU copies (cuda:0 -> cuda:1) are not handled here; they may work
-            only if your memcpy wrapper supports peer copies. By default this
+            only if memcpy wrapper supports peer copies. By default this
             method raises for different CUDA device indices.
 
         Raises
@@ -1244,7 +1242,7 @@ class TensorMixinMemory(ABC):
                 )
 
             # Ensure destination host buffer exists (it should on CPU tensors).
-            # If your Tensor can be CPU with _data None, allocate here:
+            # If Tensor can be CPU with _data None, allocate here:
             if getattr(self, "_data", None) is None:
                 self.data[...] = np.empty(self.shape, dtype=dt_self)
 

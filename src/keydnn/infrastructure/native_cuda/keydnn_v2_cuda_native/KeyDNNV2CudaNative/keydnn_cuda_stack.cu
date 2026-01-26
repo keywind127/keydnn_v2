@@ -65,7 +65,6 @@ static inline void keydnn_debug_append(const char* fmt, ...) {
     va_end(args);
 }
 
-// For compatibility with your existing call sites: "set" == clear + append
 static inline void keydnn_debug_set(const char* fmt, ...) {
     if (!g_keydnn_cuda_debug_enabled) return;
 
@@ -238,7 +237,7 @@ static inline int keydnn_debug_require_device_or_managed(const void* p, const ch
 }*/
 
 // ----------------------------
-// Stack forward kernel (gather) ¡X u64 pointer array
+// Stack forward kernel (gather) ï¿½X u64 pointer array
 // ----------------------------
 template <typename T>
 __global__ void stack_fwd_u64_kernel(
@@ -267,7 +266,7 @@ __global__ void stack_fwd_u64_kernel(
 }
 
 // ----------------------------
-// Stack backward kernel (scatter) ¡X u64 pointer array
+// Stack backward kernel (scatter) ï¿½X u64 pointer array
 // ----------------------------
 template <typename T>
 __global__ void stack_bwd_u64_kernel(

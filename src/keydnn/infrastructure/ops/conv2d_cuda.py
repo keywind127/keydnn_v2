@@ -590,7 +590,7 @@ def conv2d_backward_cuda(
     H_pad = H + 2 * p_h
     W_pad = W + 2 * p_w
 
-    # Bias grad (CPU path) matches your CPU kernel semantics
+    # Bias grad (CPU path) matches CPU kernel semantics
     grad_b = None
     if b_arr is not None:
         grad_b = grad_out.sum(axis=(0, 2, 3)).astype(dtype, copy=False)
@@ -1113,7 +1113,7 @@ class _Conv2dCudaAliases:
     conv2d_backward_devptr = conv2d_backward_cuda_devptr
 
 
-# Aliases (similar to your matmul wrapper)
+# Aliases
 conv2d_cuda = conv2d_forward_cuda
 conv2d_forward = conv2d_forward_cuda
 conv2d_backward = conv2d_backward_cuda

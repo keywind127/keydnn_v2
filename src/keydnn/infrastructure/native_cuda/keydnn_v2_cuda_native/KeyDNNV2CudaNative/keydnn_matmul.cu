@@ -15,8 +15,7 @@ static int _ensure_cublas_handle() {
 }
 
 static int _cublas_to_int(cublasStatus_t st) {
-    // Keep it simple: non-zero error code for your C ABI.
-    // You can map more precisely if you want.
+    // Keep it simple: non-zero error code for C ABI.
     return (st == CUBLAS_STATUS_SUCCESS) ? 0 : 2;
 }
 

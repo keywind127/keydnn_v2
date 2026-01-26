@@ -150,7 +150,7 @@ def _make_tensor_from_numpy_cuda(
     requires_grad: bool = False,
 ) -> Tensor:
     """
-    Create a CUDA Tensor and copy host -> device using Tensor APIs already present in your repo.
+    Create a CUDA Tensor and copy host
     Prefer Tensor.from_numpy(..., device=cuda). Fallback: allocate + cudaMemcpyHtoD.
     """
     x_c = np.ascontiguousarray(x)
@@ -227,7 +227,7 @@ class Case:
 def _make_case_arrays(
     rng: np.random.Generator, c: Case, dtype: np.dtype
 ) -> tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]:
-    # NOTE: transpose-conv weight is IOHW in your project:
+    # NOTE: transpose-conv weight is IOHW
     # w: (C_in, C_out, Kh, Kw)
     x = rng.standard_normal((c.N, c.Cin, c.H, c.W)).astype(dtype, copy=False)
     w = rng.standard_normal((c.Cin, c.Cout, c.Kh, c.Kw)).astype(dtype, copy=False)

@@ -16,7 +16,7 @@ Timing policy
 Notes
 -----
 - Dropout is stochastic; for sanity checks we seed NumPy before each forward
-  so CPU and CUDA should produce identical masks if your RNG is shared.
+  so CPU and CUDA should produce identical masks if RNG is shared.
   If CUDA uses a different RNG source, sanity may fail; you can disable it.
 
 Usage
@@ -54,7 +54,6 @@ from keydnn.infrastructure.layers._dropout import Dropout
 from keydnn.infrastructure.tensor._tensor import Tensor
 
 
-# CUDA availability (same pattern as your tests)
 def _cuda_available() -> bool:
     try:
         from keydnn.infrastructure.native_cuda.python.maxpool2d_ctypes import (
@@ -110,10 +109,9 @@ def _get_ctx(t):
 
 
 # -------------------------
-# CUDA memcpy helpers (match your clone test style)
+# CUDA memcpy helpers
 # -------------------------
 def _bind_memcpy(lib, mc):
-    # pick whichever names exist in your tree
     def htod(dst_dev: int, src_host: np.ndarray, nbytes: int, sync: bool) -> None:
         if hasattr(mc, "memcpy_htod"):
             mc.memcpy_htod(
@@ -225,7 +223,6 @@ def bench_case(
         np.random.seed(seed)  # try to match CPU mask generation
         y = d_cuda(x_cuda)
         if sync_cuda:
-            # if your Tensor exposes a sync, use it; else call cuda_synchronize via a known wrapper
             try:
                 from keydnn.infrastructure.native_cuda.python.maxpool2d_ctypes import cuda_synchronize  # type: ignore
 

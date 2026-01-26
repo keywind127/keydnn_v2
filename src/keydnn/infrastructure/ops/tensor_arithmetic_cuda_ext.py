@@ -87,7 +87,6 @@ from ..native_cuda.python.ops.tensor_arithmetic_ctypes import (
     div_scalar_inplace_cuda as _div_scalar_inplace_cuda,
 )
 
-# Reuse your existing DLL loader + CUDA utils (malloc/free/set_device).
 from ..native_cuda.python.maxpool2d_ctypes import (
     cuda_set_device,
     cuda_malloc,

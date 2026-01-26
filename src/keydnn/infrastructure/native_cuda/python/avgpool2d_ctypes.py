@@ -21,7 +21,7 @@ AvgPool2D forward/backward via `ctypes`. It is backend-specific and assumes:
 Platform notes
 --------------
 This wrapper currently targets Windows and loads the CUDA DLL from the build
-output path used by your Visual Studio project.
+output path used by the Visual Studio project.
 
 Design notes
 ------------

@@ -274,7 +274,6 @@ class TensorMixinArithmetic(ABC):
 
                 device_index = int(getattr(self.device, "index", 0) or 0)
 
-                # Uses your new in-place wrapper at Tensor-boundary level
                 from ....ops.mul_cuda_ext import (
                     mul_scalar_inplace as _mul_scalar_inplace,
                 )

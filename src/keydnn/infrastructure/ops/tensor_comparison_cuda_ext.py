@@ -75,7 +75,6 @@ from ..native_cuda.python.ops.tensor_comparison_ctypes import (
     ne_scalar_cuda as _ne_scalar_cuda,
 )
 
-# Reuse your existing DLL loader + CUDA utils (malloc/free/set_device).
 from ..native_cuda.python.maxpool2d_ctypes import (
     cuda_set_device,
     cuda_malloc,

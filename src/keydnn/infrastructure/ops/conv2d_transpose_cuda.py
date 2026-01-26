@@ -677,7 +677,7 @@ def conv2d_transpose_backward_cuda_devptr(*args: Any, **kwargs: Any) -> None:
     -----
     - Bias grad is a reduction over grad_out across (N, H_out, W_out).
       If `grad_b_dev` is provided, this function attempts to compute it on GPU
-      via `sum_to_shape_cuda`. If your build does not expose `sum_to_shape_cuda`,
+      via `sum_to_shape_cuda`. If build does not expose `sum_to_shape_cuda`,
       this will raise.
     - For safety/consistency, if `zeros_cuda` exists we zero `grad_x_dev` and
       `grad_w_dev` before launching the native kernel (covers accumulation-style kernels).

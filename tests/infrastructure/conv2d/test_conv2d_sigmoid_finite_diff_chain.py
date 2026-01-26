@@ -18,7 +18,7 @@ def forward_loss_np(
 ) -> float:
     """
     Compute L = sum(sigmoid(conv2d(x,w,b))) using the KeyDNN modules (but with numpy inputs).
-    This keeps the numeric comparison apples-to-apples with your actual implementation.
+    This keeps the numeric comparison apples-to-apples with actual implementation.
     """
     device = Device("cpu")
     x = tensor_from_numpy(x_np.astype(np.float32), device, requires_grad=False)

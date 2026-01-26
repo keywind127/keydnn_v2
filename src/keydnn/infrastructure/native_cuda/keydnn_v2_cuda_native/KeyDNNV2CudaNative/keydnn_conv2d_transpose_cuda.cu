@@ -83,7 +83,7 @@ static inline void _set_tensor4d_nchw(
 }
 
 // IMPORTANT: we will set filter descriptor as OIHW.
-// For transpose-conv (IOHW in your project), we reinterpret:
+// For transpose-conv (IOHW in project), we reinterpret:
 //   w_iohw(C_in, C_out, Kh, Kw)  ==  filter_oihw(O=C_in, I=C_out, Kh, Kw)
 static inline void _set_filter4d_oihw(
     cudnnFilterDescriptor_t desc, cudnnDataType_t dt,
@@ -332,14 +332,14 @@ static int launch_conv2d_transpose_backward_cudnn(
 
     // ---- 2) grad_w ----
     // We want grad_w in IOHW memory, but we expose it to cuDNN as OIHW with:
-    //   O = C_in, I = C_out   (so memory matches your IOHW layout).
+    //   O = C_in, I = C_out   (so memory matches IOHW layout).
     //
     // Numerics note:
     // cudnnGetConvolutionBackwardFilterAlgorithm_v7 may pick a very fast algo whose
     // accumulation order can drift in float32 beyond tight unit-test tolerances.
     // Prefer a stable deterministic algo first, then fallback to v7 selection.
     {
-        // IMPORTANT mapping to match your NumPy reference:
+        // IMPORTANT mapping to match NumPy reference:
         //   xDesc  = grad_out  (N, C_out, H_out, W_out)  == I
         //   dyDesc = x         (N, C_in,  H_in,  W_in)   == O
         //
@@ -482,13 +482,6 @@ extern "C" int keydnn_cuda_conv2d_transpose_forward_f64(
         pad_h, pad_w
     );
 }
-
-// NOTE: your original ABI for backward did NOT include grad_b.
-// If you want bias grad on CUDA-native side, you can either:
-//  (A) add new exported symbols *_backward_bias_* OR
-//  (B) keep bias grad in Python (sum over grad_out), which you already do in some wrappers.
-// Here we keep ABI compatible: compute grad_b only if caller passes a non-null pointer by adding
-// a private extension would break ABI, so we omit it here.
 
 extern "C" int keydnn_cuda_conv2d_transpose_backward_f32(
     const float* x,

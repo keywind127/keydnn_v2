@@ -289,7 +289,7 @@ def conv2d_transpose_backward_cuda(
     Notes
     -----
     - The provided CUDA backward implementation is gather-style and writes
-      grad_x and grad_w (not +=). No need to pre-zero unless your caller expects
+      grad_x and grad_w (not +=). No need to pre-zero unless caller expects
       accumulation semantics across multiple ops.
     - grad_b is not computed here.
     """

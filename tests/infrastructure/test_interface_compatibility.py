@@ -5,7 +5,6 @@ import unittest
 def _make_cpu_device():
     """
     Try to construct a CPU Device without assuming one specific API.
-    Edit this if your Device API is strict.
     """
     from src.keydnn.domain.device._device import Device
 
@@ -22,7 +21,6 @@ def _make_cpu_device():
     except TypeError as e:
         raise RuntimeError(
             "Could not construct a CPU Device. "
-            "Please update _make_cpu_device() to match your Device API."
         ) from e
 
 
@@ -69,7 +67,7 @@ def _make_tensor():
     except TypeError as e:
         raise RuntimeError(
             "Could not construct Tensor for tests. "
-            "Update _make_tensor() to match your Tensor __init__."
+            "Update _make_tensor() to match Tensor __init__."
         ) from e
 
 
@@ -94,7 +92,7 @@ def _make_parameter():
 
     raise RuntimeError(
         "Could not construct Parameter for tests. "
-        "Update _make_parameter() to match your Tensor/Parameter __init__."
+        "Update _make_parameter() to match Tensor/Parameter __init__."
     )
 
 

@@ -9,7 +9,7 @@ into *plain callables* compatible with `Model.fit()` / `train_on_batch()`:
 
 Why this exists
 ---------------
-Your `Model.fit()` expects a callable:
+The `Model.fit()` expects a callable:
 
     loss(y_pred, y_true) -> scalar Tensor
 

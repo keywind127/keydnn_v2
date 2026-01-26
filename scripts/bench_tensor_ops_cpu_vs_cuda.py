@@ -12,7 +12,7 @@ Notes
 -----
 - This benchmark intentionally includes the Python boundary overhead (wrapper, alloc,
   Tensor construction) because that's often the dominating cost for small tensors.
-- Inputs are allocated once and reused. Outputs are created each iteration (as your
+- Inputs are allocated once and reused. Outputs are created each iteration (as the
   current CUDA ext ops allocate new device buffers).
 
 Example

@@ -269,7 +269,7 @@ class TestBatchNorm1dBackward(TestCase):
         self.assertEqual(x.grad.shape, x.shape)
 
         # gamma/beta grads
-        # (Parameters are Tensor-like in your framework)
+        # (Parameters are Tensor-like)
         self.assertTrue(hasattr(bn, "gamma"))
         self.assertTrue(hasattr(bn, "beta"))
 

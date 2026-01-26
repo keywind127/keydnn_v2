@@ -86,7 +86,7 @@ def tensor_log_gpu(self: ITensor) -> "ITensor":
         requires_grad=self.requires_grad,
         ctx=None,
     )
-    # Ensure output has a device buffer; dtype should match your tensor dtype.
+    # Ensure output has a device buffer; dtype should match tensor dtype.
     out._ensure_cuda_alloc(dtype=np.dtype(getattr(self, "dtype", np.float32)))
     out.copy_from_numpy(y_np)
 

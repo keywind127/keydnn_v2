@@ -92,7 +92,7 @@ class CudaFillLib:
 
 
 # ---------------------------------------------------------------------
-# Singleton pattern (same as your other wrappers)
+# Singleton pattern
 # ---------------------------------------------------------------------
 
 _fill_singleton: CudaFillLib | None = None

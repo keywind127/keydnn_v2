@@ -27,7 +27,6 @@ def ones_like(t: Tensor) -> Tensor:
 
 
 def _cpu() -> Device:
-    # Adjust if your Device API differs
     return Device("cpu")
 
 
@@ -111,7 +110,7 @@ class TestReLU(unittest.TestCase):
         grad_out = make_cpu_tensor(np.ones_like(x_np), requires_grad=False)
         grad_x = ReLUFn.backward(ctx, grad_out)
 
-        # derivative: 1 where x > 0 else 0 (note: x == 0 -> 0 in your implementation)
+        # derivative: 1 where x > 0 else 0 (note: x == 0 -> 0)
         expected = (x_np > 0).astype(np.float32)
         np.testing.assert_allclose(grad_x.to_numpy(), expected, rtol=0, atol=0)
 

@@ -33,7 +33,7 @@ import ctypes
 from ctypes import wintypes
 import numpy as np
 
-from ..avgpool2d_ctypes import load_keydnn_cuda_native  # consistent with your tree
+from ..avgpool2d_ctypes import load_keydnn_cuda_native
 
 _GetProcAddress = ctypes.windll.kernel32.GetProcAddress
 _GetProcAddress.argtypes = [wintypes.HMODULE, wintypes.LPCSTR]

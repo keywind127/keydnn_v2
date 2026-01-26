@@ -23,7 +23,6 @@ def ones_like(t: Tensor) -> Tensor:
 
 
 def _cpu() -> Device:
-    # Adjust if your Device API differs
     return Device("cpu")
 
 

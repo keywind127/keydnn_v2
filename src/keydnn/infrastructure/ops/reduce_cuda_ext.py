@@ -786,7 +786,7 @@ def sum_to_shape_forward(
     # Example: (2,3,4) -> (3,1) is treated as (1,3,1)
     #          (5,7)   -> (7,)  is treated as (1,7)
     in_shape = tuple(int(d) for d in x.shape)  # or however you already compute it
-    out_shape_t = tuple(int(d) for d in out_shape)  # your passed target shape
+    out_shape_t = tuple(int(d) for d in out_shape)  # passed target shape
 
     in_rank = len(in_shape)
     out_rank = len(out_shape_t)

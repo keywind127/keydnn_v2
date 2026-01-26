@@ -49,7 +49,7 @@ DevPtr = int  # uintptr_t as Python int
 
 
 # ---------------------------------------------------------------------
-# DLL loading (copy your existing path logic; adjust if needed)
+# DLL loading
 # ---------------------------------------------------------------------
 
 
@@ -965,7 +965,7 @@ class CudaLib:
 
 
 # ---------------------------------------------------------------------
-# Functional API (cached singleton like your other wrappers)
+# Functional API
 # ---------------------------------------------------------------------
 
 _cuda_singleton: CudaLib | None = None

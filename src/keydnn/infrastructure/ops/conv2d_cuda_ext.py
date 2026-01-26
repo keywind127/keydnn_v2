@@ -28,7 +28,7 @@ Backend constraints (current)
 - This boundary currently performs D2H/H2D copies because the conv2d CUDA ops
   wrapper is NumPy-facing.
 - A future "true CUDA boundary" can avoid host copies by calling the ctypes
-  wrapper directly with device pointers (x_dev/w_dev/b_dev/y_dev), once your
+  wrapper directly with device pointers (x_dev/w_dev/b_dev/y_dev), once the
   Tensor exposes/stabilizes raw device pointers for conv2d without padding on CPU.
 """
 
@@ -122,7 +122,7 @@ def _get_tensor_dev_ptr(t: Tensor) -> int:
     Returning 0 is allowed for empty tensors (nbytes == 0). Callers should
     validate pointer presence when a non-empty buffer is required.
     """
-    # Primary: `data` field used by Tensor._from_devptr in your tests
+    # Primary: `data` field used by Tensor._from_devptr
     if hasattr(t, "data"):
         try:
             v = int(getattr(t, "data"))
