@@ -116,9 +116,9 @@ KeyDNN provides two separate knobs for reproducibility:
 Call `seed()` once at the beginning of your script (before model construction / initialization):
 
 ```python
-import keydnn as kd
+from keydnn.utils import random
 
-kd.utils.seed(42)
+random.seed(42)
 
 # alternative: from keydnn.presentation.apis.utils.random import seed
 ```
@@ -138,11 +138,11 @@ which can introduce small run-to-run differences due to floating-point accumulat
 order. To reduce this nondeterminism:
 
 ```python
-import keydnn as kd
+from keydnn.utils import determinism
 
-kd.utils.set_deterministic(True)  # defaults to cpu_threads=1
+determinism.set_deterministic(True)  # defaults to cpu_threads=1
 # or explicitly:
-kd.utils.set_deterministic(True, cpu_threads=1)
+determinism.set_deterministic(True, cpu_threads=1)
 
 # alternative: from keydnn.presentation.apis.utils.determinism import set_deterministic
 ```
@@ -150,7 +150,7 @@ kd.utils.set_deterministic(True, cpu_threads=1)
 If you want KeyDNN to **not** modify thread-related environment variables:
 
 ```python
-kd.utils.set_deterministic(True, cpu_threads=None)
+determinism.set_deterministic(True, cpu_threads=None)
 ```
 
 > Note: Thread-related environment variables may need to be set **before importing NumPy**
@@ -159,10 +159,10 @@ kd.utils.set_deterministic(True, cpu_threads=None)
 #### (3) Recommended order
 
 ```python
-import keydnn as kd
+from keydnn.utils import determinism, random
 
-kd.utils.seed(42)
-kd.utils.set_deterministic(True)
+random.seed(42)
+determinism.set_deterministic(True)
 
 # build / initialize model after reproducibility is configured
 model = ...
@@ -195,9 +195,6 @@ python -m keydnn test --train_mnist_example --device cuda:0 --epochs 4 --limit-t
 ```
 
 ```bash
-# CPU (always available)
-python -m keydnn test --train_cifar_example --device cpu --epochs 4 --limit-train 50000 --limit-test 1000
-
 # CUDA (if CUDA backend + native libraries are available)
 python -m keydnn test --train_cifar_example --device cuda:0 --epochs 4 --limit-train 50000 --limit-test 1000
 
@@ -284,11 +281,10 @@ if __name__ == "__main__":
         Sigmoid(),
     )
 
-    if str(device).startswith("cuda"):
-        model.to_(device)
+    model.to_(device)
 
     # (N, 2)
-    model.build((1, 2))
+    model.build((1, 2), device=device)
 
     # ------------------------------------------------------------------
     # Callbacks
@@ -471,6 +467,7 @@ portability or debuggability.
 ## CUDA Backend (Implemented)
 
 KeyDNN includes a CUDA execution backend with device-resident tensor storage and tested CUDA kernels.
+
 > Note: The CUDA backend is currently supported on **Windows**. Linux CUDA support will be added once cross-platform CUDA builds are finalized.
 
 ### Design principles
@@ -792,7 +789,6 @@ model = Sequential(
 
 model.save_json("checkpoint.json")
 loaded = Sequential.load_json("checkpoint.json")
-
 ```
 
 #### Supported layers for JSON save/load
