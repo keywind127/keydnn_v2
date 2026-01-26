@@ -110,7 +110,7 @@ class TestLayerNormInfrastructure(TestCase):
             device=self.device,
         )
         params = list(ln_aff.parameters())
-        self.assertEqual(len(params), 2)  # gamma + beta
+        self.assertEqual(len(params), 2)
 
         ln_no = _make_layernorm(
             normalized_shape=(4,),
@@ -150,9 +150,8 @@ class TestLayerNormForward(TestCase):
             device=self.device,
         )
 
-        x = Tensor((3, 4), self.device)  # rank=2, needs rank>=2 for (3,4) OK
-        # This one should pass rank check but fail trailing shape if mismatch occurs in other cases.
-        # Let's make a rank-1 tensor which must fail.
+        x = Tensor((3, 4), self.device)
+
         x1 = Tensor((12,), self.device)
         with self.assertRaises(ValueError):
             ln.forward(x1)
@@ -165,7 +164,7 @@ class TestLayerNormForward(TestCase):
             device=self.device,
         )
 
-        x = Tensor((4, 5), self.device)  # trailing dim is 5, expected 3
+        x = Tensor((4, 5), self.device)
         with self.assertRaises(ValueError):
             ln.forward(x)
 
@@ -259,7 +258,6 @@ class TestLayerNormForward(TestCase):
         y0 = ln_aff.forward(x).to_numpy()
         np.testing.assert_allclose(y0, y_no, rtol=0, atol=1e-6)
 
-        # tweak gamma/beta => output should differ
         assert ln_aff.gamma is not None and ln_aff.beta is not None
 
         gamma_np = np.ones((D,), dtype=np.float32) * 2.0
@@ -376,14 +374,12 @@ class TestLayerNormBackward(TestCase):
             device=self.device,
         )
 
-        # analytic grad
         x = _make_tensor_from_numpy(x0, self.device, requires_grad=True)
         y = ln.forward(x)
-        # scalar loss: sum(y)
+
         y.sum().backward()
         g_analytic = x.grad.to_numpy()
 
-        # numeric grad (central difference)
         g_num = np.zeros_like(x0, dtype=np.float32)
         for i in range(N):
             for j in range(D):

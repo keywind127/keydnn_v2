@@ -49,7 +49,6 @@ class TestModelSaveLoadActivationsJSON(unittest.TestCase):
 
             loaded = Sequential.load_json(ckpt_path)
 
-        # Order + types preserved
         self.assertEqual(len(loaded), 5)
         self.assertIsInstance(loaded[0], Sigmoid)
         self.assertIsInstance(loaded[1], ReLU)
@@ -57,11 +56,10 @@ class TestModelSaveLoadActivationsJSON(unittest.TestCase):
         self.assertIsInstance(loaded[3], Tanh)
         self.assertIsInstance(loaded[4], Softmax)
 
-        # Hyperparams preserved
-        loaded_lrelu: LeakyReLU = loaded[2]  # type: ignore[assignment]
+        loaded_lrelu: LeakyReLU = loaded[2]
         self.assertAlmostEqual(float(getattr(loaded_lrelu, "alpha")), 0.123, places=7)
 
-        loaded_softmax: Softmax = loaded[4]  # type: ignore[assignment]
+        loaded_softmax: Softmax = loaded[4]
         self.assertEqual(int(getattr(loaded_softmax, "_axis")), 1)
 
     def test_save_load_json_activation_forward_matches(self) -> None:
@@ -122,7 +120,6 @@ class TestModelSaveLoadActivationsJSON(unittest.TestCase):
 
             payload = json.loads(ckpt_path.read_text(encoding="utf-8"))
 
-            # Remove required key to force failure path
             del payload["arch"]
 
             ckpt_path.write_text(

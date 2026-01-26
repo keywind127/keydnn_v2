@@ -6,9 +6,9 @@ import numpy as np
 
 def _cuda_available() -> bool:
     try:
-        # same pattern used in your other cuda tests
+
         from src.keydnn.infrastructure.native_cuda.python.maxpool2d_ctypes import (
-            load_keydnn_cuda_native,  # type: ignore
+            load_keydnn_cuda_native,
         )
 
         _ = load_keydnn_cuda_native()
@@ -18,7 +18,7 @@ def _cuda_available() -> bool:
 
 
 def _get_ctx(t):
-    # supports either _ctx or ctx attribute
+
     return getattr(t, "_ctx", None) or getattr(t, "ctx", None)
 
 
@@ -61,11 +61,9 @@ class TestTensorCloneCPU(unittest.TestCase):
 
         y = x.clone()
 
-        # mutate clone's numpy buffer
         y_arr = y.to_numpy()
         y_arr[...] = -999.0
 
-        # original must remain unchanged
         np.testing.assert_allclose(x.to_numpy(), x_np, rtol=0, atol=0)
 
     def test_clone_cpu_no_ctx_and_no_requires_grad(self) -> None:
@@ -95,21 +93,18 @@ class TestTensorCloneCUDA(unittest.TestCase):
 
         lib = Tensor._get_cuda_lib()
         from src.keydnn.infrastructure.native_cuda.python.maxpool2d_ctypes import (
-            cuda_set_device,  # type: ignore
+            cuda_set_device,
         )
 
         cuda_set_device(lib, 0)
 
         from src.keydnn.infrastructure.native_cuda.python.ops import (
-            memcpy_ctypes as mc,  # type: ignore
+            memcpy_ctypes as mc,
         )
 
         cls.lib = lib
         cls.mc = mc
 
-    # -------------------------
-    # helpers: choose correct memcpy symbols
-    # -------------------------
     def _memcpy_htod(
         self, *, dst_dev: int, src_host: np.ndarray, nbytes: int, sync: bool
     ) -> None:
@@ -158,9 +153,6 @@ class TestTensorCloneCUDA(unittest.TestCase):
             return
         raise RuntimeError("memcpy_ctypes missing memcpy_dtod/cuda_memcpy_d2d")
 
-    # -------------------------
-    # helpers: cuda <-> numpy
-    # -------------------------
     def _cuda_tensor_from_numpy(self, arr: np.ndarray, *, requires_grad: bool):
         if not arr.flags["C_CONTIGUOUS"]:
             arr = np.ascontiguousarray(arr)
@@ -192,9 +184,6 @@ class TestTensorCloneCUDA(unittest.TestCase):
         )
         return out
 
-    # -------------------------
-    # tests
-    # -------------------------
     def test_clone_cuda_preserves_shape_dtype_and_values(self) -> None:
         rng = np.random.default_rng(1)
         x_np = rng.standard_normal((4, 5)).astype(np.float32)
@@ -218,7 +207,6 @@ class TestTensorCloneCUDA(unittest.TestCase):
         x = self._cuda_tensor_from_numpy(x_np, requires_grad=False)
         y = x.clone()
 
-        # overwrite clone's device memory
         y_new = (np.ones_like(x_np) * -777.0).astype(np.float32)
         self._memcpy_htod(
             dst_dev=int(y.data),
@@ -227,11 +215,9 @@ class TestTensorCloneCUDA(unittest.TestCase):
             sync=True,
         )
 
-        # original unchanged
         x_back = self._cuda_to_numpy(x)
         np.testing.assert_allclose(x_back, x_np, rtol=0, atol=0)
 
-        # clone changed
         y_back = self._cuda_to_numpy(y)
         np.testing.assert_allclose(y_back, y_new, rtol=0, atol=0)
 

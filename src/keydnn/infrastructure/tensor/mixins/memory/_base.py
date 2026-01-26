@@ -327,10 +327,6 @@ class TensorMixinMemory(ABC):
         """
         Broadcast this tensor to a target shape by explicit expansion.
 
-        This is an explicit broadcasting primitive intended to mirror NumPy's
-        broadcasting rules while keeping most binary ops strict (i.e., they do
-        not implicitly broadcast unless you opt in).
-
         Parameters
         ----------
         shape : tuple[int, ...]
@@ -367,8 +363,6 @@ class TensorMixinMemory(ABC):
         -----
         - `clone()` is intended to copy raw storage and typically returns a tensor
           with `requires_grad=False` and no autograd context (`ctx=None`).
-          If you want to preserve autograd flags/ctx, that should be handled by
-          a higher-level API.
         """
         ...
 
@@ -599,14 +593,13 @@ class TensorMixinMemory(ABC):
         Notes
         -----
         - This method intentionally *does not preserve autograd context* across
-        device transfers. If this tensor participates in autograd, you should
+        device transfers. If this tensor participates in autograd, should
         treat `to_()` as a graph break:
             - `ctx` is cleared.
             - `requires_grad` is left unchanged (you can still accumulate grads
             going forward), but any prior graph history is discarded.
         - If `self.grad` exists and is a Tensor-like object with `.to(...)`,
         this method will attempt to move it to the same device as well.
-        If you do not want this behavior, remove that block below.
         """
         from .....domain.device._device import Device
 
@@ -642,7 +635,7 @@ class TensorMixinMemory(ABC):
         if hasattr(self, "_ctx"):
             self._ctx = None  # type: ignore[attr-defined]
 
-        # Optional: move accumulated grad if present
+        # move accumulated grad if present
         g = getattr(self, "grad", None)
         if g is not None and hasattr(g, "to"):
             try:
@@ -938,7 +931,6 @@ class TensorMixinMemory(ABC):
         def _normalize_shape(shape_like) -> tuple[int, ...]:
             if isinstance(shape_like, tuple):
                 return tuple(int(x) for x in shape_like)
-            # allow list/int etc. if you want to keep old behavior
             return tuple(int(x) for x in tuple(shape_like))
 
         new_shape = _normalize_shape(new_shape)
@@ -961,7 +953,7 @@ class TensorMixinMemory(ABC):
         req = self.requires_grad
 
         # -----------------------
-        # CPU path (preserve intent; now avoids unnecessary copy if you already store ndarray)
+        # CPU path
         # -----------------------
         if self.device.is_cpu():
             src_np = self.to_numpy()
@@ -974,8 +966,6 @@ class TensorMixinMemory(ABC):
                 ctx=None,
                 dtype=getattr(self, "dtype", np.float32),
             )
-            # keep existing semantics (copy_from_numpy). If you have a true view mode,
-            # you can switch to sharing storage, but for backward-compat keep copy.
             out.copy_from_numpy(reshaped_np)
 
             if req:
@@ -1135,7 +1125,7 @@ class TensorMixinMemory(ABC):
                 )
             # Same-device copy paths below will handle CPU or CUDA.
         else:
-            # If both are CUDA, be conservative about cross-GPU unless you explicitly support it.
+            # If both are CUDA, be conservative about cross-GPU.
             if self.device.is_cuda() and other.device.is_cuda():
                 if int(self.device.index or 0) != int(other.device.index or 0):
                     raise RuntimeError(

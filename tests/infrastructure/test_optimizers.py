@@ -29,9 +29,7 @@ def tensor_from_np(arr: np.ndarray) -> Tensor:
 class TestSGD(unittest.TestCase):
     def test_step_updates_parameter(self):
         p = param_from_np(np.array([1.0, 2.0, 3.0], dtype=np.float32))
-        p._grad = tensor_from_np(
-            np.array([0.1, -0.2, 0.3], dtype=np.float32)
-        )  # if you must avoid this, see note below
+        p._grad = tensor_from_np(np.array([0.1, -0.2, 0.3], dtype=np.float32))
 
         opt = SGD([p], lr=0.5)
         opt.step()
@@ -70,7 +68,6 @@ class TestSGD(unittest.TestCase):
         opt = SGD([p], lr=lr, weight_decay=wd)
         opt.step()
 
-        # classical L2: p <- p - lr * (g + wd * p)
         expected = p0 - lr * (g0 + wd * p0)
         np.testing.assert_allclose(p.to_numpy(), expected, rtol=1e-6, atol=1e-7)
 
@@ -92,11 +89,10 @@ class TestAdam(unittest.TestCase):
 
         p = param_from_np(p0)
 
-        # Prefer p._set_grad(...) if available; fallback to direct assignment
         if hasattr(p, "_set_grad"):
             p._set_grad(tensor_from_np(g0))
         else:
-            p._grad = tensor_from_np(g0)  # temporary until autograd exists
+            p._grad = tensor_from_np(g0)
 
         lr = 1e-2
         b1, b2 = 0.9, 0.999
@@ -105,7 +101,6 @@ class TestAdam(unittest.TestCase):
         opt = Adam([p], lr=lr, betas=(b1, b2), eps=eps)
         opt.step()
 
-        # Reference computation for t=1:
         m = (1 - b1) * g0
         v = (1 - b2) * (g0 * g0)
         m_hat = m / (1 - b1)
@@ -128,7 +123,7 @@ class TestAdam(unittest.TestCase):
         if hasattr(p, "_set_grad"):
             p._set_grad(tensor_from_np(np.array([2.0], dtype=np.float32)))
         else:
-            p._grad = tensor_from_np(np.array([2.0], dtype=np.float32))  # temporary
+            p._grad = tensor_from_np(np.array([2.0], dtype=np.float32))
 
         opt = Adam([p], lr=1e-3)
         opt.zero_grad()
@@ -146,7 +141,7 @@ class TestAdam(unittest.TestCase):
         if hasattr(p, "_set_grad"):
             p._set_grad(tensor_from_np(g0))
         else:
-            p._grad = tensor_from_np(g0)  # temporary
+            p._grad = tensor_from_np(g0)
 
         lr = 1e-2
         b1, b2 = 0.9, 0.999

@@ -20,7 +20,7 @@ from src.keydnn.infrastructure.ops.pool2d_cpu import (
     global_avgpool2d_backward_cpu,
 )
 
-# CUDA helpers come from your CUDA ops module
+
 from src.keydnn.infrastructure.ops.pool2d_cuda import (
     _load_cuda_lib,
     cuda_set_device,
@@ -28,8 +28,7 @@ from src.keydnn.infrastructure.ops.pool2d_cuda import (
     cuda_free,
 )
 
-# NOTE: host<->device memcpy wrappers are expected to exist in your native bindings.
-# If your project names differ, adjust `_cuda_memcpy_htod/_cuda_memcpy_dtoh` below.
+
 from src.keydnn.infrastructure.native_cuda.python import maxpool2d_ctypes as cuda_ctypes
 
 
@@ -44,8 +43,6 @@ def tensor_from_numpy_cpu(
 def _cuda_memcpy_htod(lib, dst_dev: int, src_host: np.ndarray, nbytes: int) -> None:
     """
     Copy host -> device.
-
-    IMPORTANT: Update this if your ctypes function names differ.
     """
     fn = getattr(cuda_ctypes, "cuda_memcpy_htod", None) or getattr(
         cuda_ctypes, "cudaMemcpyHtoD", None
@@ -61,8 +58,6 @@ def _cuda_memcpy_htod(lib, dst_dev: int, src_host: np.ndarray, nbytes: int) -> N
 def _cuda_memcpy_dtoh(lib, dst_host: np.ndarray, src_dev: int, nbytes: int) -> None:
     """
     Copy device -> host.
-
-    IMPORTANT: Update this if your ctypes function names differ.
     """
     fn = getattr(cuda_ctypes, "cuda_memcpy_dtoh", None) or getattr(
         cuda_ctypes, "cudaMemcpyDtoH", None
@@ -78,11 +73,6 @@ def _cuda_memcpy_dtoh(lib, dst_host: np.ndarray, src_dev: int, nbytes: int) -> N
 class _CudaAllocs:
     """
     Tiny RAII-style allocator tracker for tests.
-
-    Notes
-    -----
-    Your Tensor._from_devptr does not auto-free. These tests therefore explicitly
-    free every DevPtr we allocate or receive from CUDA kernels (including argmax_idx).
     """
 
     def __init__(self, *, device_index: int = 0) -> None:
@@ -102,15 +92,10 @@ class _CudaAllocs:
         return int(p)
 
     def free_all(self) -> None:
-        # free in reverse order
+
         for p in reversed(self._ptrs):
-            # try:
-            #     cuda_free(self.lib, int(p))
-            # except Exception:
-            #     # best-effort cleanup during tests
-            #     pass
-            # cuda_free(self.lib, int(p))
-            ...  # deprecated as we now rely on storage to free the memory
+
+            ...
         self._ptrs.clear()
 
 
@@ -169,9 +154,6 @@ class TestPool2dFunctionCuda(unittest.TestCase):
         self.device = Device(f"cuda:{device_index}")
         self.allocs = _CudaAllocs(device_index=device_index)
 
-    # def tearDown(self) -> None:
-    #     self.allocs.free_all()
-
     def test_maxpool2d_fn_backward_matches_cpu(self):
         x_np = np.random.randn(1, 2, 5, 6).astype(np.float32)
         x = tensor_from_numpy_cuda(
@@ -181,7 +163,6 @@ class TestPool2dFunctionCuda(unittest.TestCase):
         ctx = Context(parents=(x,), backward_fn=lambda go: ())
         y = MaxPool2dFn.forward(ctx, x, kernel_size=2, stride=2, padding=0)
 
-        # Track y buffer for cleanup (forward allocates y_dev inside CUDA ext)
         self.allocs.track(int(y.data))
 
         grad_out_np = np.random.randn(*y.shape).astype(np.float32)
@@ -194,10 +175,8 @@ class TestPool2dFunctionCuda(unittest.TestCase):
         self.assertIsNotNone(grad_x)
         self.allocs.track(int(grad_x.data))
 
-        # Track argmax pointer (CUDA ext allocates it and returns DevPtr int)
         self.allocs.track(int(ctx.saved_meta["argmax_idx"].dev_ptr))
 
-        # CPU reference
         y_ref, argmax_idx_cpu = maxpool2d_forward_cpu(
             x_np, kernel_size=2, stride=2, padding=0
         )
@@ -213,7 +192,7 @@ class TestPool2dFunctionCuda(unittest.TestCase):
         )
 
         grad_x_host = cuda_tensor_to_numpy(grad_x, self.allocs)
-        # print(grad_x_host, grad_x_ref)
+
         self.assertTrue(np.allclose(grad_x_host, grad_x_ref, atol=1e-5, rtol=1e-5))
 
     def test_avgpool2d_fn_backward_matches_cpu(self):
@@ -237,7 +216,6 @@ class TestPool2dFunctionCuda(unittest.TestCase):
         self.assertIsNotNone(grad_x)
         self.allocs.track(int(grad_x.data))
 
-        # CPU reference
         y_ref = avgpool2d_forward_cpu(
             x_np, kernel_size=(2, 3), stride=(2, 1), padding=(1, 0)
         )
@@ -273,7 +251,6 @@ class TestPool2dFunctionCuda(unittest.TestCase):
         self.assertIsNotNone(grad_x)
         self.allocs.track(int(grad_x.data))
 
-        # CPU reference
         y_ref = global_avgpool2d_forward_cpu(x_np)
         self.assertEqual(y_ref.shape, y.shape)
 

@@ -21,10 +21,6 @@ def exp_cuda(*args: Any, **kwargs: Any) -> None:
     ---------
     Tests store this function on the test class, then call it via `self.exp_cuda(...)`.
     That turns it into a *bound method* and injects `self` as the first positional arg.
-
-    Therefore this function must accept *args/**kwargs and manually parse arguments,
-    otherwise you'll get:
-        TypeError: exp_cuda() got multiple values for argument 'x_dev'
     """
     if not args:
         raise TypeError("exp_cuda expected at least a lib argument")
@@ -49,9 +45,13 @@ def exp_cuda(*args: Any, **kwargs: Any) -> None:
 
     # tolerate legacy keyword spellings
     if x_dev is None:
-        x_dev = kwargs.pop("X_dev", None) or kwargs.pop("x", None) or kwargs.pop("X", None)
+        x_dev = (
+            kwargs.pop("X_dev", None) or kwargs.pop("x", None) or kwargs.pop("X", None)
+        )
     if y_dev is None:
-        y_dev = kwargs.pop("Y_dev", None) or kwargs.pop("y", None) or kwargs.pop("Y", None)
+        y_dev = (
+            kwargs.pop("Y_dev", None) or kwargs.pop("y", None) or kwargs.pop("Y", None)
+        )
 
     # If still missing, try positional parsing: (x_dev, y_dev)
     if x_dev is None and len(rest) >= 1:

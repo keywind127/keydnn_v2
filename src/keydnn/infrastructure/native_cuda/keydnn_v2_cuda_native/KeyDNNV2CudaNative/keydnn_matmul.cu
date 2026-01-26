@@ -9,7 +9,6 @@ static int _ensure_cublas_handle() {
     if (g_handle) return 0;
     cublasStatus_t st = cublasCreate(&g_handle);
     if (st != CUBLAS_STATUS_SUCCESS) return 1;
-    // Optional: use default stream (0). If you later use streams, set it here.
     // cublasSetStream(g_handle, 0);
     return 0;
 }

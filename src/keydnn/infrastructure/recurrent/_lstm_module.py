@@ -61,15 +61,12 @@ def _tanh(x: Tensor) -> Tensor:
 def _sigmoid(x: Tensor) -> Tensor:
     """
     Elementwise sigmoid using the framework's sigmoid op / Function.
-
-    If you don't have SigmoidFn / sigmoid op, implement via exp:
-        sigmoid(x) = 1 / (1 + exp(-x))
     """
     # Preferred: existing sigmoid op/function
     try:
         return x.sigmoid()
     except Exception:
-        # Fallback: exp-based if you have Tensor.exp()
+        # Fallback: exp-based
         one = Tensor.full(x.shape, 1.0, device=x.device, requires_grad=False)
         return one / (one + (-x).exp())
 
@@ -115,7 +112,7 @@ class LSTMCell(Module):
         device = Device("cpu")
 
         # Initialization:
-        # Use Tensor.rand/full if you want to avoid NumPy here too.
+        # Use Tensor.rand/full.
         # If Parameter.copy_from(other_tensor) exists, this is fully NumPy-free.
         k = 1.0 / (H**0.5)
 
@@ -127,7 +124,6 @@ class LSTMCell(Module):
         self.W_ih = Parameter(shape=(D, 4 * H), device=device, requires_grad=True)
         self.W_hh = Parameter(shape=(H, 4 * H), device=device, requires_grad=True)
 
-        # NOTE: this assumes you have copy_from(other_tensor). If not, see note below.
         self.W_ih.copy_from(W_ih)
         self.W_hh.copy_from(W_hh)
 

@@ -1,4 +1,3 @@
-# tests/infrastructure/native_cuda/ops/test_tensor_comparison_ctypes.py
 from __future__ import annotations
 
 import unittest
@@ -201,7 +200,6 @@ class _CudaComparisonCtypesBase(unittest.TestCase):
             cuda_synchronize,
         ) = _get_cuda_utils_wrappers()
 
-        # IMPORTANT: wrap as staticmethod to avoid unittest binding them as methods
         cls.cuda_set_device = staticmethod(cuda_set_device)
         cls.cuda_malloc = staticmethod(cuda_malloc)
         cls.cuda_free = staticmethod(cuda_free)
@@ -209,7 +207,6 @@ class _CudaComparisonCtypesBase(unittest.TestCase):
         cls.cudaMemcpyDtoH = staticmethod(cudaMemcpyDtoH)
         cls.cuda_synchronize = staticmethod(cuda_synchronize)
 
-        # ops under test
         mod_candidates = (
             (
                 "src.keydnn.infrastructure.native_cuda.python.ops.tensor_comparison_ctypes",
@@ -225,7 +222,6 @@ class _CudaComparisonCtypesBase(unittest.TestCase):
                 )
             )
 
-        # elementwise compare
         cls.gt_cuda = _op("gt_cuda")
         cls.ge_cuda = _op("ge_cuda")
         cls.lt_cuda = _op("lt_cuda")
@@ -233,7 +229,6 @@ class _CudaComparisonCtypesBase(unittest.TestCase):
         cls.eq_cuda = _op("eq_cuda")
         cls.ne_cuda = _op("ne_cuda")
 
-        # scalar compare
         cls.gt_scalar_cuda = _op("gt_scalar_cuda")
         cls.ge_scalar_cuda = _op("ge_scalar_cuda")
         cls.lt_scalar_cuda = _op("lt_scalar_cuda")
@@ -243,9 +238,8 @@ class _CudaComparisonCtypesBase(unittest.TestCase):
 
         cls.cuda_set_device(cls.lib, 0)
 
-    # ---- tiny helpers ----
     def _alloc(self, nbytes: int) -> int:
-        # IMPORTANT: some allocators reject nbytes==0; allocate 1 byte for "empty" tests.
+
         nbytes = int(nbytes)
         if nbytes <= 0:
             nbytes = 1
@@ -267,7 +261,6 @@ class _CudaComparisonCtypesBase(unittest.TestCase):
     def _sync(self) -> None:
         type(self).cuda_synchronize(self.lib)
 
-    # ---- shared compare helpers ----
     def _run_binary_cmp(self, op_name: str, a: np.ndarray, b: np.ndarray) -> np.ndarray:
         assert a.shape == b.shape
         y = np.empty((a.size,), dtype=np.float32)
@@ -357,9 +350,9 @@ class TestTensorComparisonCtypesF32(_CudaComparisonCtypesBase):
             np.testing.assert_allclose(y, ref, rtol=0, atol=0)
 
     def test_non_contiguous_inputs_f32_are_ok(self):
-        # Ensure our test harness makes contiguous copies before HtoD.
+
         base = np.array([[1.0, -2.0, 3.0], [4.0, 0.0, -1.0]], dtype=np.float32)
-        a = base[:, ::2]  # non-contiguous (shape (2,2))
+        a = base[:, ::2]
         b = np.array([[0.0, 3.0], [4.0, -2.0]], dtype=np.float32)
 
         y = self._run_binary_cmp("gt_cuda", a, b)
@@ -367,7 +360,7 @@ class TestTensorComparisonCtypesF32(_CudaComparisonCtypesBase):
         np.testing.assert_allclose(y, ref, rtol=0, atol=0)
 
     def test_numel_zero_is_ok_f32(self):
-        # allocate 1 byte but pass n=0 => should be a no-op and not crash.
+
         a_dev = self._alloc(0)
         b_dev = self._alloc(0)
         y_dev = self._alloc(0)

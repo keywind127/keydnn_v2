@@ -14,7 +14,7 @@ RUN_SLOW = os.environ.get("KEYDNN_RUN_SLOW", "0") == "1"
 def _cuda_available() -> bool:
     try:
         from src.keydnn.infrastructure.native_cuda.python.maxpool2d_ctypes import (
-            load_keydnn_cuda_native,  # type: ignore
+            load_keydnn_cuda_native,
         )
 
         _ = load_keydnn_cuda_native()
@@ -44,13 +44,11 @@ def _as_float(x) -> float:
     if isinstance(x, (int, float)):
         return float(x)
 
-    # Tensor -> numpy -> scalar
     if hasattr(x, "to_numpy"):
         v = x.to_numpy()
         v = np.asarray(v)
         return float(v.reshape(-1)[0])
 
-    # numpy scalar / array
     v = np.asarray(x)
     return float(v.reshape(-1)[0])
 
@@ -77,11 +75,6 @@ def _xor_data_numpy():
 def _accuracy_from_pred_np(y_true_np: np.ndarray, pred_np: np.ndarray) -> float:
     y_hat = (pred_np >= 0.5).astype(np.float32)
     return float((y_hat == y_true_np).mean())
-
-
-# ======================================================================================
-# Slow integration tests (opt-in via KEYDNN_RUN_SLOW=1)
-# ======================================================================================
 
 
 class _FitTrainOnBatchMixin:
@@ -124,7 +117,6 @@ class _FitTrainOnBatchMixin:
         x = _tensor_from_numpy(x_np, device=device)
         y = _tensor_from_numpy(y_np, device=device)
 
-        # Guardrails against silent CPU fallback
         if hasattr(x, "device"):
             self.assertEqual(str(x.device), self.DEVICE_STR)
         if hasattr(y, "device"):
@@ -142,7 +134,7 @@ class _FitTrainOnBatchMixin:
         try:
             from src.keydnn.infrastructure.models._sequential import (
                 Sequential,
-            )  # noqa: F401
+            )
         except (ModuleNotFoundError, ImportError) as e:
             self.skipTest(f"Missing imports: {e}")
 
@@ -177,7 +169,6 @@ class _FitTrainOnBatchMixin:
         self.assertTrue(np.isfinite(loss0))
         self.assertTrue(0.0 <= acc0 <= 1.0)
 
-        # Train
         epochs = 2000
         for _ in range(epochs - 1):
             model.train_on_batch(
@@ -210,7 +201,7 @@ class _FitTrainOnBatchMixin:
         try:
             from src.keydnn.infrastructure.models._sequential import (
                 Sequential,
-            )  # noqa: F401
+            )
         except (ModuleNotFoundError, ImportError) as e:
             self.skipTest(f"Missing imports: {e}")
 
@@ -225,7 +216,6 @@ class _FitTrainOnBatchMixin:
             yp = np.asarray(y_pred.to_numpy(), dtype=np.float32)
             return float(_accuracy_from_pred_np(y_np, yp))
 
-        # IMPORTANT: finite iterable (one batch total)
         batches = [(x, y)]
         epochs = 2000
 
@@ -278,15 +268,9 @@ class TestModelFitTrainOnBatchCUDA(_FitTrainOnBatchMixin, unittest.TestCase):
     DEVICE_STR = "cuda:0"
 
 
-# ======================================================================================
-# Fast contract tests (always run): use stubs, but call REAL methods on a real Model instance
-# ======================================================================================
-
-
 class FakeScalar:
     """
     Minimal scalar-like object that simulates a Tensor scalar returned by loss.
-    Supports backward() and to_numpy() so your _to_float_scalar works.
     """
 
     def __init__(self, value: float):
@@ -337,35 +321,26 @@ class TestModelTrainOnBatchContract(unittest.TestCase):
         - calls optimizer.zero_grad() and optimizer.step()
         - calls loss(...).backward()
         - returns dict containing loss + metric keys
-
-        Important:
-        We must call instance methods on a real Model object because your actual implementation
-        may live on Sequential/Model instances, not as classmethods.
         """
         try:
             from src.keydnn.infrastructure.models._models import Model
         except (ModuleNotFoundError, ImportError) as e:
             self.skipTest(f"Missing imports: {e}")
 
-        # Real Model instance, but we override forward to keep it cheap.
         m = Model()
 
-        # Provide callable semantics expected by train_on_batch: y_pred = self(x_batch)
-        # Some Module implementations call forward through __call__; to be safe we set forward.
-        m.forward = lambda x: FakePred(0.5)  # type: ignore[method-assign]
+        m.forward = lambda x: FakePred(0.5)
 
         opt = FakeOptimizer()
 
-        # Loss returns FakeScalar
         loss_fn = Mock(side_effect=lambda y_pred, y_true: FakeScalar(1.234))
         metrics = [Mock(side_effect=_simple_metric)]
 
         x = _tensor_from_numpy(np.array([[0.0]]), device=Device("cpu"))
         y = _tensor_from_numpy(np.array([[1.0]]), device=Device("cpu"))
 
-        m.build(x[:1])  # ensure built
+        m.build(x[:1])
 
-        # Call instance method
         logs = m.train_on_batch(
             x,
             y,
@@ -401,8 +376,7 @@ class TestModelFitHistoryContract(unittest.TestCase):
 
         m = Model()
 
-        # NEW: provide a minimal forward so build() can run
-        m.forward = lambda x: x  # type: ignore[method-assign]
+        m.forward = lambda x: x
 
         dummy_x = _tensor_from_numpy(
             np.array([[0.0]], dtype=np.float32),
@@ -410,17 +384,14 @@ class TestModelFitHistoryContract(unittest.TestCase):
         )
         m.build(dummy_x[:1])
 
-        # Monkeypatch train_on_batch on the instance to be deterministic & fast.
         def fake_train_on_batch(*args, **kwargs):
             _ = args, kwargs
             return {"loss": 1.0, "acc": 0.5}
 
-        m.train_on_batch = fake_train_on_batch  # type: ignore[assignment]
+        m.train_on_batch = fake_train_on_batch
 
-        # Finite "dataloader": 3 batches per epoch
         batches = [("xb1", "yb1"), ("xb2", "yb2"), ("xb3", "yb3")]
 
-        # loss/optimizer are unused due to stubbed train_on_batch, but required by signature
         hist = m.fit(
             batches,
             None,

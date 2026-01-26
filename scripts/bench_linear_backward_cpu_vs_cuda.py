@@ -83,7 +83,7 @@ def _get_linear_tensors(layer: Linear) -> tuple[Tensor, Optional[Tensor]]:
             "Could not locate Linear weight tensor on layer (weight/W/w)."
         )
 
-    # bias (optional)
+    # bias
     bt = None
     for bname in ("bias", "b"):
         if hasattr(layer, bname):

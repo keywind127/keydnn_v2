@@ -18,7 +18,7 @@
 #define KEYDNN_EXPORT KEYDNN_EXTERN_C KEYDNN_DLL_EXPORT
 
 // ------------------------------------------------------------
-// CUDA Stack (C ABI) ¡X u64 pointer-array ABI
+// CUDA Stack (C ABI) ï¿½X u64 pointer-array ABI
 // ------------------------------------------------------------
 // We reduce axis insertion to (pre, post):
 //   pre  = prod(in_shape[:axis])
@@ -79,9 +79,6 @@ KEYDNN_EXPORT int keydnn_cuda_stack_bwd_u64_f64(
     std::int64_t post,
     const std::uint64_t* dxs_u64_dev
 );
-
-
-// Add near the bottom of keydnn_cuda_stack.hpp (or a common header if you prefer)
 
 KEYDNN_EXPORT void keydnn_cuda_debug_set_enabled(int enabled);
 

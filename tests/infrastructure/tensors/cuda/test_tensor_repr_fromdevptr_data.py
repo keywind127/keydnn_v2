@@ -53,7 +53,7 @@ class TestTensorDataAndDevPtr(unittest.TestCase):
         """Tensor._from_devptr should reject dev_ptr=None."""
         with self.assertRaises(ValueError):
             Tensor._from_devptr(
-                None,  # type: ignore[arg-type]
+                None,
                 shape=(2, 3),
                 device=Device("cuda:0"),
             )
@@ -86,11 +86,9 @@ class TestTensorDataAndDevPtr(unittest.TestCase):
             shape=(1,),
             device=device,
             requires_grad=True,
-            ctx=ctx_obj,  # Context is optional; for this test we just use a sentinel.
+            ctx=ctx_obj,
         )
 
-        # These are internal fields in your snippet; we verify via getattr to avoid
-        # coupling to any additional API you may have.
         self.assertTrue(getattr(t, "_requires_grad"))
         self.assertIs(getattr(t, "_ctx"), ctx_obj)
         self.assertIsNone(getattr(t, "_grad"))

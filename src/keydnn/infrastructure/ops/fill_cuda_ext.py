@@ -43,9 +43,6 @@ Notes
 -----
 - `fill_` uses `Tensor._get_cuda_lib()` when `lib` is None to share the same
   loaded library/runtime context as other Tensor CUDA operations.
-- Some functions use `load_keydnn_cuda_native()` directly; if you standardize on
-  `Tensor._get_cuda_lib()` later, this module can be updated without changing
-  API behavior.
 """
 
 from __future__ import annotations
@@ -551,7 +548,6 @@ def full_like(x: Tensor, value: float, *, device: int = 0, sync: bool = True) ->
         raise
 
 
-# Optional: simple factories if you want them for tests / Tensor.zeros/ones plumbing.
 def zeros(
     shape: Iterable[int],
     *,

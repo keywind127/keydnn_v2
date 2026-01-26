@@ -46,13 +46,11 @@ class TestModelSaveLoadRNNJSON(unittest.TestCase):
             )
         )
 
-        rnn: RNN = model[0]  # type: ignore[assignment]
+        rnn: RNN = model[0]
         cell = rnn.cell
 
-        # Use the device owned by the cell parameters (avoid constructing a new Device in tests)
         dev = cell.W_ih.device
 
-        # Overwrite weights/bias with deterministic values
         W_ih = (np.arange(3 * 4, dtype=np.float32).reshape(3, 4) - 5.0) / 10.0
         W_hh = (np.arange(4 * 4, dtype=np.float32).reshape(4, 4) - 7.0) / 10.0
         b_ih = np.array([0.10, -0.20, 0.30, -0.40], dtype=np.float32)
@@ -62,20 +60,17 @@ class TestModelSaveLoadRNNJSON(unittest.TestCase):
         cell.W_hh.copy_from_numpy(W_hh)
         self.assertIsNotNone(cell.b_ih)
         self.assertIsNotNone(cell.b_hh)
-        cell.b_ih.copy_from_numpy(b_ih)  # type: ignore[union-attr]
-        cell.b_hh.copy_from_numpy(b_hh)  # type: ignore[union-attr]
+        cell.b_ih.copy_from_numpy(b_ih)
+        cell.b_hh.copy_from_numpy(b_hh)
 
-        # Input (T, N, D)
         x = self._make_time_major_input(device=dev, T=5, N=2, D=3)
 
-        # Forward before save
         y_before = model.forward(x).to_numpy()
 
         with tempfile.TemporaryDirectory() as td:
             ckpt_path = Path(td) / "rnn.json"
             model.save_json(ckpt_path)
 
-            # Sanity-check payload
             payload = json.loads(ckpt_path.read_text(encoding="utf-8"))
             self.assertEqual(payload.get("format"), "keydnn.json.ckpt.v1")
             self.assertIn("arch", payload)
@@ -83,15 +78,13 @@ class TestModelSaveLoadRNNJSON(unittest.TestCase):
 
             loaded = Sequential.load_json(ckpt_path)
 
-        loaded_rnn: RNN = loaded[0]  # type: ignore[assignment]
+        loaded_rnn: RNN = loaded[0]
         loaded_cell = loaded_rnn.cell
 
-        # Check config survived
         self.assertTrue(loaded_rnn.keras_compat)
         self.assertFalse(loaded_rnn.return_sequences)
         self.assertFalse(loaded_rnn.return_state)
 
-        # Check weights survived
         np.testing.assert_allclose(
             loaded_cell.W_ih.to_numpy(), W_ih, rtol=0.0, atol=0.0
         )
@@ -101,19 +94,18 @@ class TestModelSaveLoadRNNJSON(unittest.TestCase):
         self.assertIsNotNone(loaded_cell.b_ih)
         self.assertIsNotNone(loaded_cell.b_hh)
         np.testing.assert_allclose(
-            loaded_cell.b_ih.to_numpy(),  # type: ignore[union-attr]
+            loaded_cell.b_ih.to_numpy(),
             b_ih,
             rtol=0.0,
             atol=0.0,
         )
         np.testing.assert_allclose(
-            loaded_cell.b_hh.to_numpy(),  # type: ignore[union-attr]
+            loaded_cell.b_hh.to_numpy(),
             b_hh,
             rtol=0.0,
             atol=0.0,
         )
 
-        # Forward after load
         y_after = loaded.forward(x).to_numpy()
         np.testing.assert_allclose(y_after, y_before, rtol=0.0, atol=0.0)
 
@@ -139,7 +131,6 @@ class TestModelSaveLoadRNNJSON(unittest.TestCase):
             payload = json.loads(ckpt_path.read_text(encoding="utf-8"))
             state = payload["state"]
 
-            # Remove one parameter entry to force failure
             some_key = next(iter(state.keys()))
             del state[some_key]
 
@@ -168,11 +159,10 @@ class TestModelSaveLoadRNNJSON(unittest.TestCase):
             )
         )
 
-        rnn: RNN = model[0]  # type: ignore[assignment]
+        rnn: RNN = model[0]
         cell = rnn.cell
         dev = cell.W_ih.device
 
-        # deterministic weights (no biases)
         W_ih = (np.arange(2 * 3, dtype=np.float32).reshape(2, 3) - 2.0) / 10.0
         W_hh = (np.arange(3 * 3, dtype=np.float32).reshape(3, 3) - 3.0) / 10.0
         cell.W_ih.copy_from_numpy(W_ih)
@@ -188,10 +178,9 @@ class TestModelSaveLoadRNNJSON(unittest.TestCase):
             model.save_json(ckpt_path)
             loaded = Sequential.load_json(ckpt_path)
 
-        loaded_rnn: RNN = loaded[0]  # type: ignore[assignment]
+        loaded_rnn: RNN = loaded[0]
         loaded_cell = loaded_rnn.cell
 
-        # weights match
         np.testing.assert_allclose(
             loaded_cell.W_ih.to_numpy(), W_ih, rtol=0.0, atol=0.0
         )

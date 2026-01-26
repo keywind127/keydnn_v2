@@ -105,7 +105,7 @@ class TestTensorSumAxisKeepdimsForward(TestCase, _TensorFactoryMixin):
             np.random.randn(2, 3).astype(np.float32), requires_grad=False
         )
         with self.assertRaises(TypeError):
-            _ = x.sum(axis="0")  # type: ignore[arg-type]
+            _ = x.sum(axis="0")
 
     def test_sum_on_cuda_raises(self):
         x = Tensor((2, 3), Device("cuda:0"), requires_grad=False)
@@ -169,7 +169,7 @@ class TestTensorBroadcastToForward(TestCase, _TensorFactoryMixin):
         self.assertTrue(np.allclose(y.to_numpy(), expected, rtol=1e-5, atol=1e-6))
 
     def test_broadcast_to_forward_adds_leading_dims(self):
-        # (3,) -> (2,3) by leading broadcast
+
         x_np = np.random.randn(3).astype(np.float32)
         x = self._tensor_from_numpy(x_np, requires_grad=False)
 
@@ -192,7 +192,7 @@ class TestTensorBroadcastToForward(TestCase, _TensorFactoryMixin):
         x = self._tensor_from_numpy(x_np, requires_grad=False)
 
         with self.assertRaises(ValueError):
-            _ = x.broadcast_to((3, 3))  # cannot change 2 -> 3 on dim0
+            _ = x.broadcast_to((3, 3))
 
     def test_broadcast_to_on_cuda_raises(self):
         x = Tensor((2, 1), Device("cuda:0"), requires_grad=False)
@@ -285,7 +285,7 @@ class TestTensorMaxForwardBackward(TestCase, _TensorFactoryMixin):
         x_np = np.array([[1, 3, 2], [5, 4, 5]], dtype=np.float32)
         x = self._tensor_from_numpy(x_np, requires_grad=True)
 
-        y = x.max(axis=1, keepdims=False)  # (2,)
+        y = x.max(axis=1, keepdims=False)
         loss = y.sum()
         loss.backward()
 
@@ -293,9 +293,9 @@ class TestTensorMaxForwardBackward(TestCase, _TensorFactoryMixin):
         grad = x.grad.to_numpy()
 
         expected = np.zeros_like(x_np)
-        expected[0, 1] = 1.0  # 3 is max in row0
-        expected[1, 0] = 1.0  # tie max 5
-        expected[1, 2] = 1.0  # tie max 5
+        expected[0, 1] = 1.0
+        expected[1, 0] = 1.0
+        expected[1, 2] = 1.0
 
         self.assertTrue(np.array_equal(grad, expected))
 

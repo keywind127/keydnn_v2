@@ -7,7 +7,7 @@ import numpy as np
 def _cuda_available() -> bool:
     try:
         from src.keydnn.infrastructure.native_cuda.python.maxpool2d_ctypes import (
-            load_keydnn_cuda_native,  # type: ignore
+            load_keydnn_cuda_native,
         )
 
         _ = load_keydnn_cuda_native()
@@ -33,21 +33,18 @@ class TestTensorBroadcastToCUDA(unittest.TestCase):
 
         lib = Tensor._get_cuda_lib()
         from src.keydnn.infrastructure.native_cuda.python.maxpool2d_ctypes import (
-            cuda_set_device,  # type: ignore
+            cuda_set_device,
         )
 
         cuda_set_device(lib, 0)
 
         from src.keydnn.infrastructure.native_cuda.python.ops import (
-            memcpy_ctypes as mc,  # type: ignore
+            memcpy_ctypes as mc,
         )
 
         cls.lib = lib
         cls.mc = mc
 
-    # -------------------------
-    # helpers: choose correct memcpy symbols
-    # -------------------------
     def _memcpy_htod(
         self, *, dst_dev: int, src_host: np.ndarray, nbytes: int, sync: bool
     ) -> None:
@@ -80,9 +77,6 @@ class TestTensorBroadcastToCUDA(unittest.TestCase):
             return
         raise RuntimeError("memcpy_ctypes missing memcpy_dtoh/cuda_memcpy_d2h")
 
-    # -------------------------
-    # helpers: cuda <-> numpy
-    # -------------------------
     def _cuda_tensor_from_numpy(self, arr: np.ndarray, *, requires_grad: bool):
         if not isinstance(arr, np.ndarray):
             arr = np.asarray(arr)
@@ -95,7 +89,6 @@ class TestTensorBroadcastToCUDA(unittest.TestCase):
         t._ensure_cuda_alloc(dtype=np.dtype(arr.dtype))
         self.assertNotEqual(int(t.data), 0)
 
-        # Copy only if there is payload
         nbytes = int(arr.nbytes)
         if nbytes > 0:
             self._memcpy_htod(
@@ -120,9 +113,6 @@ class TestTensorBroadcastToCUDA(unittest.TestCase):
             )
         return out
 
-    # -------------------------
-    # tests
-    # -------------------------
     def test_broadcast_to_cuda_preserves_dtype_and_device(self) -> None:
         rng = np.random.default_rng(0)
         x_np = rng.standard_normal((3, 1)).astype(np.float32)
@@ -154,7 +144,7 @@ class TestTensorBroadcastToCUDA(unittest.TestCase):
         np.testing.assert_allclose(got, ref, rtol=1e-5, atol=1e-6)
 
     def test_broadcast_to_cuda_multi_axis(self) -> None:
-        # (1,3,1) -> (2,3,4)
+
         rng = np.random.default_rng(2)
         x_np = rng.standard_normal((1, 3, 1)).astype(np.float64)
 
@@ -168,14 +158,13 @@ class TestTensorBroadcastToCUDA(unittest.TestCase):
         np.testing.assert_allclose(got, ref, rtol=1e-12, atol=1e-12)
 
     def test_broadcast_to_cuda_is_materialized_deep_copy(self) -> None:
-        # verify y is not a view of x: mutating y should not change x
+
         x_np = np.arange(3, dtype=np.float32).reshape(3, 1)
         x = self._cuda_tensor_from_numpy(x_np, requires_grad=False)
 
         y = x.broadcast_to((3, 4))
         self.assertNotEqual(int(y.data), int(x.data))
 
-        # overwrite y device memory with a new constant tensor payload
         y_new = (np.ones((3, 4), dtype=np.float32) * -999.0).astype(
             np.float32, copy=False
         )
@@ -186,11 +175,9 @@ class TestTensorBroadcastToCUDA(unittest.TestCase):
             sync=True,
         )
 
-        # x should remain unchanged
         x_back = self._cuda_to_numpy(x)
         np.testing.assert_allclose(x_back, x_np, rtol=0, atol=0)
 
-        # y should now equal y_new
         y_back = self._cuda_to_numpy(y)
         np.testing.assert_allclose(y_back, y_new, rtol=0, atol=0)
 
@@ -203,7 +190,6 @@ class TestTensorBroadcastToCUDA(unittest.TestCase):
         ctx = _get_ctx(y)
         self.assertIsNotNone(ctx)
 
-        # Optional: verify metadata
         saved_meta = getattr(ctx, "saved_meta", {})
         self.assertEqual(saved_meta.get("broadcast_from"), (2, 1))
         self.assertEqual(saved_meta.get("broadcast_to"), (2, 3))
@@ -217,10 +203,10 @@ class TestTensorBroadcastToCUDA(unittest.TestCase):
 
     def test_broadcast_to_cuda_scalar_to_tensor_if_supported(self) -> None:
         """
-        Scalar (0-d) input broadcast. Skip if your Tensor constructor disallows 0-d shapes.
+        Scalar (0-d) input broadcast. Skip if Tensor constructor disallows 0-d shapes.
         """
         try:
-            # 0-d ndarray
+
             x_np = np.array(3.25, dtype=np.float64)
             x = self._cuda_tensor_from_numpy(x_np, requires_grad=False)
         except Exception as e:

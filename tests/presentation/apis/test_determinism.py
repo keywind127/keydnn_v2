@@ -17,11 +17,11 @@ _THREAD_ENV_VARS = (
 
 class TestDeterminismConfig(unittest.TestCase):
     def setUp(self) -> None:
-        # Snapshot environment to avoid leaking across tests
+
         self._old_env = {k: os.environ.get(k) for k in _THREAD_ENV_VARS}
 
     def tearDown(self) -> None:
-        # Restore environment
+
         for k, v in self._old_env.items():
             if v is None:
                 os.environ.pop(k, None)
@@ -45,7 +45,7 @@ class TestDeterminismConfig(unittest.TestCase):
             self.assertEqual(os.environ.get(k), "8")
 
     def test_cpu_threads_none_does_not_modify_env(self) -> None:
-        # Put known values in env first
+
         os.environ["OMP_NUM_THREADS"] = "16"
         os.environ["MKL_NUM_THREADS"] = "16"
         os.environ["OPENBLAS_NUM_THREADS"] = "16"
@@ -75,7 +75,7 @@ class TestDeterminismConfig(unittest.TestCase):
 
     def test_enabled_requires_bool(self) -> None:
         with self.assertRaises(TypeError):
-            set_deterministic(1)  # type: ignore[arg-type]
+            set_deterministic(1)
 
     def test_cpu_threads_validation(self) -> None:
         with self.assertRaises(ValueError):
@@ -85,7 +85,7 @@ class TestDeterminismConfig(unittest.TestCase):
             set_deterministic(True, cpu_threads=-3)
 
         with self.assertRaises(ValueError):
-            set_deterministic(True, cpu_threads=3.14)  # type: ignore[arg-type]
+            set_deterministic(True, cpu_threads=3.14)
 
 
 if __name__ == "__main__":

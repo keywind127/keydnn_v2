@@ -20,7 +20,7 @@ def _conv2d_transpose_forward_ref(
     output_padding: int | tuple[int, int] = 0,
 ) -> np.ndarray:
     """
-    Naive NCHW/IOHW transpose-conv forward reference (matches your CPU semantics).
+    Naive NCHW/IOHW transpose-conv forward reference.
 
     y[n, co, hi*s_h + kh - p_h, wi*s_w + kw - p_w] += x[n, ci, hi, wi] * w[ci, co, kh, kw]
     Bias is added after accumulation: y[n, co] += b[co]
@@ -168,7 +168,6 @@ class TestConv2dTransposeCudaOps(unittest.TestCase):
     def _run_forward(self, dtype: np.dtype, *, with_bias: bool) -> None:
         dtype = np.dtype(dtype)
 
-        # Keep small: wrapper does H2D/D2H + kernel
         N, C_in, C_out = 2, 3, 4
         H_in, W_in = 4, 5
         K_h, K_w = 3, 2
@@ -177,7 +176,7 @@ class TestConv2dTransposeCudaOps(unittest.TestCase):
         output_padding = (0, 0)
 
         x = np.random.randn(N, C_in, H_in, W_in).astype(dtype)
-        w = np.random.randn(C_in, C_out, K_h, K_w).astype(dtype)  # IOHW
+        w = np.random.randn(C_in, C_out, K_h, K_w).astype(dtype)
         b = np.random.randn(C_out).astype(dtype) if with_bias else None
 
         y_ref = _conv2d_transpose_forward_ref(
@@ -215,7 +214,6 @@ class TestConv2dTransposeCudaOps(unittest.TestCase):
     def _run_backward(self, dtype: np.dtype, *, with_bias: bool) -> None:
         dtype = np.dtype(dtype)
 
-        # Small sizes; backward likely uses atomics in native kernel
         N, C_in, C_out = 2, 2, 3
         H_in, W_in = 4, 4
         K_h, K_w = 3, 3
@@ -224,7 +222,7 @@ class TestConv2dTransposeCudaOps(unittest.TestCase):
         output_padding = (0, 0)
 
         x = np.random.randn(N, C_in, H_in, W_in).astype(dtype)
-        w = np.random.randn(C_in, C_out, K_h, K_w).astype(dtype)  # IOHW
+        w = np.random.randn(C_in, C_out, K_h, K_w).astype(dtype)
         b = np.random.randn(C_out).astype(dtype) if with_bias else None
 
         y_ref = _conv2d_transpose_forward_ref(
@@ -259,7 +257,6 @@ class TestConv2dTransposeCudaOps(unittest.TestCase):
         self.assertEqual(grad_x.shape, grad_x_ref.shape)
         self.assertEqual(grad_w.shape, grad_w_ref.shape)
 
-        # Atomics reorder summation -> allow slightly looser tolerance than forward
         if dtype == np.float32:
             np.testing.assert_allclose(grad_x, grad_x_ref, rtol=4e-4, atol=4e-4)
             np.testing.assert_allclose(grad_w, grad_w_ref, rtol=4e-4, atol=4e-4)
@@ -291,7 +288,7 @@ class TestConv2dTransposeCudaOps(unittest.TestCase):
     def test_rejects_in_channels_mismatch(self) -> None:
         dtype = np.float32
         x = np.random.randn(1, 3, 4, 4).astype(dtype)
-        w = np.random.randn(2, 4, 3, 3).astype(dtype)  # C_in=2 mismatch
+        w = np.random.randn(2, 4, 3, 3).astype(dtype)
         with self.assertRaises(ValueError):
             _ = self.conv_t_fwd(
                 self.env.lib,
@@ -317,7 +314,6 @@ class TestConv2dTransposeCudaOps(unittest.TestCase):
         )
         grad_out = np.random.randn(*y_ref.shape).astype(dtype)
 
-        # Corrupt grad_out (wrong C_out)
         grad_out_bad = grad_out[:, :2, :, :]
 
         with self.assertRaises(ValueError):
@@ -348,7 +344,7 @@ class TestConv2dTransposeCudaOps(unittest.TestCase):
                 b=None,
                 stride=(2, 2),
                 padding=0,
-                output_padding=(2, 0),  # invalid: op_h == stride_h
+                output_padding=(2, 0),
                 dtype=dtype,
                 sync=True,
                 device_index=0,

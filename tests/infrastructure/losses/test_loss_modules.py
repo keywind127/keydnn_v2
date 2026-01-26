@@ -197,7 +197,6 @@ class TestSSEModule(unittest.TestCase, _ModuleLossAsserts):
         ctx = out._get_ctx()
         assert ctx is not None
 
-        # SSEFn saves diff only
         self.assertEqual(len(ctx.saved_tensors), 1)
         diff_saved = ctx.saved_tensors[0]
         self.assertEqual(diff_saved.shape, pred.shape)
@@ -288,7 +287,6 @@ class TestMSEModule(unittest.TestCase, _ModuleLossAsserts):
         ctx = out._get_ctx()
         assert ctx is not None
 
-        # MSEFn saves diff and meta["n"]
         self.assertEqual(len(ctx.saved_tensors), 1)
         self.assertIn("n", ctx.saved_meta)
         self.assertEqual(int(ctx.saved_meta["n"]), pred_np.size)
@@ -403,7 +401,6 @@ class TestBinaryCrossEntropyModule(unittest.TestCase, _ModuleLossAsserts):
         ctx = out._get_ctx()
         assert ctx is not None
 
-        # BCEFn saves pred, target and meta["n"]
         self.assertEqual(len(ctx.saved_tensors), 2)
         self.assertIn("n", ctx.saved_meta)
         self.assertEqual(int(ctx.saved_meta["n"]), pred_np.size)
@@ -530,7 +527,6 @@ class TestCategoricalCrossEntropyModule(unittest.TestCase, _ModuleLossAsserts):
         ctx = out._get_ctx()
         assert ctx is not None
 
-        # CCEFn saves pred, target
         self.assertEqual(len(ctx.saved_tensors), 2)
 
         grad_pred, grad_target = ctx.backward_fn(ones_scalar())
@@ -568,7 +564,7 @@ class TestCategoricalCrossEntropyModule(unittest.TestCase, _ModuleLossAsserts):
         self.assertIsNone(grad_target)
         assert grad_pred is not None
 
-        n = float(pred_np.shape[0])  # batch size
+        n = float(pred_np.shape[0])
         expected_grad_pred = (-(target_np / pred_np) / n) * g
 
         np.testing.assert_allclose(

@@ -1,4 +1,3 @@
-# tests/infrastructure/tensors/test_tensor_inplace_arithmetic_cuda.py
 """
 Unit tests for CUDA-backed in-place Tensor arithmetic:
 
@@ -40,20 +39,20 @@ from src.keydnn.infrastructure.ops.pool2d_cuda import (
 def _get_cuda_device(index: int = 0) -> Device:
     """Best-effort helper to obtain a CUDA Device instance across possible Device APIs."""
     if hasattr(Device, "cuda") and callable(getattr(Device, "cuda")):
-        return Device.cuda(index)  # type: ignore[attr-defined]
+        return Device.cuda(index)
 
     try:
-        return Device("cuda", index)  # type: ignore[call-arg]
+        return Device("cuda", index)
     except Exception:
         pass
 
     try:
-        return Device(f"cuda:{index}")  # type: ignore[call-arg]
+        return Device(f"cuda:{index}")
     except Exception:
         pass
 
     try:
-        return Device(kind="cuda", index=index)  # type: ignore[call-arg]
+        return Device(kind="cuda", index=index)
     except Exception as e:
         raise RuntimeError(
             "Unable to construct a CUDA Device; update _get_cuda_device() for this repo."
@@ -123,7 +122,7 @@ def _make_cpu_tensor_from_numpy(x: np.ndarray) -> Tensor:
     x_c = np.ascontiguousarray(x)
     try:
         if hasattr(Tensor, "from_numpy") and callable(getattr(Tensor, "from_numpy")):
-            return Tensor.from_numpy(x_c, device=Device("cpu"))  # type: ignore[call-arg]
+            return Tensor.from_numpy(x_c, device=Device("cpu"))
     except Exception:
         pass
 
@@ -131,7 +130,7 @@ def _make_cpu_tensor_from_numpy(x: np.ndarray) -> Tensor:
         shape=tuple(int(d) for d in x_c.shape),
         device=Device("cpu"),
         requires_grad=False,
-    )  # type: ignore[call-arg]
+    )
     setattr(t, "_data", x_c)
     return t
 
@@ -186,9 +185,6 @@ class TestTensorInplaceArithmeticCuda(unittest.TestCase):
         _d2h(self.lib, int(t.data), host)
         return host
 
-    # ----------------------------
-    # In-place: add
-    # ----------------------------
     def test_iadd_tensor_tensor_cuda_f32_mutates_inplace(self) -> None:
         rng = np.random.default_rng(0)
         a0 = rng.standard_normal((64,), dtype=np.float32)
@@ -220,9 +216,6 @@ class TestTensorInplaceArithmeticCuda(unittest.TestCase):
         out = self._read_cuda_tensor_to_host(a_t)
         np.testing.assert_allclose(out, a0 + alpha, rtol=1e-10, atol=1e-10)
 
-    # ----------------------------
-    # In-place: sub
-    # ----------------------------
     def test_isub_tensor_tensor_cuda_f32_mutates_inplace(self) -> None:
         rng = np.random.default_rng(2)
         a0 = rng.standard_normal((33,), dtype=np.float32)
@@ -254,9 +247,6 @@ class TestTensorInplaceArithmeticCuda(unittest.TestCase):
         out = self._read_cuda_tensor_to_host(a_t)
         np.testing.assert_allclose(out, a0 - np.float32(alpha), rtol=1e-4, atol=1e-4)
 
-    # ----------------------------
-    # In-place: div
-    # ----------------------------
     def test_itruediv_tensor_tensor_cuda_f32_mutates_inplace(self) -> None:
         rng = np.random.default_rng(4)
         a0 = rng.standard_normal((128,), dtype=np.float32)
@@ -299,19 +289,15 @@ class TestTensorInplaceArithmeticCuda(unittest.TestCase):
         a_t = self._make_cuda_tensor_from_host(a0)
         ptr_before = int(a_t.data)
 
-        # explicit legacy in-place alias
-        a_t.__idiv__(alpha)  # type: ignore[attr-defined]
+        a_t.__idiv__(alpha)
         ptr_after = int(a_t.data)
 
         self.assertEqual(ptr_after, ptr_before, "__idiv__ must not replace storage")
         out = self._read_cuda_tensor_to_host(a_t)
         np.testing.assert_allclose(out, a0 / np.float32(alpha), rtol=1e-3, atol=1e-3)
 
-    # ----------------------------
-    # numel==0 should be no-op
-    # ----------------------------
     def test_inplace_numel_zero_is_ok_tensor_tensor(self) -> None:
-        # Empty tensor => dev_ptr may be 0; inplace should early-return without native call.
+
         a0 = np.empty((0,), dtype=np.float32)
         b0 = np.empty((0,), dtype=np.float32)
 
@@ -321,7 +307,7 @@ class TestTensorInplaceArithmeticCuda(unittest.TestCase):
         ptr_before = int(a_t.data)
         a_t += b_t
         a_t -= b_t
-        a_t /= b_t + 1.0  # keep it well-defined, still empty
+        a_t /= b_t + 1.0
         ptr_after = int(a_t.data)
 
         self.assertEqual(ptr_after, ptr_before)
@@ -342,9 +328,6 @@ class TestTensorInplaceArithmeticCuda(unittest.TestCase):
         out = self._read_cuda_tensor_to_host(a_t)
         self.assertEqual(out.size, 0)
 
-    # ----------------------------
-    # Error cases
-    # ----------------------------
     def test_iadd_raises_on_shape_mismatch(self) -> None:
         rng = np.random.default_rng(7)
         a = rng.standard_normal((8,), dtype=np.float32)
@@ -376,21 +359,21 @@ class TestTensorInplaceArithmeticCuda(unittest.TestCase):
         b_cpu = _make_cpu_tensor_from_numpy(b)
 
         with self.assertRaises(Exception):
-            a_t /= b_cpu  # type: ignore[operator]
+            a_t /= b_cpu
 
     def test_iadd_rejects_non_float_dtype(self) -> None:
         a = np.arange(16, dtype=np.int32)
         a_t = self._make_cuda_tensor_from_host(a)
 
         with self.assertRaises(TypeError):
-            a_t += 1  # scalar path should reject int32 tensor dtype
+            a_t += 1
 
     def test_itruediv_rejects_non_float_dtype(self) -> None:
         a = np.arange(16, dtype=np.int32)
         a_t = self._make_cuda_tensor_from_host(a)
 
         with self.assertRaises(TypeError):
-            a_t /= 2  # scalar path should reject int32 tensor dtype
+            a_t /= 2
 
 
 if __name__ == "__main__":

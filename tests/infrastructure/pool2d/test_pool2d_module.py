@@ -38,7 +38,6 @@ class TestPool2dModule(unittest.TestCase):
         pool = MaxPool2d(kernel_size=2, stride=2, padding=0)
         y = pool.forward(x)
 
-        # loss = sum(y) => grad_out = ones
         loss = y.sum()
         loss.backward()
 

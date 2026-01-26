@@ -15,7 +15,6 @@ def _tensor_from_numpy(arr: np.ndarray, device: Device, requires_grad: bool) -> 
 
 def _unwrap_param_tensor(p):
     """
-    Same convention as your Conv2d tests:
     - If Parameter is Tensor-like, use it directly.
     - Otherwise, unwrap common wrapper fields.
     """
@@ -50,21 +49,21 @@ class TestRNNEndToEndGradients(unittest.TestCase):
     def _build_tiny_rnn_and_input(self, *, T=2, N=1, D=2, H=2):
         rnn = RNN(input_size=D, hidden_size=H, bias=True)
 
-        # Make everything deterministic (so finite-diff is stable)
-        # Deterministic parameters (small magnitudes reduce tanh saturation)
+                                                                  
+                                                                            
         Wih = (np.arange(D * H, dtype=np.float32).reshape(D, H) - 1.5) / 10.0
         Whh = (np.arange(H * H, dtype=np.float32).reshape(H, H) - 1.0) / 10.0
         bih = np.linspace(-0.05, 0.05, H, dtype=np.float32)
         bhh = np.linspace(0.02, -0.02, H, dtype=np.float32)
 
-        # Your RNN owns a single cell
+                                     
         cell = rnn.cell
         _unwrap_param_tensor(cell.W_ih).copy_from_numpy(Wih)
         _unwrap_param_tensor(cell.W_hh).copy_from_numpy(Whh)
         _unwrap_param_tensor(cell.b_ih).copy_from_numpy(bih)
         _unwrap_param_tensor(cell.b_hh).copy_from_numpy(bhh)
 
-        # Tiny input
+                    
         x_np = (np.arange(T * N * D, dtype=np.float32).reshape(T, N, D) - 1.0) / 5.0
         x = _tensor_from_numpy(x_np, self.device, requires_grad=True)
 
@@ -81,9 +80,9 @@ class TestRNNEndToEndGradients(unittest.TestCase):
         Wih = _unwrap_param_tensor(cell.W_ih)
 
         eps = 1e-3
-        i, j = 0, 1  # check a single entry
+        i, j = 0, 1                        
 
-        # ---- Analytic gradient ----
+                                     
         _zero_module_grads(rnn)
         x.zero_grad()
 
@@ -94,7 +93,7 @@ class TestRNNEndToEndGradients(unittest.TestCase):
         self.assertIsNotNone(Wih.grad, "W_ih.grad should exist after backward()")
         grad_analytic = float(Wih.grad.to_numpy()[i, j])
 
-        # ---- Numerical gradient (central difference) ----
+                                                           
         W_base = Wih.to_numpy().copy()
 
         W_plus = W_base.copy()
@@ -105,7 +104,7 @@ class TestRNNEndToEndGradients(unittest.TestCase):
         h_seq_p, _ = rnn.forward(x)
         loss_p = float(
             h_seq_p.sum().to_numpy()
-        )  # scalar tensor -> numpy scalar -> float
+        )                                          
 
         W_minus = W_base.copy()
         W_minus[i, j] -= eps
@@ -115,7 +114,7 @@ class TestRNNEndToEndGradients(unittest.TestCase):
         h_seq_m, _ = rnn.forward(x)
         loss_m = float(h_seq_m.sum().to_numpy())
 
-        # Restore
+                 
         Wih.copy_from_numpy(W_base)
 
         grad_num = (loss_p - loss_m) / (2.0 * eps)
@@ -151,7 +150,7 @@ class TestRNNTinyTrainingSanity(unittest.TestCase):
     A tiny training sanity test: run a few SGD steps and confirm the scalar loss decreases.
 
     This intentionally uses a simple differentiable scalar loss that should work with
-    your existing ops: loss = sum(h_seq). (No elementwise square/subtraction required.)
+    existing ops: loss = sum(h_seq). (No elementwise square/subtraction required.)
     """
 
     def setUp(self) -> None:
@@ -162,7 +161,7 @@ class TestRNNTinyTrainingSanity(unittest.TestCase):
         T, N, D, H = 5, 2, 3, 4
         rnn = RNN(input_size=D, hidden_size=H, bias=True)
 
-        # Input sequence (requires_grad can be False for "parameter-only" training)
+                                                                                   
         x_np = np.random.randn(T, N, D).astype(np.float32) * 0.1
         x = _tensor_from_numpy(x_np, self.device, requires_grad=False)
 
@@ -174,11 +173,11 @@ class TestRNNTinyTrainingSanity(unittest.TestCase):
             loss_t = h_seq.sum()
             return float(loss_t.to_numpy())
 
-        # Initial loss
+                      
         _zero_module_grads(rnn)
         loss0 = forward_loss()
 
-        # Training loop: minimize loss = sum(h_seq)
+                                                   
         for _ in range(steps):
             _zero_module_grads(rnn)
 
@@ -186,7 +185,7 @@ class TestRNNTinyTrainingSanity(unittest.TestCase):
             loss = h_seq.sum()
             loss.backward()
 
-            # SGD step over all parameters
+                                          
             for p in rnn.parameters():
                 pt = _unwrap_param_tensor(p)
                 if not getattr(pt, "requires_grad", False):
@@ -199,8 +198,8 @@ class TestRNNTinyTrainingSanity(unittest.TestCase):
 
         loss1 = forward_loss()
 
-        # We expect descent to reduce the scalar objective value.
-        # (If you later change the objective, update this accordingly.)
+                                                                 
+                                                                       
         self.assertLess(
             loss1,
             loss0,

@@ -13,14 +13,13 @@ def _tensor_supports_numpy_load() -> bool:
     Return True if we can create a Tensor with known numeric contents
     using ONLY public APIs.
     """
-    # Option 1: data ctor
+
     try:
         _ = Tensor(data=np.zeros((1, 1), dtype=np.float32), device=Device("cpu"))
         return True
     except TypeError:
         pass
 
-    # Option 2: shape ctor + public load method
     t = Tensor((1, 1), Device("cpu"))
     if hasattr(t, "from_numpy") and callable(getattr(t, "from_numpy")):
         return True
@@ -78,7 +77,6 @@ class TestDenseInfrastructure(TestCase):
         self.assertIsNone(d.in_features)
         self.assertIsNone(getattr(d, "_linear", None))
 
-        # Lazy module should have no params yet (until built)
         self.assertEqual(len(list(d.parameters())), 0)
 
         cfg = d.get_config()
@@ -91,19 +89,17 @@ class TestDenseInfrastructure(TestCase):
         device = Device("cpu")
         d = Dense(4, bias=True, device=device)
 
-        x = Tensor((2, 3), device)  # (batch=2, in_features=3)
+        x = Tensor((2, 3), device)
         y = d.forward(x)
 
         self.assertTrue(d.is_built)
         self.assertEqual(d.in_features, 3)
         self.assertEqual(y.shape, (2, 4))
 
-        # After build, parameters should be visible (weight + bias)
         params = list(d.parameters())
         unique = {id(p) for p in params}
-        self.assertEqual(len(unique), 2)  # weight + bias (unique)
+        self.assertEqual(len(unique), 2)
 
-        # Underlying linear should exist and have expected param shapes
         lin = getattr(d, "_linear", None)
         self.assertIsNotNone(lin)
         self.assertEqual(lin.weight.shape, (4, 3))
@@ -121,15 +117,13 @@ class TestDenseInfrastructure(TestCase):
         device = Device("cpu")
         d = Dense(4, bias=True, device=device)
 
-        # first call builds with in_features=3
         _ = d.forward(Tensor((2, 3), device))
 
-        # second call uses mismatching in_features
         with self.assertRaises(RuntimeError):
             d.forward(Tensor((2, 5), device))
 
     def test_dense_device_adopts_first_input_device_when_device_none(self):
-        # If device=None, Dense should adopt x.device on first forward
+
         d = Dense(4, bias=True, device=None)
         self.assertIsNone(d.device)
 
@@ -142,13 +136,9 @@ class TestDenseInfrastructure(TestCase):
     def test_dense_forward_rejects_device_mismatch_when_device_specified(self):
         d = Dense(4, bias=True, device=Device("cpu"))
 
-        # Create x on "cpu" but use a different Device string if your Device supports it.
-        # If your Device only has "cpu" and "cuda:*", this test becomes meaningful in CUDA tests.
         x = Tensor((2, 3), Device("cpu"))
-        # Should be ok
-        _ = d.forward(x)
 
-        # No further device mismatch test on CPU-only device set; covered in CUDA tests.
+        _ = d.forward(x)
 
     def test_dense_cpu_forward_matches_numpy_reference_after_setting_params(self):
         self.assertTrue(
@@ -160,7 +150,6 @@ class TestDenseInfrastructure(TestCase):
         device = Device("cpu")
         d = Dense(2, bias=True, device=device)
 
-        # Build with in_features=3
         x_np = np.array([[1.0, 0.0, -1.0], [2.0, 3.0, 4.0]], dtype=np.float32)
         x = _make_tensor_from_numpy(x_np, device)
         _ = d.forward(x)
@@ -198,13 +187,11 @@ class TestDenseInfrastructure(TestCase):
         lin = d._linear
         self.assertIsNotNone(lin)
 
-        # parents should match underlying Linear's contract: (x, weight, bias)
         self.assertEqual(len(ctx.parents), 3)
         self.assertIs(ctx.parents[0], x)
         self.assertIs(ctx.parents[1], lin.weight)
         self.assertIs(ctx.parents[2], lin.bias)
 
-        # saved_tensors should be (x, weight)
         self.assertEqual(len(ctx.saved_tensors), 2)
         self.assertIs(ctx.saved_tensors[0], x)
         self.assertIs(ctx.saved_tensors[1], lin.weight)
@@ -216,10 +203,8 @@ class TestDenseInfrastructure(TestCase):
         x = Tensor((2, 3), device)
         x.requires_grad = False
 
-        # Build once
         _ = d.forward(x)
 
-        # Turn off param grads (critical!)
         lin = d._linear
         self.assertIsNotNone(lin)
         lin.weight.requires_grad = False
@@ -229,8 +214,9 @@ class TestDenseInfrastructure(TestCase):
         out = d.forward(x)
 
         self.assertFalse(out.requires_grad)
-        self.assertIsNone(out._get_ctx(), "Expected no Context when nothing requires grad.")
-
+        self.assertIsNone(
+            out._get_ctx(), "Expected no Context when nothing requires grad."
+        )
 
     def test_dense_get_config_after_build_includes_in_features(self):
         device = Device("cpu")

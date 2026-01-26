@@ -43,17 +43,15 @@ class TestBroadcastToCtypes(_CudaTestCase):
         """
         lib = self.lib
 
-        # Ensure ndarray (handles numpy scalars, Python scalars, lists, etc.)
         x_arr = np.asarray(x)
         if not x_arr.flags["C_CONTIGUOUS"]:
             x_arr = np.ascontiguousarray(x_arr)
 
-        # Allocate at least 1 byte (cuda_malloc(0) may fail)
         nbytes = int(x_arr.nbytes)
         alloc_nbytes = max(nbytes, 1)
 
         x_dev = int(cuda_malloc(lib, alloc_nbytes))
-        cudaMemcpyHtoD(lib, x_dev, x_arr, nbytes)  # nbytes can be 0 only if truly empty
+        cudaMemcpyHtoD(lib, x_dev, x_arr, nbytes)
         return x_dev
 
     def _alloc_out(
@@ -91,7 +89,7 @@ class TestBroadcastToCtypes(_CudaTestCase):
         dtype = np.dtype(dtype)
 
         rng = np.random.default_rng(seed)
-        # deterministic + small
+
         x = (rng.random(in_shape, dtype=np.float64) - 0.5).astype(dtype, copy=False)
         y_ref = np.broadcast_to(x, out_shape).astype(dtype, copy=False)
 
@@ -124,33 +122,25 @@ class TestBroadcastToCtypes(_CudaTestCase):
             if x_dev:
                 cuda_free(lib, x_dev)
 
-    # -------------------------
-    # Correctness tests
-    # -------------------------
-
     def test_broadcast_to_float32_basic_expand(self) -> None:
-        # (3,1) -> (3,5)
+
         self._run_case(np.float32, (3, 1), (3, 5), seed=1)
 
     def test_broadcast_to_float32_rank_increase(self) -> None:
-        # (4,) -> (2,4)
+
         self._run_case(np.float32, (4,), (2, 4), seed=2)
 
     def test_broadcast_to_float32_multi_axis(self) -> None:
-        # (1,3,1) -> (2,3,4)
+
         self._run_case(np.float32, (1, 3, 1), (2, 3, 4), seed=3)
 
     def test_broadcast_to_float64_basic_expand(self) -> None:
-        # (2,1,3) -> (2,7,3)
+
         self._run_case(np.float64, (2, 1, 3), (2, 7, 3), seed=4)
 
     def test_broadcast_to_float64_scalar_to_tensor(self) -> None:
-        # () -> (2,3,4)
-        self._run_case(np.float64, tuple(), (2, 3, 4), seed=5)
 
-    # -------------------------
-    # Error handling
-    # -------------------------
+        self._run_case(np.float64, tuple(), (2, 3, 4), seed=5)
 
     def test_broadcast_to_unsupported_dtype_raises(self) -> None:
         lib = self.lib
@@ -165,7 +155,7 @@ class TestBroadcastToCtypes(_CudaTestCase):
             )
 
     def test_broadcast_to_incompatible_shapes_raises(self) -> None:
-        # (2,3) cannot broadcast to (2,4)
+
         lib = self.lib
         dtype = np.float32
         x = (np.random.rand(2, 3) - 0.5).astype(dtype, copy=False)
@@ -192,7 +182,7 @@ class TestBroadcastToCtypes(_CudaTestCase):
                 cuda_free(lib, x_dev)
 
     def test_broadcast_to_zero_numel_is_ok(self) -> None:
-        # output has zero elements -> should no-op and not crash
+
         lib = self.lib
         dtype = np.float32
 
@@ -202,7 +192,6 @@ class TestBroadcastToCtypes(_CudaTestCase):
         try:
             x_dev = self._alloc_and_copy_in(x)
 
-            # out_shape contains a zero dim => numel==0
             out_shape = (0, 5)
             y_dev, _ = self._alloc_out(dtype, out_shape)
 

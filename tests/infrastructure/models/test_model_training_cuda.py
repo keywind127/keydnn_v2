@@ -7,13 +7,11 @@ import numpy as np
 def _cuda_available() -> bool:
     """
     Best-effort CUDA availability check.
-    We only return True if your native CUDA DLL/wrappers can be imported and loaded.
     """
     try:
-        # Pick any known-good loader you already have in the repo.
-        # If you have multiple, choose the most stable one.
+
         from src.keydnn.infrastructure.native_cuda.python.maxpool2d_ctypes import (
-            load_keydnn_cuda_native,  # type: ignore
+            load_keydnn_cuda_native,
         )
 
         _ = load_keydnn_cuda_native()
@@ -25,7 +23,7 @@ def _cuda_available() -> bool:
 @unittest.skipUnless(_cuda_available(), "CUDA native DLL/wrappers not available")
 class TestSequentialXORTrainingCUDA(unittest.TestCase):
     def test_xor_training_one_hidden_layer_cuda(self):
-        # Only skip when components truly cannot be imported.
+
         try:
             from src.keydnn.infrastructure.models._sequential import Sequential
             from src.keydnn.infrastructure.fully_connected._linear import Linear
@@ -36,7 +34,6 @@ class TestSequentialXORTrainingCUDA(unittest.TestCase):
         except (ModuleNotFoundError, ImportError) as e:
             self.skipTest(f"XOR CUDA training test skipped (missing import): {e}")
 
-        # ---------------- Dataset ----------------
         x_np = np.array(
             [[0.0, 0.0], [0.0, 1.0], [1.0, 0.0], [1.0, 1.0]],
             dtype=np.float32,
@@ -51,7 +48,6 @@ class TestSequentialXORTrainingCUDA(unittest.TestCase):
         y = Tensor(shape=y_np.shape, device=device)
         y.copy_from_numpy(y_np)
 
-        # --- Guardrails: ensure we're truly on CUDA and not silently CPU ---
         self.assertTrue(
             hasattr(x, "device") and str(x.device) == "cuda:0",
             f"x is not on cuda:0 (silent CPU fallback?). x.device={getattr(x, 'device', None)}",
@@ -61,8 +57,6 @@ class TestSequentialXORTrainingCUDA(unittest.TestCase):
             f"y is not on cuda:0 (silent CPU fallback?). y.device={getattr(y, 'device', None)}",
         )
 
-        # Optional stronger checks if your Tensor exposes device pointer / cuda alloc
-        # (won't fail if you don't have these attributes)
         if hasattr(x, "_cuda_ptr"):
             self.assertNotEqual(
                 getattr(x, "_cuda_ptr"), 0, "x CUDA pointer not allocated"
@@ -72,7 +66,6 @@ class TestSequentialXORTrainingCUDA(unittest.TestCase):
                 getattr(y, "_cuda_ptr"), 0, "y CUDA pointer not allocated"
             )
 
-        # ---------------- Model ----------------
         hidden_dim = 8
         model: Sequential = Sequential(
             Linear(2, hidden_dim, device=device),
@@ -81,15 +74,6 @@ class TestSequentialXORTrainingCUDA(unittest.TestCase):
             Sigmoid(),
         )
 
-        # If your framework requires explicit device move for modules/params, do it here.
-        # Try model.to(device) if you have it; otherwise do nothing and let ops enforce device.
-        # if hasattr(model, "to"):
-        #     model.to(device)  # type: ignore[attr-defined]
-
-        # for p in model.layers():
-        #     p.to(device)
-
-        # Verify parameters (if available) are on CUDA too (catches partial moves).
         if hasattr(model, "parameters"):
             for i, p in enumerate(model.parameters()):
                 if hasattr(p, "device"):
@@ -99,12 +83,10 @@ class TestSequentialXORTrainingCUDA(unittest.TestCase):
                         f"param[{i}] not on cuda:0; got {p.device}",
                     )
 
-        # ---------------- Loss (MSE) ----------------
         def mse(pred, target):
             diff = pred - target
             sq = diff * diff
 
-            # ensure loss remains Tensor-like, not python float
             if hasattr(sq, "mean"):
                 return sq.mean()
             if hasattr(sq, "sum"):
@@ -112,20 +94,16 @@ class TestSequentialXORTrainingCUDA(unittest.TestCase):
 
             raise AttributeError("Tensor must implement mean() or sum()")
 
-        # ---------------- Optimizer ----------------
         opt = SGD(model.parameters(), lr=1.0)
         self.assertTrue(hasattr(opt, "step"), "SGD must implement step().")
 
-        # ---------------- Training loop ----------------
-        # CUDA can be numerically a bit different; allow more epochs if needed.
         epochs = 800
 
-        model.build(x[:1])  # ensure built before training
+        model.build(x[:1])
 
         for _ in range(epochs):
             pred = model(x)
 
-            # Guardrail: pred should stay on CUDA
             if hasattr(pred, "device"):
                 self.assertEqual(
                     str(pred.device),
@@ -143,7 +121,6 @@ class TestSequentialXORTrainingCUDA(unittest.TestCase):
             loss.backward()
             opt.step()
 
-            # Clear gradients
             if hasattr(model, "zero_grad"):
                 model.zero_grad()
             else:
@@ -151,10 +128,8 @@ class TestSequentialXORTrainingCUDA(unittest.TestCase):
                     if hasattr(p, "zero_grad"):
                         p.zero_grad()
 
-        # ---------------- Evaluation ----------------
         pred = model(x)
 
-        # We evaluate on CPU numpy (common pattern even for CUDA backends).
         self.assertTrue(
             hasattr(pred, "to_numpy"),
             f"Expected prediction to support to_numpy(); got type={type(pred)}",

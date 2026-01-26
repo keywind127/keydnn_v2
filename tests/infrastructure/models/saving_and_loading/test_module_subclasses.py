@@ -23,8 +23,7 @@ def _iter_infra_modules(package: ModuleType) -> Iterable[ModuleType]:
         try:
             yield importlib.import_module(m.name)
         except Exception:
-            # Some submodules may require optional deps / native libs.
-            # If you want strict behavior, remove this and let import fail.
+
             continue
 
 
@@ -36,7 +35,6 @@ def _iter_module_subclasses(*, root_pkg_name: str) -> Iterable[Type[Module]]:
 
     seen: set[Type[Module]] = set()
 
-    # include already-imported root pkg module itself
     all_py_mods = [root_pkg, *_iter_infra_modules(root_pkg)]
 
     for py_mod in all_py_mods:
@@ -45,13 +43,11 @@ def _iter_module_subclasses(*, root_pkg_name: str) -> Iterable[Type[Module]]:
                 continue
             if not issubclass(obj, Module):
                 continue
-            # Avoid duplicates from re-exports
+
             if obj in seen:
                 continue
             seen.add(obj)
 
-            # Only count classes that *belong* to the infra package namespace
-            # (prevents pulling in random third-party Module subclasses, if any)
             if obj.__module__.startswith(root_pkg_name):
                 yield obj
 
@@ -65,7 +61,7 @@ def _is_abstract_like(cls: Type[Module]) -> bool:
         return True
     if "base" in name or "abstract" in name or "mixin" in name:
         return True
-    # Many pure containers or stateless wrappers are still instantiable; do not skip.
+
     return False
 
 
@@ -93,17 +89,14 @@ class TestAllModulesImplementConfigForJSON(unittest.TestCase):
         problems: list[str] = []
 
         for cls in _iter_module_subclasses(root_pkg_name=infra_root):
-            # Skip base/abstract-ish helpers
+
             if _is_abstract_like(cls):
                 continue
 
-            # Mixins will often show up here; skip them explicitly (they're not real Modules)
             if not issubclass(cls, Module):
                 continue
 
-            # Must provide a get_config override OR be safely constructible via best-effort path.
-            # We enforce explicit hooks because you said you want to detect forgotten layers.
-            has_get = cls.get_config is not Module.get_config  # type: ignore[attr-defined]
+            has_get = cls.get_config is not Module.get_config
             has_from = hasattr(cls, "from_config") and callable(
                 getattr(cls, "from_config")
             )
@@ -116,11 +109,8 @@ class TestAllModulesImplementConfigForJSON(unittest.TestCase):
                 )
                 continue
 
-            # Additionally: ensure module_to_config can at least see/encode the type name.
-            # This indirectly checks registration for most implementations.
             try:
-                # We can't instantiate generically, so we only validate that the hooks exist.
-                # If you *do* have a central registry of default constructors, plug it in here.
+
                 pass
             except Exception as e:
                 problems.append(
@@ -164,17 +154,15 @@ class TestAllConcreteModulesRoundTripIfZeroArgConstructible(unittest.TestCase):
             if _is_abstract_like(cls):
                 continue
 
-            # Must have explicit hooks (same rationale as above)
-            has_get = cls.get_config is not Module.get_config  # type: ignore[attr-defined]
+            has_get = cls.get_config is not Module.get_config
             has_from = hasattr(cls, "from_config") and callable(
                 getattr(cls, "from_config")
             )
             if not (has_get and has_from):
                 continue
 
-            # Try zero-arg construction
             try:
-                m = cls()  # type: ignore[call-arg]
+                m = cls()
             except TypeError:
                 skipped.append(f"{cls.__module__}.{cls.__qualname__}")
                 continue

@@ -1,4 +1,3 @@
-# tests/infrastructure/models/saving_and_loading/cuda/test_flatten.py
 from __future__ import annotations
 
 import json
@@ -18,7 +17,7 @@ from src.keydnn.domain.device._device import Device
 
 def _cuda_available() -> bool:
     try:
-        from src.keydnn.infrastructure.native_cuda.python.maxpool2d_ctypes import (  # type: ignore
+        from src.keydnn.infrastructure.native_cuda.python.maxpool2d_ctypes import (
             load_keydnn_cuda_native,
         )
 
@@ -54,12 +53,12 @@ class TestModelSaveLoadFlattenJSONCpu(unittest.TestCase):
             Linear(in_features=6, out_features=4, bias=True),
         )
 
-        lin: Linear = model[1]  # type: ignore[assignment]
+        lin: Linear = model[1]
         W = np.arange(4 * 6, dtype=np.float32).reshape(4, 6) / 10.0
         b = np.array([0.1, -0.2, 0.3, -0.4], dtype=np.float32)
         lin.weight.copy_from_numpy(W)
         self.assertIsNotNone(lin.bias)
-        lin.bias.copy_from_numpy(b)  # type: ignore[union-attr]
+        lin.bias.copy_from_numpy(b)
 
         x_np = np.arange(2 * 2 * 3, dtype=np.float32).reshape(2, 2, 3) / 5.0
         x = Tensor(shape=x_np.shape, device=lin.device, requires_grad=False)
@@ -82,11 +81,11 @@ class TestModelSaveLoadFlattenJSONCpu(unittest.TestCase):
         self.assertIsInstance(loaded[0], Flatten)
         self.assertIsInstance(loaded[1], Linear)
 
-        loaded_lin: Linear = loaded[1]  # type: ignore[assignment]
+        loaded_lin: Linear = loaded[1]
         np.testing.assert_allclose(loaded_lin.weight.to_numpy(), W, rtol=0.0, atol=0.0)
         self.assertIsNotNone(loaded_lin.bias)
         np.testing.assert_allclose(
-            loaded_lin.bias.to_numpy(),  # type: ignore[union-attr]
+            loaded_lin.bias.to_numpy(),
             b,
             rtol=0.0,
             atol=0.0,
@@ -142,14 +141,14 @@ class TestModelSaveLoadFlattenJSONCuda(unittest.TestCase):
             Linear(in_features=6, out_features=4, bias=True, device=dev),
         )
 
-        lin: Linear = model[1]  # type: ignore[assignment]
+        lin: Linear = model[1]
         self.assertTrue(lin.device.is_cuda())
 
         W = np.arange(4 * 6, dtype=np.float32).reshape(4, 6) / 10.0
         b = np.array([0.1, -0.2, 0.3, -0.4], dtype=np.float32)
         lin.weight.copy_from_numpy(W)
         self.assertIsNotNone(lin.bias)
-        lin.bias.copy_from_numpy(b)  # type: ignore[union-attr]
+        lin.bias.copy_from_numpy(b)
 
         x_np = np.arange(2 * 2 * 3, dtype=np.float32).reshape(2, 2, 3) / 5.0
         x = _make_input_on_device(dev, x_np)
@@ -165,12 +164,12 @@ class TestModelSaveLoadFlattenJSONCuda(unittest.TestCase):
         self.assertIsInstance(loaded[0], Flatten)
         self.assertIsInstance(loaded[1], Linear)
 
-        loaded_lin: Linear = loaded[1]  # type: ignore[assignment]
+        loaded_lin: Linear = loaded[1]
 
         np.testing.assert_allclose(loaded_lin.weight.to_numpy(), W, rtol=0.0, atol=0.0)
         self.assertIsNotNone(loaded_lin.bias)
         np.testing.assert_allclose(
-            loaded_lin.bias.to_numpy(),  # type: ignore[union-attr]
+            loaded_lin.bias.to_numpy(),
             b,
             rtol=0.0,
             atol=0.0,

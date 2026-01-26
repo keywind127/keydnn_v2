@@ -367,7 +367,7 @@ class GRUCell(Module):
         - Bias gradients are computed for the combined per-gate bias
           `b_gate = b_ih_gate + b_hh_gate` and then returned for both `b_ih`
           and `b_hh`, matching the forward composition used here.
-        - This method is not currently invoked by `forward` unless you attach a
+        - This method is not currently invoked by `forward` unless attached a
           `Context` that calls it.
 
         Important

@@ -19,12 +19,10 @@ class DummyTensor:
         self.shape = tuple(shape)
         self.device = device
         self.dtype = np.dtype(dtype)
-        self.data = np.full(
-            self.shape, 7, dtype=self.dtype
-        )  # non-trivial initial content
+        self.data = np.full(self.shape, 7, dtype=self.dtype)
 
     def copy_from(self, other: "DummyTensor") -> None:
-        # Mimic in-place copy semantics
+
         assert other.shape == self.shape
         self.data[...] = other.data
 
@@ -47,7 +45,7 @@ class TestConstantInitializers(unittest.TestCase):
         try:
             from src.keydnn.infrastructure.utils.weight_initializer import (
                 _constant,
-            )  # noqa: F401
+            )
         except Exception:
             pass
 

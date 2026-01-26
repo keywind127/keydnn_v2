@@ -52,7 +52,7 @@ def main() -> None:
     lin.bias.copy_from_numpy(b)
 
     # ----------------------------
-    # Optional: sanity forward pass
+    # sanity forward pass
     # ----------------------------
     x_np = np.array(
         [[1.0, 0.0, -1.0], [2.0, 1.0, 0.5]],

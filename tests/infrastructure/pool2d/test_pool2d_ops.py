@@ -236,11 +236,8 @@ class TestPool2dOps(unittest.TestCase):
     def setUp(self) -> None:
         np.random.seed(0)
 
-    # -----------------------------
-    # Existing deterministic tests
-    # -----------------------------
     def test_maxpool2d_forward_known_values(self):
-        # Input: 1x1x2x2
+
         x = np.array([[[[1.0, 2.0], [3.0, 4.0]]]], dtype=np.float32)
 
         y, argmax_idx = maxpool2d_forward_cpu(x, kernel_size=2, stride=2, padding=0)
@@ -253,7 +250,7 @@ class TestPool2dOps(unittest.TestCase):
         self.assertEqual(argmax_idx.dtype, np.int64)
 
     def test_maxpool2d_backward_routes_grad_to_argmax(self):
-        # Same input as above, max is at bottom-right (value=4)
+
         x = np.array([[[[1.0, 2.0], [3.0, 4.0]]]], dtype=np.float32)
 
         _, argmax_idx = maxpool2d_forward_cpu(x, kernel_size=2, stride=2, padding=0)
@@ -285,7 +282,6 @@ class TestPool2dOps(unittest.TestCase):
             grad_out, x_shape=x_shape, kernel_size=2, stride=2, padding=0
         )
 
-        # 8 distributed over 4 elements => 2 each
         expected = np.array([[[[2.0, 2.0], [2.0, 2.0]]]], dtype=np.float32)
 
         self.assertEqual(grad_x.shape, x_shape)
@@ -301,12 +297,9 @@ class TestPool2dOps(unittest.TestCase):
         grad_x = global_avgpool2d_backward_cpu(grad_out, x_shape=x.shape)
 
         self.assertEqual(grad_x.shape, x.shape)
-        # Each element gets 10/(H*W)
+
         self.assertTrue(np.allclose(grad_x, 10.0 / (4.0 * 5.0), atol=1e-6, rtol=1e-6))
 
-    # -----------------------------
-    # New: float64 coverage
-    # -----------------------------
     def test_maxpool2d_forward_float64_matches_reference(self):
         x = np.array([[[[1.0, 2.0], [3.0, 4.0]]]], dtype=np.float64)
 
@@ -333,9 +326,6 @@ class TestPool2dOps(unittest.TestCase):
         self.assertEqual(grad_x.dtype, np.float64)
         np.testing.assert_allclose(grad_x, expected_grad_x, rtol=0, atol=0)
 
-    # -----------------------------
-    # New: randomized stress tests for float32/float64
-    # -----------------------------
     def test_maxpool2d_forward_randomized_float32_float64(self):
         rng = np.random.default_rng(123)
 
@@ -373,16 +363,12 @@ class TestPool2dOps(unittest.TestCase):
                 np.testing.assert_allclose(y, y_ref, rtol=0, atol=0)
                 np.testing.assert_array_equal(idx, idx_ref)
 
-    # -----------------------------
-    # New: dtype fallback behavior (unsupported dtypes)
-    # -----------------------------
     def test_maxpool2d_forward_dtype_handling(self):
-        # Non-float dtypes should be rejected (padding uses -inf).
+
         x_i32 = np.array([[[[1, 2], [3, 4]]]], dtype=np.int32)
         with self.assertRaises(TypeError):
             _ = maxpool2d_forward_cpu(x_i32, kernel_size=2, stride=2, padding=0)
 
-        # float16 is allowed (falls back to NumPy path if native doesn't support it).
         x_f16 = np.array([[[[1.0, 2.0], [3.0, 4.0]]]], dtype=np.float16)
         y16, idx16 = maxpool2d_forward_cpu(x_f16, kernel_size=2, stride=2, padding=0)
 
@@ -395,14 +381,9 @@ class TestPool2dOps(unittest.TestCase):
         )
         self.assertEqual(idx16.dtype, np.int64)
 
-    # -----------------------------
-    # New: verify warning on native load failure (simulated)
-    # -----------------------------
     def test_maxpool2d_forward_warns_and_falls_back_when_native_missing(self):
         x = np.array([[[[1.0, 2.0], [3.0, 4.0]]]], dtype=np.float32)
 
-        # Force load_keydnn_native() to raise OSError so we can assert warning behavior.
-        # Patch the function where maxpool2d_forward_cpu imports it from.
         with patch(
             "src.keydnn.infrastructure.native.python.maxpool2d_ctypes.load_keydnn_native",
             side_effect=OSError("simulated missing dll"),
@@ -428,28 +409,24 @@ class TestPool2dOps(unittest.TestCase):
         x = np.array([[[[1.0, 2.0], [3.0, 4.0]]]], dtype=np.float32)
         _, idx = maxpool2d_forward_cpu(x, kernel_size=2, stride=2, padding=0)
 
-        # float32 OK
         go32 = np.array([[[[5.0]]]], dtype=np.float32)
         gx32 = maxpool2d_backward_cpu(
             go32, idx, x_shape=x.shape, kernel_size=2, stride=2, padding=0
         )
         self.assertEqual(gx32.dtype, np.float32)
 
-        # float64 OK
         go64 = np.array([[[[5.0]]]], dtype=np.float64)
         gx64 = maxpool2d_backward_cpu(
             go64, idx, x_shape=x.shape, kernel_size=2, stride=2, padding=0
         )
         self.assertEqual(gx64.dtype, np.float64)
 
-        # float16 allowed
         go16 = np.array([[[[5.0]]]], dtype=np.float16)
         gx16 = maxpool2d_backward_cpu(
             go16, idx, x_shape=x.shape, kernel_size=2, stride=2, padding=0
         )
         self.assertEqual(gx16.dtype, np.float16)
 
-        # int grads: allowed (accumulates as ints)
         go_i32 = np.array([[[[5]]]], dtype=np.int32)
         gx_i32 = maxpool2d_backward_cpu(
             go_i32, idx, x_shape=x.shape, kernel_size=2, stride=2, padding=0

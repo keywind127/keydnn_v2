@@ -82,7 +82,6 @@ class TestBidirectionalWithLSTM(unittest.TestCase):
         np.random.seed(0)
         T, N, D, H = 5, 2, 3, 4
 
-        # Template layer used by Bidirectional; wrapper will clone internally
         layer = LSTM(
             input_size=D,
             hidden_size=H,
@@ -99,7 +98,6 @@ class TestBidirectionalWithLSTM(unittest.TestCase):
             return_state=False,
         )
 
-        # Bidirectional clones forward/backward layers internally.
         _set_lstm_deterministic_params(bi.forward_layer, D=D, H=H, seed=123)
         _set_lstm_deterministic_params(bi.backward_layer, D=D, H=H, seed=456)
 
@@ -109,7 +107,6 @@ class TestBidirectionalWithLSTM(unittest.TestCase):
         y = _unwrap_out(bi.forward(x))
         y_np = y.to_numpy()
 
-        # Manual reference using the SAME cloned sublayers
         y_f = _unwrap_out(bi.forward_layer.forward(x))
         x_rev = _reverse_time(x)
         y_b_rev = _unwrap_out(bi.backward_layer.forward(x_rev))
@@ -158,7 +155,7 @@ class TestBidirectionalWithLSTM(unittest.TestCase):
         self.assertEqual(len(ret), 3)
 
         out, state_f, state_b = ret
-        # out should already be the merged final output tensor for return_sequences=False
+
         self.assertEqual(out.shape, (N, 2 * H))
 
         self.assertIsInstance(state_f, tuple)

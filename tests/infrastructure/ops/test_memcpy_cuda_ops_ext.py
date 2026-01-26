@@ -1,4 +1,3 @@
-# tests/infrastructure/ops/test_memcpy_cuda_ext.py
 """
 Unit tests for Tensor-boundary CUDA memcpy helpers (memcpy_cuda_ext.py).
 
@@ -30,20 +29,20 @@ from src.keydnn.infrastructure.ops.memcpy_cuda_ext import (
 def _get_cuda_device(index: int = 0) -> Device:
     """Best-effort helper to obtain a CUDA Device instance across possible Device APIs."""
     if hasattr(Device, "cuda") and callable(getattr(Device, "cuda")):
-        return Device.cuda(index)  # type: ignore[attr-defined]
+        return Device.cuda(index)
 
     try:
-        return Device("cuda", index)  # type: ignore[call-arg]
+        return Device("cuda", index)
     except Exception:
         pass
 
     try:
-        return Device(f"cuda:{index}")  # type: ignore[call-arg]
+        return Device(f"cuda:{index}")
     except Exception:
         pass
 
     try:
-        return Device(kind="cuda", index=index)  # type: ignore[call-arg]
+        return Device(kind="cuda", index=index)
     except Exception as e:
         raise RuntimeError(
             "Unable to construct a CUDA Device; update _get_cuda_device()."
@@ -109,7 +108,6 @@ class TestMemcpyCudaExt(unittest.TestCase):
         out = np.empty_like(x)
         y = copy_cuda_to_host(x_cuda, out=out, device=self.device_index, sync=True)
 
-        # Should return the same object
         self.assertIs(y, out)
         np.testing.assert_allclose(y, x, rtol=0.0, atol=0.0)
 
@@ -127,7 +125,6 @@ class TestMemcpyCudaExt(unittest.TestCase):
         self.assertEqual(tuple(y_cuda.shape), x.shape)
         self.assertEqual(np.dtype(y_cuda.dtype), np.float32)
 
-        # Different device pointers (unless empty)
         if int(x_cuda.data) != 0 and int(y_cuda.data) != 0:
             self.assertNotEqual(int(x_cuda.data), int(y_cuda.data))
 
@@ -141,7 +138,7 @@ class TestMemcpyCudaExt(unittest.TestCase):
             x, device_tensor=self.cuda_device, device=self.device_index, sync=True
         )
 
-        out = np.empty((4, 3), dtype=np.float32).T  # makes it non-contiguous view (3,4)
+        out = np.empty((4, 3), dtype=np.float32).T
         self.assertFalse(out.flags["C_CONTIGUOUS"])
 
         with self.assertRaises(ValueError):
@@ -151,13 +148,12 @@ class TestMemcpyCudaExt(unittest.TestCase):
         """Passing a CPU tensor to copy_cuda_to_host should raise TypeError."""
         x_np = np.ones((2, 3), dtype=np.float32)
 
-        # CPU tensor creation varies across repos; attempt common patterns.
         if hasattr(Tensor, "from_numpy") and callable(getattr(Tensor, "from_numpy")):
-            x_cpu = Tensor.from_numpy(x_np, device=Device("cpu"))  # type: ignore[call-arg]
+            x_cpu = Tensor.from_numpy(x_np, device=Device("cpu"))
         else:
             try:
-                x_cpu = Tensor(x_np.shape, device=Device("cpu"), requires_grad=False)  # type: ignore[call-arg]
-                x_cpu._data = x_np  # type: ignore[attr-defined]
+                x_cpu = Tensor(x_np.shape, device=Device("cpu"), requires_grad=False)
+                x_cpu._data = x_np
             except Exception as e:
                 raise unittest.SkipTest(
                     f"Unable to construct CPU tensor in this repo; update test_copy_cuda_to_host_rejects_cpu_tensor: {e}"
@@ -169,7 +165,12 @@ class TestMemcpyCudaExt(unittest.TestCase):
     def test_copy_host_to_cuda_rejects_non_ndarray(self) -> None:
         """copy_host_to_cuda should reject non-ndarray input."""
         with self.assertRaises(TypeError):
-            _ = copy_host_to_cuda([1, 2, 3], device_tensor=self.cuda_device, device=self.device_index, sync=True)  # type: ignore[arg-type]
+            _ = copy_host_to_cuda(
+                [1, 2, 3],
+                device_tensor=self.cuda_device,
+                device=self.device_index,
+                sync=True,
+            )
 
 
 if __name__ == "__main__":

@@ -34,7 +34,7 @@ extern "C" {
 	// ----------------------------
 	// Compare: gt (outputs 1/0)
 	// Notes:
-	// - Output is float32 to match your current CPU semantics (astype(np.float32)).
+	// - Output is float32 to match current CPU semantics (astype(np.float32)).
 	// - This is intentionally "no-grad" in Python.
 	// ----------------------------
 	KEYDNN_CUDA_API int keydnn_cuda_gt_f32(const float* a, const float* b, float* y, int64_t n);
@@ -143,7 +143,7 @@ extern "C" {
 		std::int64_t out
 	);
 
-	// Optional: inplace variant y += b (broadcast)
+	// inplace variant y += b (broadcast)
 	KEYDNN_EXPORT int keydnn_cuda_bias_add_inplace_f32(
 		float* y,
 		const float* b,

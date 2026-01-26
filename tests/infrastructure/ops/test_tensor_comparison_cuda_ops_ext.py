@@ -1,4 +1,3 @@
-# tests/infrastructure/ops/test_tensor_comparison_cuda_ops_ext.py
 """
 Unit tests for CUDA Tensor-boundary comparison wrapper (tensor_comparison_cuda_ext.py).
 
@@ -41,14 +40,12 @@ from src.keydnn.infrastructure.ops.pool2d_cuda import (
 )
 
 from src.keydnn.infrastructure.ops.tensor_comparison_cuda_ext import (
-    # elementwise
     gt,
     ge,
     lt,
     le,
     eq,
     ne,
-    # scalar
     gt_scalar,
     ge_scalar,
     lt_scalar,
@@ -61,20 +58,20 @@ from src.keydnn.infrastructure.ops.tensor_comparison_cuda_ext import (
 def _get_cuda_device(index: int = 0) -> Device:
     """Best-effort helper to obtain a CUDA Device instance across possible Device APIs."""
     if hasattr(Device, "cuda") and callable(getattr(Device, "cuda")):
-        return Device.cuda(index)  # type: ignore[attr-defined]
+        return Device.cuda(index)
 
     try:
-        return Device("cuda", index)  # type: ignore[call-arg]
+        return Device("cuda", index)
     except Exception:
         pass
 
     try:
-        return Device(f"cuda:{index}")  # type: ignore[call-arg]
+        return Device(f"cuda:{index}")
     except Exception:
         pass
 
     try:
-        return Device(kind="cuda", index=index)  # type: ignore[call-arg]
+        return Device(kind="cuda", index=index)
     except Exception as e:
         raise RuntimeError(
             "Unable to construct a CUDA Device; update _get_cuda_device() for this repo."
@@ -161,9 +158,6 @@ class TestTensorComparisonCudaExt(unittest.TestCase):
         except Exception as e:
             raise unittest.SkipTest(f"Unable to construct CUDA Device: {e}") from e
 
-    # ----------------------------
-    # Helpers
-    # ----------------------------
     def _make_cuda_tensor_from_host(self, x: np.ndarray) -> Tensor:
         """Allocate device memory, copy host -> device, and wrap as CUDA Tensor."""
         x_c = np.ascontiguousarray(x)
@@ -215,9 +209,6 @@ class TestTensorComparisonCudaExt(unittest.TestCase):
         self.assertEqual(y.dtype, np.float32)
         np.testing.assert_allclose(y, ref.astype(np.float32), rtol=0.0, atol=0.0)
 
-    # ----------------------------
-    # Elementwise comparisons (tensor-tensor)
-    # ----------------------------
     def test_all_elementwise_ops_f32_match_numpy(self) -> None:
         rng = np.random.default_rng(0)
         a = rng.standard_normal((64,), dtype=np.float32)
@@ -257,9 +248,6 @@ class TestTensorComparisonCudaExt(unittest.TestCase):
         self._assert_mask(eq(a_t, b_t, device=self.device_index), (a == b), a.shape)
         self._assert_mask(ne(a_t, b_t, device=self.device_index), (a != b), a.shape)
 
-    # ----------------------------
-    # Scalar comparisons (tensor-scalar)
-    # ----------------------------
     def test_all_scalar_ops_f32_match_numpy(self) -> None:
         rng = np.random.default_rng(2)
         a = rng.standard_normal((128,), dtype=np.float32)
@@ -329,9 +317,6 @@ class TestTensorComparisonCudaExt(unittest.TestCase):
         with self.assertRaises(TypeError):
             _ = ne_scalar(a_t, 1.0, device=self.device_index)
 
-    # ----------------------------
-    # Error handling: dtype/shape/device
-    # ----------------------------
     def test_binary_raises_on_dtype_mismatch(self) -> None:
         rng = np.random.default_rng(4)
         a = rng.standard_normal((16,), dtype=np.float32)
@@ -361,14 +346,14 @@ class TestTensorComparisonCudaExt(unittest.TestCase):
         b_np = np.ones((2, 3), dtype=np.float32)
 
         if hasattr(Tensor, "from_numpy") and callable(getattr(Tensor, "from_numpy")):
-            a_cpu = Tensor.from_numpy(a_np, device=Device("cpu"))  # type: ignore[call-arg]
-            b_cpu = Tensor.from_numpy(b_np, device=Device("cpu"))  # type: ignore[call-arg]
+            a_cpu = Tensor.from_numpy(a_np, device=Device("cpu"))
+            b_cpu = Tensor.from_numpy(b_np, device=Device("cpu"))
         else:
             try:
-                a_cpu = Tensor(a_np.shape, device=Device("cpu"), requires_grad=False)  # type: ignore[call-arg]
-                a_cpu._data = a_np  # type: ignore[attr-defined]
-                b_cpu = Tensor(b_np.shape, device=Device("cpu"), requires_grad=False)  # type: ignore[call-arg]
-                b_cpu._data = b_np  # type: ignore[attr-defined]
+                a_cpu = Tensor(a_np.shape, device=Device("cpu"), requires_grad=False)
+                a_cpu._data = a_np
+                b_cpu = Tensor(b_np.shape, device=Device("cpu"), requires_grad=False)
+                b_cpu._data = b_np
             except Exception as e:
                 raise unittest.SkipTest(
                     f"Unable to construct CPU tensors; update test_binary_raises_on_cpu_tensor: {e}"
@@ -381,11 +366,11 @@ class TestTensorComparisonCudaExt(unittest.TestCase):
         a_np = np.ones((2, 3), dtype=np.float32)
 
         if hasattr(Tensor, "from_numpy") and callable(getattr(Tensor, "from_numpy")):
-            a_cpu = Tensor.from_numpy(a_np, device=Device("cpu"))  # type: ignore[call-arg]
+            a_cpu = Tensor.from_numpy(a_np, device=Device("cpu"))
         else:
             try:
-                a_cpu = Tensor(a_np.shape, device=Device("cpu"), requires_grad=False)  # type: ignore[call-arg]
-                a_cpu._data = a_np  # type: ignore[attr-defined]
+                a_cpu = Tensor(a_np.shape, device=Device("cpu"), requires_grad=False)
+                a_cpu._data = a_np
             except Exception as e:
                 raise unittest.SkipTest(
                     f"Unable to construct CPU tensors; update test_scalar_ops_raise_on_cpu_tensor: {e}"
@@ -394,9 +379,6 @@ class TestTensorComparisonCudaExt(unittest.TestCase):
         with self.assertRaises(TypeError):
             _ = ge_scalar(a_cpu, 1.0, device=self.device_index)
 
-    # ----------------------------
-    # numel==0 behavior
-    # ----------------------------
     def test_numel_zero_tensor_tensor_returns_empty_cuda_tensor(self) -> None:
         a_t = self._make_empty_cuda_tensor((0,), np.float32)
         b_t = self._make_empty_cuda_tensor((0,), np.float32)

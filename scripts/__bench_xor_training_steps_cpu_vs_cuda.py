@@ -700,7 +700,7 @@ def main() -> None:
                     "Expected profile.sections[name].cpu_ms/count (and optionally gpu_ms)."
                 )
 
-            # Per-op (optional)
+            # Per-op
             per_op_totals_cpu: dict[str, float] = {}
             per_op_totals_gpu: dict[str, float] = {}
             per_op_counts: dict[str, int] = {}

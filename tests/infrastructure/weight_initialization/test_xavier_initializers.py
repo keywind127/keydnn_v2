@@ -79,7 +79,6 @@ class TestXavierInitializers(unittest.TestCase):
         self.assertLessEqual(float(t.data.max()), bound * 1.001)
         self.assertGreaterEqual(float(t.data.min()), -bound * 1.001)
 
-        # For U(-b, b): Var = b^2 / 3
         expected_std = math.sqrt((bound * bound) / 3.0)
         self._assert_mean_std_close(
             t.data, expected_std=expected_std, atol_mean=5e-3, rtol_std=0.10

@@ -1,4 +1,3 @@
-# tests/infrastructure/models/saving_and_loading/cuda/test_linear.py
 from __future__ import annotations
 
 from pathlib import Path
@@ -20,7 +19,7 @@ def _cuda_available() -> bool:
     we assume CUDA ops are available for the test environment.
     """
     try:
-        from src.keydnn.infrastructure.native_cuda.python.maxpool2d_ctypes import (  # type: ignore
+        from src.keydnn.infrastructure.native_cuda.python.maxpool2d_ctypes import (
             load_keydnn_cuda_native,
         )
 
@@ -40,7 +39,7 @@ def _alloc_cuda_tensor_from_numpy(arr: np.ndarray, *, device: Device) -> Tensor:
     explicit allocation step via `_ensure_cuda_alloc(...)` before copies/ops.
     """
     t = Tensor(shape=arr.shape, device=device, requires_grad=False, dtype=arr.dtype)
-    # Ensure device memory exists (no-op if already allocated).
+
     t._ensure_cuda_alloc(dtype=np.dtype(arr.dtype))
     t.copy_from_numpy(arr)
     return t
@@ -60,7 +59,7 @@ class TestModelSaveLoadLinearJSONCuda(unittest.TestCase):
             Linear(in_features=3, out_features=2, bias=True, device=dev),
         )
 
-        lin: Linear = model[0]  # type: ignore[assignment]
+        lin: Linear = model[0]
         self.assertTrue(lin.device.is_cuda(), f"Expected CUDA device, got {lin.device}")
 
         W = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=np.float32)
@@ -68,7 +67,7 @@ class TestModelSaveLoadLinearJSONCuda(unittest.TestCase):
 
         lin.weight.copy_from_numpy(W)
         self.assertIsNotNone(lin.bias)
-        lin.bias.copy_from_numpy(b)  # type: ignore[union-attr]
+        lin.bias.copy_from_numpy(b)
 
         x_np = np.array([[1.0, 0.0, -1.0], [2.0, 1.0, 0.5]], dtype=np.float32)
         x = _alloc_cuda_tensor_from_numpy(x_np, device=lin.device)
@@ -87,10 +86,8 @@ class TestModelSaveLoadLinearJSONCuda(unittest.TestCase):
 
             loaded = Sequential.load_json(ckpt_path)
 
-        loaded_lin: Linear = loaded[0]  # type: ignore[assignment]
+        loaded_lin: Linear = loaded[0]
 
-        # Depending on your deserialization policy, this might come back as CPU.
-        # If you serialize device and restore it, this should be CUDA.
         self.assertTrue(
             loaded_lin.device.is_cuda(),
             f"Expected loaded model on CUDA; got {loaded_lin.device}",
@@ -99,7 +96,7 @@ class TestModelSaveLoadLinearJSONCuda(unittest.TestCase):
         np.testing.assert_allclose(loaded_lin.weight.to_numpy(), W, rtol=0.0, atol=0.0)
         self.assertIsNotNone(loaded_lin.bias)
         np.testing.assert_allclose(
-            loaded_lin.bias.to_numpy(),  # type: ignore[union-attr]
+            loaded_lin.bias.to_numpy(),
             b,
             rtol=0.0,
             atol=0.0,
@@ -108,7 +105,6 @@ class TestModelSaveLoadLinearJSONCuda(unittest.TestCase):
         x2 = _alloc_cuda_tensor_from_numpy(x_np, device=loaded_lin.device)
         y_after = loaded.forward(x2).to_numpy()
 
-        # If this flakes due to CUDA math/order, relax to 1e-6.
         np.testing.assert_allclose(y_after, y_before, rtol=0.0, atol=0.0)
 
     def test_save_load_json_linear_cuda_no_bias_roundtrip(self) -> None:
@@ -121,8 +117,10 @@ class TestModelSaveLoadLinearJSONCuda(unittest.TestCase):
         np.random.seed(0)
         dev = Device("cuda:0")
 
-        model = Sequential(Linear(in_features=3, out_features=2, bias=False, device=dev))
-        lin: Linear = model[0]  # type: ignore[assignment]
+        model = Sequential(
+            Linear(in_features=3, out_features=2, bias=False, device=dev)
+        )
+        lin: Linear = model[0]
         self.assertTrue(lin.device.is_cuda())
 
         W = np.array([[1.0, -2.0, 3.0], [0.5, 1.5, -4.0]], dtype=np.float32)
@@ -139,7 +137,7 @@ class TestModelSaveLoadLinearJSONCuda(unittest.TestCase):
             model.save_json(ckpt_path)
             loaded = Sequential.load_json(ckpt_path)
 
-        loaded_lin: Linear = loaded[0]  # type: ignore[assignment]
+        loaded_lin: Linear = loaded[0]
         self.assertTrue(loaded_lin.device.is_cuda())
         self.assertIsNone(loaded_lin.bias)
         np.testing.assert_allclose(loaded_lin.weight.to_numpy(), W, rtol=0.0, atol=0.0)
@@ -160,22 +158,22 @@ class TestModelSaveLoadLinearJSONCuda(unittest.TestCase):
             Linear(in_features=4, out_features=2, bias=True, device=dev),
         )
 
-        lin0: Linear = model[0]  # type: ignore[assignment]
-        lin1: Linear = model[1]  # type: ignore[assignment]
+        lin0: Linear = model[0]
+        lin1: Linear = model[1]
         self.assertTrue(lin0.device.is_cuda())
         self.assertTrue(lin1.device.is_cuda())
 
-        W0 = (np.arange(12, dtype=np.float32).reshape(4, 3) / 10.0)
+        W0 = np.arange(12, dtype=np.float32).reshape(4, 3) / 10.0
         b0 = np.array([0.1, -0.2, 0.3, -0.4], dtype=np.float32)
         lin0.weight.copy_from_numpy(W0)
         self.assertIsNotNone(lin0.bias)
-        lin0.bias.copy_from_numpy(b0)  # type: ignore[union-attr]
+        lin0.bias.copy_from_numpy(b0)
 
-        W1 = (np.arange(8, dtype=np.float32).reshape(2, 4) / 20.0)
+        W1 = np.arange(8, dtype=np.float32).reshape(2, 4) / 20.0
         b1 = np.array([0.25, -0.75], dtype=np.float32)
         lin1.weight.copy_from_numpy(W1)
         self.assertIsNotNone(lin1.bias)
-        lin1.bias.copy_from_numpy(b1)  # type: ignore[union-attr]
+        lin1.bias.copy_from_numpy(b1)
 
         x_np = np.array([[1.0, -1.0, 2.0], [0.0, 0.5, -0.5]], dtype=np.float32)
         x = _alloc_cuda_tensor_from_numpy(x_np, device=lin0.device)
@@ -191,8 +189,8 @@ class TestModelSaveLoadLinearJSONCuda(unittest.TestCase):
         self.assertIsInstance(loaded[0], Linear)
         self.assertIsInstance(loaded[1], Linear)
 
-        loaded0: Linear = loaded[0]  # type: ignore[assignment]
-        loaded1: Linear = loaded[1]  # type: ignore[assignment]
+        loaded0: Linear = loaded[0]
+        loaded1: Linear = loaded[1]
         self.assertTrue(loaded0.device.is_cuda())
         self.assertTrue(loaded1.device.is_cuda())
 
@@ -220,7 +218,9 @@ class TestModelSaveLoadLinearJSONCuda(unittest.TestCase):
             some_key = next(iter(state.keys()))
             del state[some_key]
 
-            ckpt_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+            ckpt_path.write_text(
+                json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8"
+            )
 
             with self.assertRaises(KeyError):
                 Sequential.load_json(ckpt_path)
@@ -238,7 +238,9 @@ class TestModelSaveLoadLinearJSONCuda(unittest.TestCase):
 
             payload = json.loads(ckpt_path.read_text(encoding="utf-8"))
             payload["format"] = "some.other.format.v999"
-            ckpt_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+            ckpt_path.write_text(
+                json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8"
+            )
 
             with self.assertRaises(ValueError):
                 Sequential.load_json(ckpt_path)
@@ -260,7 +262,9 @@ class TestModelSaveLoadLinearJSONCuda(unittest.TestCase):
             some_key = next(iter(state.keys()))
             state[some_key]["shape"] = [999, 999]
 
-            ckpt_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+            ckpt_path.write_text(
+                json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8"
+            )
 
             with self.assertRaises(ValueError):
                 Sequential.load_json(ckpt_path)

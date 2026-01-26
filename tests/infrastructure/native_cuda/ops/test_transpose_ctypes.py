@@ -87,7 +87,7 @@ class TestTransposeCtypes(_CudaTestCase):
 
     def test_transpose2d_zero_rows_or_cols_is_ok(self) -> None:
         lib = self.lib
-        # If rows==0 or cols==0, kernel should be no-op; we still allocate minimal buffers.
+
         dtype = np.float32
         x = np.empty((0, 5), dtype=dtype)
         y = np.empty((5, 0), dtype=dtype)

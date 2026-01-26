@@ -57,9 +57,6 @@ extern "C" {
     // grad_out:   (N, C_out, H_out, W_out) NCHW on device
     // grad_x_pad: (N, C_in, H_pad, W_pad) NCHW on device (accumulated; caller zero-init)
     // grad_w:     (C_out, C_in, K_h, K_w) OIHW on device (accumulated; caller zero-init)
-    //
-    // Notes:
-    // - grad_b is NOT computed here; you already do sum(grad_out) on Python side.
     KEYDNN_CUDA_API int keydnn_cuda_conv2d_backward_f32(
         const float* x_pad,
         const float* w,

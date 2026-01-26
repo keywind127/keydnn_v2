@@ -13,7 +13,7 @@ OUT_LIB_OMP="$OUT_DIR/libkeydnn_native_omp.so"
 OUT_LIB_DEFAULT="$OUT_DIR/libkeydnn_native.so"
 
 # -------------------------
-# Load compiler settings from repo_root/.env (optional)
+# Load compiler settings from repo_root/.env
 # Supports lines like:
 #   KEYDNN_GPP=/path/to/g++
 #   KEYDNN_MINGW_BIN=/path/to/bin   (fallback: uses KEYDNN_MINGW_BIN/g++)
@@ -82,7 +82,7 @@ SOURCES=(
   "$SRC_DIR/keydnn_conv2d_transpose.cpp"
 )
 
-# Optional: fail fast if any source is missing
+# fail fast if any source is missing
 for f in "${SOURCES[@]}"; do
   if [[ ! -f "$f" ]]; then
     echo "[KeyDNN] ERROR: source file not found: $f" >&2

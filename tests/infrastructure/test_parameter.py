@@ -49,7 +49,7 @@ class TestParameterInfrastructure(TestCase):
 
         p.set_grad(g)
         self.assertIsNotNone(p.grad)
-        # Compare via public contract (to_numpy), not internal storage
+
         self.assertTrue(np.array_equal(p.grad.to_numpy(), g.to_numpy()))
 
         p.zero_grad()
@@ -87,9 +87,8 @@ class TestParameterInfrastructure(TestCase):
 
         grad_arr = p.grad.to_numpy()
 
-        # Preferred: elementwise sum => 3.0
         expected_sum = np.full((2, 2), 3.0, dtype=np.float32)
-        # Fallback: overwrite => 2.0
+
         expected_overwrite = np.full((2, 2), 2.0, dtype=np.float32)
 
         self.assertTrue(
@@ -131,7 +130,6 @@ class TestParameterInfrastructure(TestCase):
         self.assertTrue(p.requires_grad)
         self.assertIsNone(p.grad)
 
-        # zero_grad should still work
         p.zero_grad()
         self.assertIsNone(p.grad)
 
@@ -141,7 +139,7 @@ class TestParameterInfrastructure(TestCase):
 
     def test_parameter_zero_grad_contract(self):
         p = Parameter((2, 2), Device("cpu"))
-        # grad is optional and might be None initially; zero_grad should always be safe
+
         p.zero_grad()
         self.assertIsNone(p.grad)
 
@@ -158,16 +156,13 @@ class TestParameterAutogradAccumulation(TestCase):
         This is a core requirement for BPTT, because W_ih/W_hh are reused at
         every timestep.
         """
-        # p used twice in the forward graph
+
         p = Parameter((2, 2), self.device, requires_grad=True)
         p.copy_from_numpy(np.zeros((2, 2), dtype=np.float32))
 
         x = Tensor((2, 2), self.device, requires_grad=False)
         x.fill(0.0)
 
-        # y = p + x
-        # z = p + x
-        # loss = (y + z).sum()
         y = p + x
         z = p + x
         loss = (y + z).sum()
@@ -175,7 +170,6 @@ class TestParameterAutogradAccumulation(TestCase):
 
         self.assertIsNotNone(p.grad, "p.grad should exist after backward()")
 
-        # d/dp of (p+x) is 1, used twice => 2
         expected = np.full((2, 2), 2.0, dtype=np.float32)
         self.assertTrue(
             np.array_equal(p.grad.to_numpy(), expected),

@@ -1,4 +1,3 @@
-# tests/infrastructure/convolution/transpose/test_conv2d_transpose_fn_cuda.py
 """
 CUDA unit tests for Conv2dTransposeFn (autograd-enabled transpose conv2d).
 
@@ -49,29 +48,26 @@ from src.keydnn.infrastructure.ops.pool2d_cuda import (
 )
 
 
-# ---------------------------
-# CUDA test utilities
-# ---------------------------
 def _get_cuda_device(index: int = 0) -> Device:
     """
     Best-effort helper to obtain a CUDA Device instance across possible Device APIs.
     Mirrors helpers used in other CUDA ext tests.
     """
     if hasattr(Device, "cuda") and callable(getattr(Device, "cuda")):
-        return Device.cuda(index)  # type: ignore[attr-defined]
+        return Device.cuda(index)
 
     try:
-        return Device("cuda", index)  # type: ignore[call-arg]
+        return Device("cuda", index)
     except Exception:
         pass
 
     try:
-        return Device(f"cuda:{index}")  # type: ignore[call-arg]
+        return Device(f"cuda:{index}")
     except Exception:
         pass
 
     try:
-        return Device(kind="cuda", index=index)  # type: ignore[call-arg]
+        return Device(kind="cuda", index=index)
     except Exception as e:
         raise RuntimeError(
             "Unable to construct a CUDA Device; update _get_cuda_device() for this repo."
@@ -157,7 +153,7 @@ class TestConv2dTransposeFnCuda(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        # Load CUDA DLL; skip suite if unavailable.
+
         try:
             cls.lib = _load_cuda_lib()
         except Exception as e:
@@ -169,13 +165,11 @@ class TestConv2dTransposeFnCuda(unittest.TestCase):
         except Exception as e:
             raise unittest.SkipTest(f"Failed to set CUDA device: {e}") from e
 
-        # Ensure memcpy symbols exist; if not, skip (cannot validate numerics).
         try:
             _bind_memcpy_symbols(cls.lib)
         except Exception as e:
             raise unittest.SkipTest(f"CUDA memcpy symbols unavailable: {e}") from e
 
-        # Construct CUDA device object
         try:
             cls.cuda_device = _get_cuda_device(cls.device_index)
         except Exception as e:
@@ -194,7 +188,6 @@ class TestConv2dTransposeFnCuda(unittest.TestCase):
             cuda_free(self.lib, dev_ptr)
             raise
 
-        # Use the same construction style as other CUDA ext tests
         return Tensor._from_devptr(
             dev_ptr,
             shape=tuple(int(d) for d in x_c.shape),
@@ -215,7 +208,7 @@ class TestConv2dTransposeFnCuda(unittest.TestCase):
         dtype = np.float32
 
         x_np = rng.standard_normal((2, 3, 5, 4), dtype=dtype)
-        w_np = rng.standard_normal((3, 4, 3, 2), dtype=dtype)  # (C_in, C_out, Kh, Kw)
+        w_np = rng.standard_normal((3, 4, 3, 2), dtype=dtype)
         b_np = rng.standard_normal((4,), dtype=dtype)
 
         x = self._make_cuda_tensor_from_host(x_np, requires_grad=False)
@@ -295,7 +288,7 @@ class TestConv2dTransposeFnCuda(unittest.TestCase):
         dtype = np.float64
 
         x_np = rng.standard_normal((1, 2, 5, 4)).astype(dtype)
-        w_np = rng.standard_normal((2, 3, 3, 2)).astype(dtype)  # (C_in, C_out, Kh, Kw)
+        w_np = rng.standard_normal((2, 3, 3, 2)).astype(dtype)
         b_np = rng.standard_normal((3,)).astype(dtype)
 
         x = self._make_cuda_tensor_from_host(x_np, requires_grad=False)
@@ -374,7 +367,6 @@ class TestConv2dTransposeFnCuda(unittest.TestCase):
         self.assertIsNotNone(w.grad)
         self.assertIsNotNone(b.grad)
 
-        # Reference grads with grad_out=ones (matching loss=sum)
         y_ref = conv2d_transpose_forward_cpu(
             x_np,
             w_np,
@@ -395,15 +387,14 @@ class TestConv2dTransposeFnCuda(unittest.TestCase):
             output_padding=output_padding,
         )
 
-        gx = self._read_cuda_tensor_to_host(x.grad)  # type: ignore[arg-type]
-        gw = self._read_cuda_tensor_to_host(w.grad)  # type: ignore[arg-type]
-        gb = self._read_cuda_tensor_to_host(b.grad)  # type: ignore[arg-type]
+        gx = self._read_cuda_tensor_to_host(x.grad)
+        gw = self._read_cuda_tensor_to_host(w.grad)
+        gb = self._read_cuda_tensor_to_host(b.grad)
 
         rtol, atol = _tol_cuda(dtype)
         np.testing.assert_allclose(gx, gx_ref, rtol=rtol, atol=atol)
         np.testing.assert_allclose(gw, gw_ref, rtol=rtol, atol=atol)
 
-        # Bias grad is a reduction; keep modestly tighter
         np.testing.assert_allclose(gb, gb_ref, rtol=1e-4, atol=1e-4)
 
     def test_backward_none_bias_returns_none(self) -> None:
@@ -440,7 +431,6 @@ class TestConv2dTransposeFnCuda(unittest.TestCase):
 
         self.assertIsNotNone(x.grad)
         self.assertIsNotNone(w.grad)
-        # no bias => Conv2dTransposeFn.backward returns (grad_x, grad_w) only
 
     def test_forward_respects_out_requires_grad_flag_cuda(self) -> None:
         rng = np.random.default_rng(11)
@@ -450,7 +440,6 @@ class TestConv2dTransposeFnCuda(unittest.TestCase):
         w_np = rng.standard_normal((1, 2, 2, 2), dtype=dtype)
         b_np = rng.standard_normal((2,), dtype=dtype)
 
-        # Case A: parents do not require grad -> output should not require grad
         x0 = self._make_cuda_tensor_from_host(x_np, requires_grad=False)
         w0 = self._make_cuda_tensor_from_host(w_np, requires_grad=False)
         b0 = self._make_cuda_tensor_from_host(b_np, requires_grad=False)
@@ -461,7 +450,6 @@ class TestConv2dTransposeFnCuda(unittest.TestCase):
         )
         self.assertFalse(y0.requires_grad)
 
-        # Case B: one parent requires grad -> output should require grad
         x1 = self._make_cuda_tensor_from_host(x_np, requires_grad=True)
         w1 = self._make_cuda_tensor_from_host(w_np, requires_grad=False)
         b1 = self._make_cuda_tensor_from_host(b_np, requires_grad=False)
@@ -479,7 +467,6 @@ class TestConv2dTransposeFnCuda(unittest.TestCase):
         x_np = rng.standard_normal((1, 1, 3, 3), dtype=dtype)
         w_np = rng.standard_normal((1, 1, 2, 2), dtype=dtype)
 
-        # x on CUDA, w on CPU -> should raise
         x_cuda = self._make_cuda_tensor_from_host(x_np, requires_grad=False)
 
         w_cpu = Tensor(

@@ -1,4 +1,3 @@
-# tests/infrastructure/conv2d/test_conv2d_fn_cuda.py
 """
 Unit tests for Conv2dFn on CUDA devices.
 
@@ -39,20 +38,20 @@ def _get_cuda_device(index: int = 0) -> Device:
     Best-effort helper to construct a CUDA Device for this repo.
     """
     if hasattr(Device, "cuda") and callable(getattr(Device, "cuda")):
-        return Device.cuda(index)  # type: ignore[attr-defined]
+        return Device.cuda(index)
 
     try:
-        return Device("cuda", index)  # type: ignore[call-arg]
+        return Device("cuda", index)
     except Exception:
         pass
 
     try:
-        return Device(f"cuda:{index}")  # type: ignore[call-arg]
+        return Device(f"cuda:{index}")
     except Exception:
         pass
 
     try:
-        return Device(kind="cuda", index=index)  # type: ignore[call-arg]
+        return Device(kind="cuda", index=index)
     except Exception as e:
         raise RuntimeError(
             "Unable to construct a CUDA Device; update _get_cuda_device()."
@@ -101,9 +100,6 @@ class TestConv2dFnCuda(unittest.TestCase):
     def tearDown(self) -> None:
         self.allocs.free_all()
 
-    # -----------------------------
-    # Helpers
-    # -----------------------------
     def _make_cuda_tensor_from_host(
         self, arr: np.ndarray, *, requires_grad: bool
     ) -> Tensor:
@@ -135,9 +131,6 @@ class TestConv2dFnCuda(unittest.TestCase):
             self.env.cuda_synchronize(self.env.lib)
         return host
 
-    # -----------------------------
-    # Tests
-    # -----------------------------
     def test_forward_matches_cpu(self) -> None:
         rng = np.random.default_rng(0)
 
@@ -180,27 +173,25 @@ class TestConv2dFnCuda(unittest.TestCase):
         stride = (1, 2)
         padding = (1, 0)
 
-        # Forward to get output shape
         ctx = Context(
             parents=(x, w, b),
-            backward_fn=lambda grad_out: Conv2dFn.backward(ctx, grad_out),  # type: ignore[misc]
+            backward_fn=lambda grad_out: Conv2dFn.backward(ctx, grad_out),
         )
         out = Conv2dFn.forward(ctx, x, w, b, stride=stride, padding=padding)
 
-        # grad_out = ones on CUDA
         out_host = self._read_cuda_tensor_to_host(out)
         grad_out_np = np.ones_like(out_host, dtype=np.float32)
         grad_out = self._make_cuda_tensor_from_host(grad_out_np, requires_grad=False)
 
-        gx_t, gw_t, gb_t = Conv2dFn.backward(ctx, grad_out)  # type: ignore[assignment]
+        gx_t, gw_t, gb_t = Conv2dFn.backward(ctx, grad_out)
 
         self.assertIsNotNone(gx_t)
         self.assertIsNotNone(gw_t)
         self.assertIsNotNone(gb_t)
 
-        gx = self._read_cuda_tensor_to_host(gx_t)  # type: ignore[arg-type]
-        gw = self._read_cuda_tensor_to_host(gw_t)  # type: ignore[arg-type]
-        gb = self._read_cuda_tensor_to_host(gb_t)  # type: ignore[arg-type]
+        gx = self._read_cuda_tensor_to_host(gx_t)
+        gw = self._read_cuda_tensor_to_host(gw_t)
+        gb = self._read_cuda_tensor_to_host(gb_t)
 
         gx_ref, gw_ref, gb_ref = conv2d_backward_cpu(
             x_np, w_np, b_np, grad_out_np, stride=stride, padding=padding

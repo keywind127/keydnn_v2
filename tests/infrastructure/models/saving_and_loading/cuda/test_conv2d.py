@@ -1,4 +1,3 @@
-# tests/infrastructure/models/saving_and_loading/cuda/test_conv2d.py
 from __future__ import annotations
 
 from pathlib import Path
@@ -20,7 +19,7 @@ def _cuda_available() -> bool:
     treat CUDA as available.
     """
     try:
-        from src.keydnn.infrastructure.native_cuda.python.maxpool2d_ctypes import (  # type: ignore
+        from src.keydnn.infrastructure.native_cuda.python.maxpool2d_ctypes import (
             load_keydnn_cuda_native,
         )
 
@@ -39,7 +38,7 @@ def _make_input(device: Device, x_np: np.ndarray) -> Tensor:
     x = Tensor(shape=x_np.shape, device=device, requires_grad=False, dtype=x_np.dtype)
 
     if device.is_cuda():
-        # CUDA tensors may begin as devptr=0, so allocate before copy.
+
         x._ensure_cuda_alloc(dtype=np.dtype(x_np.dtype))
 
     x.copy_from_numpy(x_np)
@@ -68,14 +67,14 @@ class _Conv2dRoundtripMixin:
                 device=self.DEVICE,
             ),
         )
-        conv: Conv2d = model[0]  # type: ignore[assignment]
+        conv: Conv2d = model[0]
 
         W = np.arange(2 * 1 * 3 * 3, dtype=np.float32).reshape(2, 1, 3, 3) / 10.0
         b = np.array([0.25, -0.75], dtype=np.float32)
 
         conv.weight.copy_from_numpy(W)
         self.assertIsNotNone(conv.bias)
-        conv.bias.copy_from_numpy(b)  # type: ignore[union-attr]
+        conv.bias.copy_from_numpy(b)
 
         x_np = np.random.randn(1, 1, 4, 4).astype(np.float32)
         x = _make_input(conv.weight.device, x_np)
@@ -93,18 +92,16 @@ class _Conv2dRoundtripMixin:
 
             loaded = Sequential.load_json(ckpt_path)
 
-        loaded_conv: Conv2d = loaded[0]  # type: ignore[assignment]
+        loaded_conv: Conv2d = loaded[0]
         np.testing.assert_allclose(loaded_conv.weight.to_numpy(), W, rtol=0.0, atol=0.0)
         self.assertIsNotNone(loaded_conv.bias)
         np.testing.assert_allclose(
-            loaded_conv.bias.to_numpy(),  # type: ignore[union-attr]
+            loaded_conv.bias.to_numpy(),
             b,
             rtol=0.0,
             atol=0.0,
         )
 
-        # If your load_json restores on CPU by default, you may need:
-        # loaded = loaded.to(self.DEVICE)
         y_after = loaded.forward(x).to_numpy()
         np.testing.assert_allclose(y_after, y_before, rtol=0.0, atol=0.0)
 
@@ -122,7 +119,7 @@ class _Conv2dRoundtripMixin:
                 device=self.DEVICE,
             ),
         )
-        conv: Conv2d = model[0]  # type: ignore[assignment]
+        conv: Conv2d = model[0]
 
         W = np.arange(2 * 1 * 3 * 3, dtype=np.float32).reshape(2, 1, 3, 3) / 7.0
         conv.weight.copy_from_numpy(W)
@@ -138,7 +135,7 @@ class _Conv2dRoundtripMixin:
             model.save_json(ckpt_path)
             loaded = Sequential.load_json(ckpt_path)
 
-        loaded_conv: Conv2d = loaded[0]  # type: ignore[assignment]
+        loaded_conv: Conv2d = loaded[0]
         self.assertIsNone(loaded_conv.bias)
         np.testing.assert_allclose(loaded_conv.weight.to_numpy(), W, rtol=0.0, atol=0.0)
 
@@ -168,14 +165,14 @@ class _Conv2dRoundtripMixin:
                 device=self.DEVICE,
             ),
         )
-        c0: Conv2d = model[0]  # type: ignore[assignment]
-        c1: Conv2d = model[1]  # type: ignore[assignment]
+        c0: Conv2d = model[0]
+        c1: Conv2d = model[1]
 
         W0 = np.arange(2 * 1 * 3 * 3, dtype=np.float32).reshape(2, 1, 3, 3) / 11.0
         b0 = np.array([0.1, -0.2], dtype=np.float32)
         c0.weight.copy_from_numpy(W0)
         self.assertIsNotNone(c0.bias)
-        c0.bias.copy_from_numpy(b0)  # type: ignore[union-attr]
+        c0.bias.copy_from_numpy(b0)
 
         W1 = np.arange(1 * 2 * 1 * 1, dtype=np.float32).reshape(1, 2, 1, 1) / 3.0
         c1.weight.copy_from_numpy(W1)
@@ -195,16 +192,14 @@ class _Conv2dRoundtripMixin:
         self.assertIsInstance(loaded[0], Conv2d)
         self.assertIsInstance(loaded[1], Conv2d)
 
-        lc0: Conv2d = loaded[0]  # type: ignore[assignment]
-        lc1: Conv2d = loaded[1]  # type: ignore[assignment]
+        lc0: Conv2d = loaded[0]
+        lc1: Conv2d = loaded[1]
 
         np.testing.assert_allclose(lc0.weight.to_numpy(), W0, rtol=0.0, atol=0.0)
         np.testing.assert_allclose(lc1.weight.to_numpy(), W1, rtol=0.0, atol=0.0)
 
         self.assertIsNotNone(lc0.bias)
-        np.testing.assert_allclose(
-            lc0.bias.to_numpy(), b0, rtol=0.0, atol=0.0  # type: ignore[union-attr]
-        )
+        np.testing.assert_allclose(lc0.bias.to_numpy(), b0, rtol=0.0, atol=0.0)
         self.assertIsNone(lc1.bias)
 
         y_after = loaded.forward(x).to_numpy()

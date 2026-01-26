@@ -38,7 +38,6 @@ class TestFlattenFn(unittest.TestCase):
         )
         y = FlattenFn.forward(ctx, x)
 
-        # IMPORTANT: mimic Module behavior (attach ctx to the output)
         if x.requires_grad:
             y.requires_grad = True
             y._set_ctx(ctx)

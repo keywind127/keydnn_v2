@@ -8,9 +8,9 @@ from src.keydnn.infrastructure.tensor._tensor import Tensor
 from src.keydnn.infrastructure.recurrent._rnn_module import RNN, RNNCell
 
 
-# -----------------------------
-# Helpers (match Conv2d style)
-# -----------------------------
+                               
+                              
+                               
 def _tensor_from_numpy(arr: np.ndarray, device: Device, requires_grad: bool) -> Tensor:
     arr = np.asarray(arr, dtype=np.float32)
     t = Tensor(shape=arr.shape, device=device, requires_grad=requires_grad, ctx=None)
@@ -74,9 +74,9 @@ def _supports_binary_ops() -> bool:
     return True
 
 
-# -----------------------------
-# E2E RNN autograd tests
-# -----------------------------
+                               
+                        
+                               
 class TestRNNE2EGradients(unittest.TestCase):
     def setUp(self) -> None:
         self.device = Device("cpu")
@@ -97,7 +97,7 @@ class TestRNNE2EGradients(unittest.TestCase):
 
         h_seq, h_T = rnn.forward(x)
 
-        # Simple scalar loss that touches all timesteps
+                                                       
         loss = h_seq.sum()
         loss.backward()
 
@@ -127,7 +127,7 @@ class TestRNNE2EGradients(unittest.TestCase):
         loss = h_T.sum()
         loss.backward()
 
-        # Parameters should have grads
+                                      
         any_param_grad = False
         for p in rnn.parameters():
             pt = _unwrap_param_tensor(p)
@@ -136,7 +136,7 @@ class TestRNNE2EGradients(unittest.TestCase):
                 break
         self.assertTrue(any_param_grad, "Expected at least one parameter gradient")
 
-        # x should also get gradient (because h_T depends on all inputs through time)
+                                                                                     
         self.assertIsNotNone(x.grad)
         self.assertEqual(x.grad.shape, x.shape)
 
@@ -156,12 +156,12 @@ class TestRNNE2EGradients(unittest.TestCase):
         loss = h_seq.sum()
         loss.backward()
 
-        # Finite grads for x
+                            
         self.assertIsNotNone(x.grad)
         g = x.grad.to_numpy()
         self.assertTrue(np.isfinite(g).all(), "Expected finite gradients for x")
 
-        # Finite grads for parameters
+                                     
         for p in rnn.parameters():
             pt = _unwrap_param_tensor(p)
             if pt.grad is None:
@@ -182,7 +182,7 @@ class TestRNNE2EGradients(unittest.TestCase):
 
         cell = RNNCell(input_size=D, hidden_size=H, bias=True)
 
-        # Deterministic params to make finite difference stable
+                                                               
         Wih = np.random.randn(D, H).astype(np.float32) * 0.1
         Whh = np.random.randn(H, H).astype(np.float32) * 0.1
         bih = np.random.randn(H).astype(np.float32) * 0.1
@@ -198,7 +198,7 @@ class TestRNNE2EGradients(unittest.TestCase):
             np.random.randn(N, H), self.device, requires_grad=True
         )
 
-        # Analytical grad
+                         
         out = cell.forward(x, h_prev)
         loss = out.sum()
         loss.backward()
@@ -206,11 +206,11 @@ class TestRNNE2EGradients(unittest.TestCase):
         Wih_t = _unwrap_param_tensor(cell.W_ih)
         self.assertIsNotNone(Wih_t.grad, "Expected W_ih.grad to exist")
 
-        # Pick one entry to check
+                                 
         i, j = 1, 2
         grad_analytical = float(Wih_t.grad.to_numpy()[i, j])
 
-        # Finite difference
+                           
         eps = 1e-3
         Wih_plus = Wih.copy()
         Wih_minus = Wih.copy()
@@ -218,21 +218,21 @@ class TestRNNE2EGradients(unittest.TestCase):
         Wih_minus[i, j] -= eps
 
         def loss_with_Wih(Wih_candidate: np.ndarray) -> float:
-            # Rebuild a fresh cell to avoid accumulated ctx/grad state
+                                                                      
             c = RNNCell(input_size=D, hidden_size=H, bias=True)
             _unwrap_param_tensor(c.W_ih).copy_from_numpy(Wih_candidate)
             _unwrap_param_tensor(c.W_hh).copy_from_numpy(Whh)
             _unwrap_param_tensor(c.b_ih).copy_from_numpy(bih)
             _unwrap_param_tensor(c.b_hh).copy_from_numpy(bhh)
 
-            y = c.forward(x, h_prev)  # x/h_prev are fixed tensors
+            y = c.forward(x, h_prev)                              
             return float(np.sum(y.to_numpy()))
 
         Lp = loss_with_Wih(Wih_plus)
         Lm = loss_with_Wih(Wih_minus)
         grad_fd = (Lp - Lm) / (2.0 * eps)
 
-        # Loose tolerance: this is a sanity check, and tanh + float32 + eps yields noise
+                                                                                        
         self.assertTrue(
             np.isfinite(grad_fd),
             "Finite difference gradient should be finite",
@@ -240,14 +240,14 @@ class TestRNNE2EGradients(unittest.TestCase):
         self.assertAlmostEqual(
             grad_analytical,
             grad_fd,
-            places=2,  # intentionally loose
+            places=2,                       
             msg=f"Analytical grad {grad_analytical} vs FD grad {grad_fd}",
         )
 
 
-# -----------------------------
-# Tiny training sanity test
-# -----------------------------
+                               
+                           
+                               
 class TestRNNTinyTraining(unittest.TestCase):
     def setUp(self) -> None:
         self.device = Device("cpu")
@@ -260,7 +260,6 @@ class TestRNNTinyTraining(unittest.TestCase):
           loss = ((h_seq - target) * (h_seq - target)).sum()
 
         This requires Tensor.__sub__ and Tensor.__mul__ to exist.
-        If not implemented yet, we skip (so your suite stays green).
         """
         if not _supports_binary_ops():
             self.skipTest(
@@ -271,12 +270,12 @@ class TestRNNTinyTraining(unittest.TestCase):
         T, N, D, H = 6, 2, 3, 4
         rnn = RNN(input_size=D, hidden_size=H, bias=True)
 
-        # Fixed input
+                     
         x = _tensor_from_numpy(
             np.random.randn(T, N, D), self.device, requires_grad=False
         )
 
-        # Simple target: encourage hidden states toward a constant pattern
+                                                                          
         target_np = np.ones((T, N, H), dtype=np.float32) * 0.5
         target = _tensor_from_numpy(target_np, self.device, requires_grad=False)
 
@@ -285,8 +284,8 @@ class TestRNNTinyTraining(unittest.TestCase):
             diff = h_seq - target
             return (diff * diff).sum()
 
-        # Run a few SGD steps and expect loss to go down (not necessarily monotonically every step,
-        # but should improve from start to end).
+                                                                                                   
+                                                
         lr = 0.05
         steps = 25
 

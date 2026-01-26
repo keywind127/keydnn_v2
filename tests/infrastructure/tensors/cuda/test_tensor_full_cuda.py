@@ -1,4 +1,3 @@
-# tests/infrastructure/tensors/test_tensor_full_cuda.py
 from __future__ import annotations
 
 import unittest
@@ -39,7 +38,6 @@ class TestTensorFullCuda(TestCase, _CudaTestMixin):
         self.assertTrue(t.device.is_cuda())
         self.assertEqual(t.shape, (4, 7))
 
-        # Contract: CUDA full should allocate (fill() ensures allocation)
         self.assertNotEqual(int(t.data), 0)
 
         got = t.to_numpy()
@@ -61,7 +59,7 @@ class TestTensorFullCuda(TestCase, _CudaTestMixin):
         got = t.to_numpy()
         self.assertEqual(got.shape, ())
         self.assertEqual(got.dtype, np.float32)
-        # scalar ndarray comparison
+
         self.assertAlmostEqual(float(got), float(np.float32(fill_value)), places=6)
 
     def test_full_cuda_requires_grad_flag_preserved(self) -> None:
@@ -71,7 +69,6 @@ class TestTensorFullCuda(TestCase, _CudaTestMixin):
         self.assertTrue(t.device.is_cuda())
         self.assertTrue(bool(getattr(t, "requires_grad", False)))
 
-        # Should still be filled correctly
         got = t.to_numpy()
         self.assertTrue(np.allclose(got, np.ones((2, 2), dtype=np.float32)))
 

@@ -39,12 +39,6 @@ class TestTensorMatmulForward(TestCase, _TensorFactoryMixin):
         with self.assertRaises(ValueError):
             _ = a @ b
 
-    # def test_matmul_on_cuda_raises(self):
-    #     a = Tensor((3, 4), Device("cuda:0"), requires_grad=False)
-    #     b = Tensor((4, 2), Device("cuda:0"), requires_grad=False)
-    #     with self.assertRaises(Exception):
-    #         _ = a @ b
-
     def test_matmul_on_cuda_forward_runs_when_allocated(self):
         a = Tensor.zeros(shape=(3, 4), device=Device("cuda:0"), requires_grad=False)
         b = Tensor.zeros(shape=(4, 2), device=Device("cuda:0"), requires_grad=False)
@@ -202,7 +196,7 @@ class TestTensorSumAxisForward(TestCase, _TensorFactoryMixin):
     def test_sum_axis_non_int_raises(self):
         x = self._tensor_from_numpy(np.random.randn(2, 3), requires_grad=False)
         with self.assertRaises(TypeError):
-            _ = x.sum(axis="0")  # type: ignore[arg-type]
+            _ = x.sum(axis="0")
 
     def test_sum_axis_on_scalar_raises(self):
         s = Tensor((), Device("cpu"), requires_grad=False)

@@ -7,7 +7,7 @@ from src.keydnn.presentation.apis.utils import random as kd_random
 
 class TestRandomSeeding(unittest.TestCase):
     def tearDown(self) -> None:
-        # Ensure one test doesn't influence another
+
         kd_random.seed(0)
 
     def test_python_random_same_seed_same_sequence(self) -> None:
@@ -29,14 +29,13 @@ class TestRandomSeeding(unittest.TestCase):
         np.testing.assert_array_equal(a, b)
 
     def test_different_seeds_produce_different_numpy_sequence(self) -> None:
-        # Use randint to make "different" essentially guaranteed.
+
         kd_random.seed(1)
         a = np.random.randint(0, 2**31 - 1, size=10)
 
         kd_random.seed(2)
         b = np.random.randint(0, 2**31 - 1, size=10)
 
-        # For deterministic RNGs, this should never match elementwise.
         np.testing.assert_array_equal(a == b, np.zeros_like(a, dtype=bool))
 
     def test_seed_is_idempotent_for_next_value(self) -> None:
@@ -60,10 +59,10 @@ class TestRandomSeeding(unittest.TestCase):
 
     def test_seed_requires_int(self) -> None:
         with self.assertRaises(TypeError):
-            kd_random.seed(3.14)  # type: ignore[arg-type]
+            kd_random.seed(3.14)
 
         with self.assertRaises(TypeError):
-            kd_random.seed("123")  # type: ignore[arg-type]
+            kd_random.seed("123")
 
 
 if __name__ == "__main__":

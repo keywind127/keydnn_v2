@@ -1,5 +1,3 @@
-# tests/infrastructure/tensors/cuda/test_tensor_concat_cuda.py
-
 from __future__ import annotations
 
 import unittest
@@ -9,7 +7,7 @@ import numpy as np
 def _cuda_available() -> bool:
     try:
         from src.keydnn.infrastructure.native_cuda.python.maxpool2d_ctypes import (
-            load_keydnn_cuda_native,  # type: ignore
+            load_keydnn_cuda_native,
         )
 
         _ = load_keydnn_cuda_native()
@@ -31,13 +29,13 @@ class TestTensorConcatCudaForward(unittest.TestCase):
 
         lib = Tensor._get_cuda_lib()
         from src.keydnn.infrastructure.native_cuda.python.maxpool2d_ctypes import (
-            cuda_set_device,  # type: ignore
+            cuda_set_device,
         )
 
         cuda_set_device(lib, 0)
 
         from src.keydnn.infrastructure.native_cuda.python.ops import (
-            memcpy_ctypes as mc,  # type: ignore
+            memcpy_ctypes as mc,
         )
 
         cls.mc = mc
@@ -144,13 +142,13 @@ class TestTensorConcatCudaBackward(unittest.TestCase):
 
         lib = Tensor._get_cuda_lib()
         from src.keydnn.infrastructure.native_cuda.python.maxpool2d_ctypes import (
-            cuda_set_device,  # type: ignore
+            cuda_set_device,
         )
 
         cuda_set_device(lib, 0)
 
         from src.keydnn.infrastructure.native_cuda.python.ops import (
-            memcpy_ctypes as mc,  # type: ignore
+            memcpy_ctypes as mc,
         )
 
         cls.mc = mc

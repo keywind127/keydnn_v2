@@ -168,7 +168,7 @@ class BatchNorm2d(_InfraBatchNorm2d):
         )
 
 
-# Backward-compatible aliases (optional)
+# Backward-compatible aliases
 BatchNorm1D = BatchNorm1d
 BatchNorm2D = BatchNorm2d
 

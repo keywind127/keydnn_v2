@@ -26,8 +26,7 @@ def _as_np(t: Tensor) -> np.ndarray:
 
 
 def _backward(loss_scalar: Tensor) -> None:
-    # Your Tensor likely supports .backward() for scalar tensors.
-    # If your API uses a different entrypoint, adjust here.
+
     if not hasattr(loss_scalar, "backward"):
         raise AssertionError("Tensor must expose backward() for this test.")
     loss_scalar.backward()
@@ -60,7 +59,6 @@ class TestLossFnWrappersSSE(TestCase):
         out = loss_fn(pred, targ)
         _backward(out)
 
-        # SSE: d/dpred = 2*(pred-target), d/dtarget = -2*(pred-target)
         exp_grad_pred = 2.0 * (pred_np - targ_np)
         exp_grad_targ = -exp_grad_pred
 
@@ -121,7 +119,6 @@ class TestLossFnWrappersBCE(TestCase):
     def test_bce_forward_matches_numpy_with_clamp(self) -> None:
         loss_fn = bce_loss()
 
-        # probabilities + binary targets
         pred_np = np.array([[0.9, 0.1], [0.2, 0.8]], dtype=np.float32)
         targ_np = np.array([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32)
 
@@ -143,9 +140,7 @@ class TestLossFnWrappersBCE(TestCase):
         targ_np = np.array([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32)
 
         pred = _tensor_from_numpy(pred_np, requires_grad=True)
-        targ = _tensor_from_numpy(
-            targ_np, requires_grad=True
-        )  # even if True, Fn returns None grad for target
+        targ = _tensor_from_numpy(targ_np, requires_grad=True)
 
         out = loss_fn(pred, targ)
         _backward(out)
@@ -160,7 +155,6 @@ class TestLossFnWrappersBCE(TestCase):
             _as_np(pred.grad), exp_grad_pred, rtol=1e-5, atol=1e-6
         )
 
-        # target grad is intentionally None for BCE
         self.assertTrue(getattr(targ, "grad", None) is None)
 
 
@@ -168,7 +162,6 @@ class TestLossFnWrappersCCE(TestCase):
     def test_cce_forward_matches_numpy_with_clamp(self) -> None:
         loss_fn = cce_loss()
 
-        # 2 samples, 3 classes (already a prob distribution per row)
         pred_np = np.array(
             [
                 [0.7, 0.2, 0.1],
@@ -193,7 +186,6 @@ class TestLossFnWrappersCCE(TestCase):
         eps = 1e-7
         p = np.clip(pred_np, eps, 1.0 - eps)
 
-        # Match your Fn definition: -(target * log(p)).sum() / batch_size
         exp = float(-np.sum(targ_np * np.log(p)) / pred_np.shape[0])
         self.assertAlmostEqual(got, exp, places=6)
 
@@ -216,9 +208,7 @@ class TestLossFnWrappersCCE(TestCase):
         )
 
         pred = _tensor_from_numpy(pred_np, requires_grad=True)
-        targ = _tensor_from_numpy(
-            targ_np, requires_grad=True
-        )  # even if True, Fn returns None grad for target
+        targ = _tensor_from_numpy(targ_np, requires_grad=True)
 
         out = loss_fn(pred, targ)
         _backward(out)
@@ -234,7 +224,6 @@ class TestLossFnWrappersCCE(TestCase):
             _as_np(pred.grad), exp_grad_pred, rtol=1e-5, atol=1e-6
         )
 
-        # target grad is intentionally None for CCE
         self.assertTrue(getattr(targ, "grad", None) is None)
 
 

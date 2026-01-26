@@ -59,10 +59,6 @@ class TestCudaFillCtypes(unittest.TestCase):
         expected = np.full((numel,), value, dtype=dtype)
         np.testing.assert_allclose(host, expected, rtol=0.0, atol=0.0)
 
-    # ----------------------------
-    # Tests: correctness
-    # ----------------------------
-
     def test_fill_f32_sets_all_elements(self) -> None:
         self._run_fill_case(np.float32, value=1.0, numel=1024)
 
@@ -77,27 +73,24 @@ class TestCudaFillCtypes(unittest.TestCase):
 
     def test_fill_numel_zero_is_noop_with_valid_ptr(self) -> None:
         """
-        Your native fill currently returns -1 if y_dev==0, even when numel==0.
-
-        So this test asserts a weaker (but realistic) contract:
+        This test asserts a weaker (but realistic) contract:
         - If numel==0 and y_dev is a valid pointer, the call succeeds
           and does not modify memory.
         """
         for dtype in (np.float32, np.float64):
-            # Allocate 1 element to obtain a valid pointer, but request numel=0 fill.
+
             host_before = np.empty((1,), dtype=dtype)
             host_after = np.empty((1,), dtype=dtype)
 
             nbytes = int(host_before.nbytes)
             y_dev = cuda_malloc(self.lib, nbytes)
             try:
-                # poison
+
                 cuda_memset(self.lib, y_dev, 0xA5, nbytes)
                 cuda_synchronize(self.lib)
 
                 cuda_memcpy_d2h(self.lib, host_before, y_dev)
 
-                # Should not raise; should not write anything.
                 cuda_fill(self.lib, y_dev=y_dev, numel=0, value=1.0, dtype=dtype)
                 cuda_synchronize(self.lib)
 
@@ -106,10 +99,6 @@ class TestCudaFillCtypes(unittest.TestCase):
                 cuda_free(self.lib, y_dev)
 
             np.testing.assert_array_equal(host_after, host_before)
-
-    # ----------------------------
-    # Tests: input validation
-    # ----------------------------
 
     def test_fill_rejects_unsupported_dtype(self) -> None:
         host = np.empty((4,), dtype=np.float32)

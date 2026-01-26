@@ -154,8 +154,6 @@ class CudaLib:
         self._stack_bound = False
         self._debug_bound = False
 
-        # Make debug opt-in via env var, but default OFF.
-        # If you want it always ON during tests, set KEYDNN_CUDA_DEBUG=1
         import os
 
         self._debug_enabled_default = os.environ.get("KEYDNN_CUDA_DEBUG", "0") not in (

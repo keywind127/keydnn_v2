@@ -290,7 +290,7 @@ def conv2d_forward_cuda(*args: Any, **kwargs: Any) -> np.ndarray:
     stride = kwargs.pop("stride", 1)
     padding = kwargs.pop("padding", 0)
 
-    dtype = kwargs.pop("dtype", None)  # optional: infer from x if missing
+    dtype = kwargs.pop("dtype", None)  # infer from x if missing
     sync = kwargs.pop("sync", True)
 
     device_index = kwargs.pop("device_index", None)
@@ -354,7 +354,7 @@ def conv2d_forward_cuda(*args: Any, **kwargs: Any) -> np.ndarray:
     H_pad = H + 2 * p_h
     W_pad = W + 2 * p_w
 
-    # Set device (optional)
+    # Set device
     if device_index is not None:
         cuda_set_device(lib, int(device_index))
 
@@ -599,7 +599,7 @@ def conv2d_backward_cuda(
     grad_x = np.empty_like(x)
     grad_w = np.zeros_like(w)
 
-    # Set device (optional)
+    # Set device
     if device_index is not None:
         cuda_set_device(lib, int(device_index))
 
@@ -1061,7 +1061,7 @@ def conv2d_backward_cuda_devptr(*args: Any, **kwargs: Any) -> None:
             sync=False,
         )
 
-        # Optional: compute grad_b on GPU (sum over N, H_out, W_out)
+        # compute grad_b on GPU (sum over N, H_out, W_out)
         # Reduce (N, C_out, H_out, W_out) -> (1, C_out, 1, 1).
         if grad_b_dev is not None:
             sum_to_shape_cuda(

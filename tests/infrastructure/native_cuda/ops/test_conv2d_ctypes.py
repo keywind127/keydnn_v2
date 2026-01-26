@@ -28,7 +28,7 @@ def _conv2d_forward_ref(
     s_w: int,
 ) -> np.ndarray:
     """
-    Naive NCHW/OIHW forward reference matching your C++/CUDA semantics.
+    Naive NCHW/OIHW forward reference matching C++/CUDA semantics.
     x_pad: (N, C_in, H_pad, W_pad)
     w:     (C_out, C_in, K_h, K_w)
     b:     (C_out,) or None
@@ -69,7 +69,7 @@ def _conv2d_backward_ref(
     s_w: int,
 ) -> tuple[np.ndarray, np.ndarray]:
     """
-    Naive backward reference matching your C++/CUDA semantics (accumulating).
+    Naive backward reference matching C++/CUDA semantics (accumulating).
     Returns (grad_x_pad, grad_w). Does NOT compute grad_b.
     """
     N, C_in, H_pad, W_pad = x_pad.shape
@@ -134,7 +134,6 @@ class TestConv2dCtypes(_CudaTestCase):
         lib = self.lib
         dtype = np.dtype(dtype)
 
-        # Small deterministic-ish case
         N, C_in, C_out = 2, 3, 4
         H_pad, W_pad = 6, 5
         K_h, K_w = 3, 2
@@ -208,7 +207,6 @@ class TestConv2dCtypes(_CudaTestCase):
         lib = self.lib
         dtype = np.dtype(dtype)
 
-        # Keep sizes small; backward uses atomics and can be slow
         N, C_in, C_out = 2, 2, 3
         H_pad, W_pad = 6, 6
         K_h, K_w = 3, 3
@@ -224,7 +222,6 @@ class TestConv2dCtypes(_CudaTestCase):
             x_pad, w, grad_out, s_h=s_h, s_w=s_w
         )
 
-        # Device buffers
         x_dev = self._alloc_and_copy_in(x_pad)
         w_dev = self._alloc_and_copy_in(w)
         go_dev = self._alloc_and_copy_in(grad_out)
@@ -232,8 +229,8 @@ class TestConv2dCtypes(_CudaTestCase):
         grad_x = np.zeros_like(x_pad)
         grad_w = np.zeros_like(w)
 
-        grad_x_dev = self._alloc_and_copy_in(grad_x)  # zero-init required
-        grad_w_dev = self._alloc_and_copy_in(grad_w)  # zero-init required
+        grad_x_dev = self._alloc_and_copy_in(grad_x)
+        grad_w_dev = self._alloc_and_copy_in(grad_w)
 
         try:
             conv2d_backward_cuda(
@@ -261,7 +258,6 @@ class TestConv2dCtypes(_CudaTestCase):
             cudaMemcpyDtoH(lib, grad_x, grad_x_dev, int(grad_x.nbytes))
             cudaMemcpyDtoH(lib, grad_w, grad_w_dev, int(grad_w.nbytes))
 
-            # Atomics change summation order -> allow slightly looser tolerance
             if dtype == np.float32:
                 np.testing.assert_allclose(grad_x, grad_x_ref, rtol=2e-4, atol=2e-4)
                 np.testing.assert_allclose(grad_w, grad_w_ref, rtol=2e-4, atol=2e-4)
@@ -331,14 +327,12 @@ class TestConv2dCtypes(_CudaTestCase):
         lib = self.lib
         dtype = np.float32
 
-        # Force H_out = 0 by making H_pad < K_h
         N, C_in, C_out = 1, 1, 1
         H_pad, W_pad = 2, 2
         K_h, K_w = 3, 3
         s_h, s_w = 1, 1
         H_out, W_out = 0, 0
 
-        # Allocate minimal buffers (we won't really read/write meaningful data)
         x_dev = int(cuda_malloc(lib, 1))
         w_dev = int(cuda_malloc(lib, 1))
         y_dev = int(cuda_malloc(lib, 1))

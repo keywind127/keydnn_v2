@@ -50,24 +50,19 @@ class TestCudaStackCtypes(unittest.TestCase):
     def _roundtrip_forward(self, *, in_shape, axis, K, dtype):
         rng = np.random.default_rng(0)
 
-        # create K inputs
         xs = [rng.standard_normal(in_shape).astype(dtype) for _ in range(K)]
         pre, post = _pre_post(in_shape, axis)
 
-        # expected
         expected = np.stack(xs, axis=axis)
 
-        # upload inputs (contiguous)
         x_devs = []
         try:
             for x in xs:
                 x_devs.append(self.cuda.cuda_from_host(np.ascontiguousarray(x)))
 
-            # allocate output
             y = np.empty(expected.shape, dtype=dtype)
             y_dev = self.cuda.cuda_malloc(y.nbytes)
 
-            # run forward
             xs_ptrs_dev = self.cuda.stack_forward_cuda(
                 xs_dev_ptrs=x_devs,
                 y_dev=y_dev,
@@ -77,14 +72,12 @@ class TestCudaStackCtypes(unittest.TestCase):
                 sync=True,
             )
 
-            # download
             self.cuda.cuda_memcpy_d2h(y, y_dev)
 
-            # check
             np.testing.assert_allclose(y, expected, rtol=0, atol=0)
 
         finally:
-            # free
+
             for p in x_devs:
                 self.cuda.cuda_free(p)
             if "y_dev" in locals():
@@ -96,20 +89,16 @@ class TestCudaStackCtypes(unittest.TestCase):
         rng = np.random.default_rng(1)
         pre, post = _pre_post(in_shape, axis)
 
-        # grad_out shape = in_shape[:axis] + (K,) + in_shape[axis:]
         out_shape = tuple(in_shape[:axis]) + (K,) + tuple(in_shape[axis:])
         dy = rng.standard_normal(out_shape).astype(dtype)
 
-        # expected grads: take along axis
         expected_grads = [np.take(dy, i, axis=axis) for i in range(K)]
 
-        # upload dy
         dy_dev = None
         dx_devs = []
         try:
             dy_dev = self.cuda.cuda_from_host(np.ascontiguousarray(dy))
 
-            # allocate each dx and run bwd (overwrite semantics)
             for i in range(K):
                 dx = np.empty(in_shape, dtype=dtype)
                 dx_dev = self.cuda.cuda_malloc(dx.nbytes)
@@ -124,7 +113,6 @@ class TestCudaStackCtypes(unittest.TestCase):
                 sync=True,
             )
 
-            # download each dx and compare
             for i in range(K):
                 got = np.empty(in_shape, dtype=dtype)
                 self.cuda.cuda_memcpy_d2h(got, dx_devs[i])
@@ -175,7 +163,7 @@ class TestCudaStackCtypes(unittest.TestCase):
                 )
 
     def test_forward_rejects_empty_inputs(self):
-        # low-level wrapper should reject K=0
+
         dtype = np.float32
         with self.assertRaises(ValueError):
             self.cuda.stack_forward_cuda(

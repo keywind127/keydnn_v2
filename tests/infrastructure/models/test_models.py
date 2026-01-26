@@ -82,9 +82,8 @@ class TestSequential(unittest.TestCase):
             named = list(model.named_parameters())
             self.assertTrue(len(named) > 0)
 
-            # named_parameters returns (name, param)
             names = [n for n, _ in named]
-            self.assertIn("0.w", names)  # Sequential assigns first layer name "0"
+            self.assertIn("0.w", names)
 
     def test_layers_returns_tuple(self):
         model = Sequential(AddOne(), MulTwo())
@@ -100,8 +99,7 @@ class TestModelPredict(unittest.TestCase):
 
         m = Identity()
 
-        # NEW: provide a minimal forward so build() can run
-        m.forward = lambda x: x  # type: ignore[method-assign]
+        m.forward = lambda x: x
 
         dummy_x = numpy_to_tensor(
             np.array([[0.0]], dtype=np.float32),

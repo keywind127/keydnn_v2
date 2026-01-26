@@ -17,7 +17,6 @@ Notes
 -----
 - Dropout is stochastic; for sanity checks we seed NumPy before each forward
   so CPU and CUDA should produce identical masks if RNG is shared.
-  If CUDA uses a different RNG source, sanity may fail; you can disable it.
 
 Usage
 -----
@@ -194,7 +193,7 @@ def bench_case(
         # keep a use to avoid being optimized away (not that Python does, but still)
         _ = y.shape
 
-    # CUDA setup (optional)
+    # CUDA setup
     if not _cuda_available():
         print("[skip] CUDA not available")
         return

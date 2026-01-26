@@ -55,11 +55,9 @@ class TestBatchNormChainingLinear(TestCase):
         loss = y.sum()
         loss.backward()
 
-        # Grad should flow to x
         self.assertIsNotNone(x.grad)
         self.assertEqual(x.grad.shape, x.shape)
 
-        # Grad should flow to Linear params
         any_lin_grad = False
         for p in lin.parameters():
             pt = _unwrap_param_tensor(p)
@@ -68,7 +66,6 @@ class TestBatchNormChainingLinear(TestCase):
                 break
         self.assertTrue(any_lin_grad, "Expected at least one Linear parameter gradient")
 
-        # Grad should flow to BN affine params
         self.assertIsNotNone(bn.gamma.grad)
         self.assertIsNotNone(bn.beta.grad)
         self.assertEqual(bn.gamma.grad.shape, bn.gamma.shape)
@@ -95,11 +92,9 @@ class TestBatchNormChainingLinear(TestCase):
         self.assertIsNotNone(x.grad)
         self.assertEqual(x.grad.shape, x.shape)
 
-        # BN affine grads
         self.assertIsNotNone(bn.gamma.grad)
         self.assertIsNotNone(bn.beta.grad)
 
-        # Linear grads
         for p in lin.parameters():
             pt = _unwrap_param_tensor(p)
             self.assertIsNotNone(pt.grad)
@@ -119,11 +114,9 @@ class TestBatchNormChainingLinear(TestCase):
             np.random.randn(N, Din), self.device, requires_grad=False
         )
 
-        # Train pass updates running stats
         bn.training = True
         _ = bn(lin(x_train))
 
-        # Eval is deterministic
         bn.training = False
         x_eval = _tensor_from_numpy(
             np.random.randn(N, Din), self.device, requires_grad=False
@@ -179,11 +172,9 @@ class TestLinearDropoutBatchNormChaining(TestCase):
 
         y.sum().backward()
 
-        # input grad
         self.assertIsNotNone(x.grad)
         self.assertEqual(x.grad.shape, x.shape)
 
-        # linear grads
         any_lin_grad = False
         for p in lin.parameters():
             pt = _unwrap_param_tensor(p)
@@ -192,7 +183,6 @@ class TestLinearDropoutBatchNormChaining(TestCase):
                 break
         self.assertTrue(any_lin_grad, "Expected at least one Linear parameter gradient")
 
-        # batchnorm affine grads
         self.assertIsNotNone(bn.gamma.grad)
         self.assertIsNotNone(bn.beta.grad)
 
@@ -208,7 +198,6 @@ class TestLinearDropoutBatchNormChaining(TestCase):
         d = Dropout(p=0.5)
         bn = BatchNorm1d(num_features=H, device=self.device, affine=False)
 
-        # Update BN running stats using train mode once
         bn.training = True
         d.training = True
         x_train = _tensor_from_numpy(
@@ -216,7 +205,6 @@ class TestLinearDropoutBatchNormChaining(TestCase):
         )
         _ = bn(d(lin(x_train)))
 
-        # Eval mode: dropout identity + BN uses running stats
         bn.training = False
         d.training = False
 
@@ -249,7 +237,6 @@ class TestLinearDropoutBatchNormChaining(TestCase):
         y_no_dropout = bn(lin(x)).to_numpy()
         y_with_dropout = bn(d(lin(x))).to_numpy()
 
-        # Should be identical since dropout p=0 is identity
         np.testing.assert_allclose(y_no_dropout, y_with_dropout, rtol=0, atol=0)
 
 

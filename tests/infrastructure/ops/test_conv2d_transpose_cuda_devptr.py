@@ -149,9 +149,6 @@ class TestConv2dTransposeCudaDevPtrOps(unittest.TestCase):
             ],
         )
 
-        # -------------------------------
-        # Low-level device memory helpers
-        # -------------------------------
         try:
             cuda_malloc = resolve_func(
                 ops_conv_t, candidates=["cuda_malloc", "malloc_cuda"]
@@ -159,15 +156,13 @@ class TestConv2dTransposeCudaDevPtrOps(unittest.TestCase):
             cuda_free = resolve_func(ops_conv_t, candidates=["cuda_free", "free_cuda"])
         except AttributeError:
             from src.keydnn.infrastructure.native_cuda.python.avgpool2d_ctypes import (
-                cuda_malloc,  # type: ignore
-                cuda_free,  # type: ignore
+                cuda_malloc,
+                cuda_free,
             )
 
-        # CRITICAL: prevent bound-method self injection
-        cls.cuda_malloc = staticmethod(cuda_malloc)  # type: ignore
-        cls.cuda_free = staticmethod(cuda_free)  # type: ignore
+        cls.cuda_malloc = staticmethod(cuda_malloc)
+        cls.cuda_free = staticmethod(cuda_free)
 
-        # Memcpy wrappers (support multiple spellings)
         try:
             memcpy_h2d = resolve_func(
                 ops_conv_t,
@@ -176,11 +171,11 @@ class TestConv2dTransposeCudaDevPtrOps(unittest.TestCase):
         except AttributeError:
             try:
                 from src.keydnn.infrastructure.native_cuda.python.avgpool2d_ctypes import (
-                    cudaMemcpyHtoD as memcpy_h2d,  # type: ignore
+                    cudaMemcpyHtoD as memcpy_h2d,
                 )
             except Exception:
                 from src.keydnn.infrastructure.native_cuda.python.avgpool2d_ctypes import (
-                    cuda_memcpy_h2d as memcpy_h2d,  # type: ignore
+                    cuda_memcpy_h2d as memcpy_h2d,
                 )
 
         try:
@@ -191,21 +186,18 @@ class TestConv2dTransposeCudaDevPtrOps(unittest.TestCase):
         except AttributeError:
             try:
                 from src.keydnn.infrastructure.native_cuda.python.avgpool2d_ctypes import (
-                    cudaMemcpyDtoH as memcpy_d2h,  # type: ignore
+                    cudaMemcpyDtoH as memcpy_d2h,
                 )
             except Exception:
                 from src.keydnn.infrastructure.native_cuda.python.ops.memcpy_ctypes import (
-                    cuda_memcpy_d2h as memcpy_d2h,  # type: ignore
+                    cuda_memcpy_d2h as memcpy_d2h,
                 )
 
-        cls.memcpy_h2d = staticmethod(memcpy_h2d)  # type: ignore
-        cls.memcpy_d2h = staticmethod(memcpy_d2h)  # type: ignore
+        cls.memcpy_h2d = staticmethod(memcpy_h2d)
+        cls.memcpy_d2h = staticmethod(memcpy_d2h)
 
-    # -------------------------
-    # Dev buffer helpers
-    # -------------------------
     def _malloc_dev(self, nbytes: int) -> int:
-        # cuda_malloc signature: cuda_malloc(lib, nbytes)
+
         return int(self.cuda_malloc(self.env.lib, int(nbytes if nbytes > 0 else 1)))
 
     def _free_dev(self, dev: int) -> None:
@@ -213,7 +205,7 @@ class TestConv2dTransposeCudaDevPtrOps(unittest.TestCase):
 
     def _h2d(self, dev: int, host: np.ndarray) -> None:
         host_c = np.ascontiguousarray(host)
-        # support (lib, dev, host) or (lib, dev, host, nbytes)
+
         try:
             self.memcpy_h2d(self.env.lib, int(dev), host_c)
         except TypeError:
@@ -221,16 +213,13 @@ class TestConv2dTransposeCudaDevPtrOps(unittest.TestCase):
 
     def _d2h(self, dev: int, shape: tuple[int, ...], dtype: np.dtype) -> np.ndarray:
         out = np.empty(shape, dtype=np.dtype(dtype))
-        # support (lib, out, dev) or (lib, out, dev, nbytes)
+
         try:
             self.memcpy_d2h(self.env.lib, out, int(dev))
         except TypeError:
             self.memcpy_d2h(self.env.lib, out, int(dev), int(out.nbytes))
         return out
 
-    # -------------------------
-    # Forward tests (devptr)
-    # -------------------------
     def _run_forward_devptr(self, dtype: np.dtype, *, with_bias: bool) -> None:
         dtype = np.dtype(dtype)
 
@@ -242,7 +231,7 @@ class TestConv2dTransposeCudaDevPtrOps(unittest.TestCase):
         output_padding = (0, 0)
 
         x = np.random.randn(N, C_in, H_in, W_in).astype(dtype)
-        w = np.random.randn(C_in, C_out, K_h, K_w).astype(dtype)  # IOHW
+        w = np.random.randn(C_in, C_out, K_h, K_w).astype(dtype)
         b = np.random.randn(C_out).astype(dtype) if with_bias else None
 
         y_ref = _conv2d_transpose_forward_ref(
@@ -261,7 +250,6 @@ class TestConv2dTransposeCudaDevPtrOps(unittest.TestCase):
             if b is not None:
                 self._h2d(int(b_dev), b)
 
-            # NOTE: transpose-conv devptr wrapper computes H_out/W_out internally -> do NOT pass them.
             self.fwd_devptr(
                 self.env.lib,
                 x_dev=int(x_dev),
@@ -308,9 +296,6 @@ class TestConv2dTransposeCudaDevPtrOps(unittest.TestCase):
     def test_forward_devptr_float64_with_bias(self) -> None:
         self._run_forward_devptr(np.float64, with_bias=True)
 
-    # -------------------------
-    # Backward tests (devptr)
-    # -------------------------
     def _run_backward_devptr(self, dtype: np.dtype, *, with_bias: bool) -> None:
         dtype = np.dtype(dtype)
 
@@ -423,9 +408,6 @@ class TestConv2dTransposeCudaDevPtrOps(unittest.TestCase):
     def test_backward_devptr_float64_with_bias(self) -> None:
         self._run_backward_devptr(np.float64, with_bias=True)
 
-    # -------------------------
-    # Validation / error tests
-    # -------------------------
     def test_rejects_output_padding_ge_stride_devptr(self) -> None:
         dtype = np.float32
         with self.assertRaises(ValueError):

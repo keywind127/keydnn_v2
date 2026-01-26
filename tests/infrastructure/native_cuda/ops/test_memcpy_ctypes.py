@@ -74,8 +74,7 @@ class TestMemcpyCtypes(_CudaTestCase):
 
     def test_cuda_memcpy_d2d_zero_bytes_is_noop(self) -> None:
         lib = self.lib
-        # nbytes==0 should be allowed and not crash, even if pointers are non-zero/zero.
-        # We still allocate to stay safe with stricter native contracts.
+
         src = int(cuda_malloc(lib, 1))
         dst = int(cuda_malloc(lib, 1))
         try:

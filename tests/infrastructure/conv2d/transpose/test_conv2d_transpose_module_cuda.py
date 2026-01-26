@@ -1,4 +1,3 @@
-# tests/infrastructure/convolution/transpose/test_conv2d_transpose_module_cuda.py
 """
 CUDA unit tests for Conv2dTranspose module.
 
@@ -46,28 +45,25 @@ from src.keydnn.infrastructure.ops.pool2d_cuda import (
 )
 
 
-# ---------------------------
-# CUDA test utilities
-# ---------------------------
 def _get_cuda_device(index: int = 0) -> Device:
     """
     Best-effort helper to obtain a CUDA Device instance across possible Device APIs.
     """
     if hasattr(Device, "cuda") and callable(getattr(Device, "cuda")):
-        return Device.cuda(index)  # type: ignore[attr-defined]
+        return Device.cuda(index)
 
     try:
-        return Device("cuda", index)  # type: ignore[call-arg]
+        return Device("cuda", index)
     except Exception:
         pass
 
     try:
-        return Device(f"cuda:{index}")  # type: ignore[call-arg]
+        return Device(f"cuda:{index}")
     except Exception:
         pass
 
     try:
-        return Device(kind="cuda", index=index)  # type: ignore[call-arg]
+        return Device(kind="cuda", index=index)
     except Exception as e:
         raise RuntimeError(
             "Unable to construct a CUDA Device; update _get_cuda_device() for this repo."
@@ -195,7 +191,7 @@ def _tol(dtype: np.dtype) -> tuple[float, float]:
     """
     dtype = np.dtype(dtype)
     if dtype == np.float32:
-        # backward may use atomics -> looser
+
         return 3e-4, 3e-4
     if dtype == np.float64:
         return 1e-10, 1e-10
@@ -205,7 +201,7 @@ def _tol(dtype: np.dtype) -> tuple[float, float]:
 class TestConv2dTransposeModuleCuda(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        # Load CUDA DLL; skip if unavailable.
+
         try:
             cls.lib = _load_cuda_lib()
         except Exception as e:
@@ -217,13 +213,11 @@ class TestConv2dTransposeModuleCuda(unittest.TestCase):
         except Exception as e:
             raise unittest.SkipTest(f"Failed to set CUDA device: {e}") from e
 
-        # Ensure memcpy symbols exist; if not, skip (cannot validate numerics).
         try:
             _bind_memcpy_symbols(cls.lib)
         except Exception as e:
             raise unittest.SkipTest(f"CUDA memcpy symbols unavailable: {e}") from e
 
-        # Construct CUDA device object
         try:
             cls.cuda_device = _get_cuda_device(cls.device_index)
         except Exception as e:
@@ -248,8 +242,7 @@ class TestConv2dTransposeModuleCuda(unittest.TestCase):
 
         y = deconv.forward(x)
 
-        # Reference shape from CPU op (use host params)
-        w_np = _unwrap_param_tensor(deconv.weight).to_numpy()  # IOHW
+        w_np = _unwrap_param_tensor(deconv.weight).to_numpy()
         b_np = (
             _unwrap_param_tensor(deconv.bias).to_numpy()
             if deconv.bias is not None
@@ -280,18 +273,15 @@ class TestConv2dTransposeModuleCuda(unittest.TestCase):
             device=self.cuda_device,
         )
 
-        # Deterministic params (IOHW)
         w_np = rng.standard_normal((2, 3, 3, 2), dtype=dtype)
         b_np = rng.standard_normal((3,), dtype=dtype)
 
         w_t = _unwrap_param_tensor(deconv.weight)
         b_t = _unwrap_param_tensor(deconv.bias)
 
-        # Ensure CUDA param storage is overwritten with our deterministic values
         _copy_host_into_cuda_tensor(w_t, w_np, lib=self.lib)
         _copy_host_into_cuda_tensor(b_t, b_np, lib=self.lib)
 
-        # Input
         x_np = rng.standard_normal((1, 2, 5, 4), dtype=dtype)
         x = _tensor_from_numpy_cuda(
             x_np, lib=self.lib, cuda_device=self.cuda_device, requires_grad=False
@@ -330,7 +320,6 @@ class TestConv2dTransposeModuleCuda(unittest.TestCase):
             device=self.cuda_device,
         )
 
-        # Deterministic parameters (IOHW)
         w_np = rng.standard_normal((2, 3, 3, 2), dtype=dtype)
         b_np = rng.standard_normal((3,), dtype=dtype)
 
@@ -339,13 +328,11 @@ class TestConv2dTransposeModuleCuda(unittest.TestCase):
         _copy_host_into_cuda_tensor(w_t, w_np, lib=self.lib)
         _copy_host_into_cuda_tensor(b_t, b_np, lib=self.lib)
 
-        # Input
         x_np = rng.standard_normal((1, 2, 5, 4), dtype=dtype)
         x = _tensor_from_numpy_cuda(
             x_np, lib=self.lib, cuda_device=self.cuda_device, requires_grad=True
         )
 
-        # Forward + backward
         y = deconv.forward(x)
         y.sum().backward()
 
@@ -356,7 +343,6 @@ class TestConv2dTransposeModuleCuda(unittest.TestCase):
         self.assertIsNotNone(w_holder.grad, "weight.grad should be populated")
         self.assertIsNotNone(b_holder.grad, "bias.grad should be populated")
 
-        # CPU reference under L = sum(y) -> grad_out = ones
         y_ref = conv2d_transpose_forward_cpu(
             x_np, w_np, b_np, stride=(1, 2), padding=(1, 0), output_padding=(0, 0)
         )
@@ -372,14 +358,14 @@ class TestConv2dTransposeModuleCuda(unittest.TestCase):
             output_padding=(0, 0),
         )
 
-        gx = _to_numpy_from_cuda(x.grad, lib=self.lib)  # type: ignore[arg-type]
-        gw = _to_numpy_from_cuda(w_holder.grad, lib=self.lib)  # type: ignore[arg-type]
-        gb = _to_numpy_from_cuda(b_holder.grad, lib=self.lib)  # type: ignore[arg-type]
+        gx = _to_numpy_from_cuda(x.grad, lib=self.lib)
+        gw = _to_numpy_from_cuda(w_holder.grad, lib=self.lib)
+        gb = _to_numpy_from_cuda(b_holder.grad, lib=self.lib)
 
         rtol, atol = _tol(dtype)
         np.testing.assert_allclose(gx, gx_ref, rtol=rtol, atol=atol)
         np.testing.assert_allclose(gw, gw_ref, rtol=rtol, atol=atol)
-        # bias grad is reduction -> can be a bit tighter
+
         np.testing.assert_allclose(gb, gb_ref, rtol=1e-4, atol=1e-4)
 
     def test_conv2d_transpose_module_no_bias_cuda(self) -> None:
@@ -403,7 +389,6 @@ class TestConv2dTransposeModuleCuda(unittest.TestCase):
             x_np, lib=self.lib, cuda_device=self.cuda_device, requires_grad=True
         )
 
-        # Deterministic weight (IOHW)
         w_np = rng.standard_normal((2, 2, 3, 3), dtype=dtype)
         _copy_host_into_cuda_tensor(
             _unwrap_param_tensor(deconv.weight), w_np, lib=self.lib
@@ -416,7 +401,6 @@ class TestConv2dTransposeModuleCuda(unittest.TestCase):
         w_holder = _unwrap_param_tensor(deconv.weight)
         self.assertIsNotNone(w_holder.grad)
 
-        # CPU reference (bias None)
         y_ref = conv2d_transpose_forward_cpu(
             x_np, w_np, None, stride=(1, 2), padding=(1, 1), output_padding=(0, 0)
         )
@@ -433,8 +417,8 @@ class TestConv2dTransposeModuleCuda(unittest.TestCase):
         )
 
         self.assertIsNone(gb_ref)
-        gx = _to_numpy_from_cuda(x.grad, lib=self.lib)  # type: ignore[arg-type]
-        gw = _to_numpy_from_cuda(w_holder.grad, lib=self.lib)  # type: ignore[arg-type]
+        gx = _to_numpy_from_cuda(x.grad, lib=self.lib)
+        gw = _to_numpy_from_cuda(w_holder.grad, lib=self.lib)
 
         rtol, atol = _tol(dtype)
         np.testing.assert_allclose(gx, gx_ref, rtol=rtol, atol=atol)

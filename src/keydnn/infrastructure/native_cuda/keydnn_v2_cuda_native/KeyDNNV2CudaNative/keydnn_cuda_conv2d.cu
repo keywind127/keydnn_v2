@@ -307,7 +307,6 @@ static int launch_conv2d_backward_cudnn(
     const void* alpha = std::is_same<T, float>::value ? (const void*)&one_f : (const void*)&one_d;
     const void* beta0 = std::is_same<T, float>::value ? (const void*)&zero_f : (const void*)&zero_d;
 
-    // We keep beta=0 (overwrite). If you truly want accumulation, pass beta=1.
     cudnnStatus_t s1 = cudnnConvolutionBackwardData(
         handle,
         alpha,

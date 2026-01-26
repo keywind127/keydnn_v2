@@ -33,16 +33,13 @@ class TestSequentialToAndToInPlace(TestCase):
             Linear(3, 4, device=Device("cpu")),
         )
 
-        # All params start on CPU
         for p in model.parameters():
             self.assertEqual(str(p.device), "cpu")
 
-        # CPU -> CPU should keep everything on CPU
         model.to(Device("cpu"))
         for p in model.parameters():
             self.assertEqual(str(p.device), "cpu")
 
-        # CPU -> CUDA only if available
         if not _cuda_available():
             self.skipTest("CUDA not available; skipping CPU->CUDA transfer assertion.")
 
@@ -72,7 +69,6 @@ class TestSequentialToAndToInPlace(TestCase):
         params_before = list(model.parameters())
         ids_before = [id(p) for p in params_before]
 
-        # In-place CPU -> CPU (no-op) should preserve identity
         model.to_(Device("cpu"))
         params_after_cpu = list(model.parameters())
         ids_after_cpu = [id(p) for p in params_after_cpu]
@@ -81,7 +77,6 @@ class TestSequentialToAndToInPlace(TestCase):
         for p in params_after_cpu:
             self.assertEqual(str(p.device), "cpu")
 
-        # CPU -> CUDA only if available
         if not _cuda_available():
             self.skipTest(
                 "CUDA not available; skipping CPU->CUDA in-place transfer assertions."
@@ -91,8 +86,6 @@ class TestSequentialToAndToInPlace(TestCase):
         params_after_cuda = list(model.parameters())
         ids_after_cuda = [id(p) for p in params_after_cuda]
 
-        # Identity should be preserved when underlying Parameter/Tensor supports to_().
-        # If some parameters fall back to out-of-place rebind, this will catch it.
         self.assertEqual(
             ids_after_cuda,
             ids_before,

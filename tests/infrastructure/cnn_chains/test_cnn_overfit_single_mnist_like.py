@@ -26,7 +26,7 @@ def sgd_step(params: list[Tensor], lr: float) -> None:
     for p in params:
         if p.grad is None:
             continue
-        # In-place update on underlying numpy storage
+
         p.to_numpy()[...] = p.to_numpy() - lr * p.grad.to_numpy()
         p.zero_grad()
 
@@ -38,14 +38,11 @@ def make_mnist_like_one() -> np.ndarray:
     """
     img = np.zeros((28, 28), dtype=np.float32)
 
-    # vertical stroke around the center
     col = 14
     img[4:24, col - 1 : col + 1] = 1.0
 
-    # small base to look like '1'
     img[23:25, 12:17] = 1.0
 
-    # (N, C, H, W)
     return img[None, None, :, :]
 
 
@@ -74,28 +71,26 @@ class TestCNNOverfitSingleMNISTLike(unittest.TestCase):
         - loss decreases significantly
         - predicted class becomes 1
         """
-        # ---- data ----
-        x_np = make_mnist_like_one()  # (1, 1, 28, 28)
-        t_np = one_hot(label=1, num_classes=10)  # (1, 10)
+
+        x_np = make_mnist_like_one()
+        t_np = one_hot(label=1, num_classes=10)
 
         x = tensor_from_numpy(x_np, self.device, requires_grad=True)
         target = tensor_from_numpy(t_np, self.device, requires_grad=False)
 
-        # ---- model ----
         conv = Conv2d(
             in_channels=1,
             out_channels=4,
             kernel_size=3,
             stride=1,
-            padding=1,  # keep 28x28
+            padding=1,
             bias=True,
             device=self.device,
         )
         relu = ReLU()
-        pool = MaxPool2d(kernel_size=2, stride=2, padding=0)  # 28x28 -> 14x14
+        pool = MaxPool2d(kernel_size=2, stride=2, padding=0)
         flatten = Flatten()
 
-        # After pooling: (1, 4, 14, 14) => flatten dim = 4*14*14 = 784
         fc = Linear(in_features=4 * 14 * 14, out_features=10, device=self.device)
         softmax = Softmax()
 
@@ -105,49 +100,38 @@ class TestCNNOverfitSingleMNISTLike(unittest.TestCase):
         if fc.bias is not None:
             params.append(fc.bias)
 
-        # ---- train loop ----
         lr = 0.2
         steps = 16
 
         losses: list[float] = []
 
         for _ in range(steps):
-            # forward
+
             y = conv.forward(x)
             y = relu.forward(y)
             y = pool.forward(y)
             y = flatten.forward(y)
             y = fc.forward(y)
-            probs = softmax.forward(y)  # (1, 10)
+            probs = softmax.forward(y)
 
-            # cross-entropy: -sum(target * log(probs))
-            # NOTE: this assumes probs are in (0,1] and Tensor.log exists (you have it).
             loss = -(target * probs.log()).sum()
 
-            # backward
             loss.backward()
 
-            # record
             losses.append(float(np.asarray(loss.to_numpy())))
 
-            # update params + clear grads
             sgd_step(params, lr=lr)
 
-            # clear input grad to avoid accumulation across steps
             x.zero_grad()
 
-        # ---- assertions ----
         self.assertGreater(len(losses), 2)
         self.assertTrue(np.all(np.isfinite(np.array(losses, dtype=np.float32))))
 
         initial = losses[0]
         final = losses[-1]
 
-        # should drop a lot when overfitting one sample
         self.assertLess(final, initial * 0.25)
 
-        # final prediction should be class 1
-        # run final forward to check argmax
         y = conv.forward(x)
         y = relu.forward(y)
         y = pool.forward(y)

@@ -58,8 +58,8 @@ def _make_bn1d(
 ) -> BatchNorm1d:
     """
     Construct BatchNorm1d, supporting both signatures:
-      - BatchNorm1d(..., device=Device("cpu"))  (if you implemented it)
-      - BatchNorm1d(...)                       (if it internally uses CPU)
+      - BatchNorm1d(..., device=Device("cpu"))
+      - BatchNorm1d(...) (if it internally uses CPU)
     """
     try:
         return BatchNorm1d(
@@ -102,7 +102,7 @@ class TestBatchNorm1dInfrastructure(TestCase):
             num_features=4, eps=1e-5, momentum=0.1, affine=True, device=self.device
         )
         params = list(bn_aff.parameters())
-        self.assertEqual(len(params), 2)  # gamma + beta
+        self.assertEqual(len(params), 2)
 
         bn_no = _make_bn1d(
             num_features=4, eps=1e-5, momentum=0.1, affine=False, device=self.device
@@ -120,11 +120,11 @@ class TestBatchNorm1dForward(TestCase):
             num_features=3, eps=1e-5, momentum=0.1, affine=True, device=self.device
         )
 
-        x1 = Tensor((3,), self.device)  # 1D
+        x1 = Tensor((3,), self.device)
         with self.assertRaises(ValueError):
             bn.forward(x1)
 
-        x3 = Tensor((2, 3, 4), self.device)  # 3D
+        x3 = Tensor((2, 3, 4), self.device)
         with self.assertRaises(ValueError):
             bn.forward(x3)
 
@@ -132,7 +132,7 @@ class TestBatchNorm1dForward(TestCase):
         bn = _make_bn1d(
             num_features=3, eps=1e-5, momentum=0.1, affine=True, device=self.device
         )
-        x = Tensor((4, 5), self.device)  # C=5 mismatch
+        x = Tensor((4, 5), self.device)
         with self.assertRaises(ValueError):
             bn.forward(x)
 
@@ -148,9 +148,7 @@ class TestBatchNorm1dForward(TestCase):
 
         np.random.seed(0)
         N, C = 64, 6
-        x_np = (
-            np.random.randn(N, C).astype(np.float32) * 3.0
-        ) + 5.0  # non-zero mean, scaled var
+        x_np = (np.random.randn(N, C).astype(np.float32) * 3.0) + 5.0
         x = _make_tensor_from_numpy(x_np, self.device, requires_grad=False)
 
         bn = _make_bn1d(
@@ -163,7 +161,6 @@ class TestBatchNorm1dForward(TestCase):
         mean = y.mean(axis=0)
         var = y.var(axis=0)
 
-        # Allow small numeric error due to eps and float32
         np.testing.assert_allclose(mean, np.zeros_like(mean), rtol=0, atol=1e-3)
         np.testing.assert_allclose(var, np.ones_like(var), rtol=0, atol=2e-3)
 
@@ -183,7 +180,6 @@ class TestBatchNorm1dForward(TestCase):
         )
         bn.training = True
 
-        # Snapshot running stats before
         rm0 = bn.running_mean.to_numpy().copy()
         rv0 = bn.running_var.to_numpy().copy()
 
@@ -192,7 +188,6 @@ class TestBatchNorm1dForward(TestCase):
         rm1 = bn.running_mean.to_numpy()
         rv1 = bn.running_var.to_numpy()
 
-        # running stats should change (very likely)
         self.assertFalse(np.allclose(rm0, rm1))
         self.assertFalse(np.allclose(rv0, rv1))
         self.assertEqual(rm1.shape, (C,))
@@ -214,14 +209,12 @@ class TestBatchNorm1dForward(TestCase):
             num_features=C, eps=1e-5, momentum=0.9, affine=False, device=self.device
         )
 
-        # Training pass to update running stats
         bn.training = True
         x_train = _make_tensor_from_numpy(
             np.random.randn(N, C).astype(np.float32), self.device, requires_grad=False
         )
         _ = bn.forward(x_train)
 
-        # Eval: same input twice => identical output
         bn.training = False
         x_eval = _make_tensor_from_numpy(
             np.random.randn(N, C).astype(np.float32), self.device, requires_grad=False
@@ -258,7 +251,6 @@ class TestBatchNorm1dBackward(TestCase):
         )
         bn.training = True
 
-        # Be explicit: params require grad
         for p in bn.parameters():
             p.requires_grad = True
 
@@ -268,8 +260,6 @@ class TestBatchNorm1dBackward(TestCase):
         self.assertIsNotNone(x.grad)
         self.assertEqual(x.grad.shape, x.shape)
 
-        # gamma/beta grads
-        # (Parameters are Tensor-like)
         self.assertTrue(hasattr(bn, "gamma"))
         self.assertTrue(hasattr(bn, "beta"))
 

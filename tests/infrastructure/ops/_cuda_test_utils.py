@@ -24,17 +24,13 @@ def try_get_cuda_env() -> Optional[CudaEnv]:
     Returns None if CUDA DLL or wrappers are not available (tests should skip).
     """
     try:
-        # Your codebase uses these wrappers in multiple places.
-        # Prefer maxpool2d_ctypes (commonly contains malloc/memcpy/sync).
+
         from src.keydnn.infrastructure.native_cuda.python import maxpool2d_ctypes as m
     except Exception:
         return None
 
     try:
         lib = m.load_keydnn_cuda_native()
-        # print("[CUDA ENV] lib type:", type(lib))
-        # print("[CUDA ENV] lib._name:", getattr(lib, "_name", None))
-        # print("[CUDA ENV] cwd:", __import__("os").getcwd())
 
     except Exception:
         return None
@@ -46,21 +42,6 @@ def try_get_cuda_env() -> Optional[CudaEnv]:
     GetProcAddress.argtypes = [wintypes.HMODULE, wintypes.LPCSTR]
     GetProcAddress.restype = wintypes.LPVOID
 
-    # def gp(sym: str) -> int:
-    #     addr = GetProcAddress(lib._handle, sym.encode("ascii"))
-    #     return int(ctypes.cast(addr, ctypes.c_void_p).value or 0)
-
-    # for s in [
-    #     "keydnn_cuda_matmul_f32",
-    #     "keydnn_cuda_matmul_f64",
-    #     "keydnn_cuda_memcpy_h2d",
-    #     "keydnn_cuda_memcpy_d2h",
-    #     "keydnn_cuda_transpose2d_f32",
-    #     "keydnn_cuda_exp_f32",
-    # ]:
-    #     print("[CUDA ENV] GetProcAddress", s, hex(gp(s)))
-
-    # Some repos define cuda_set_device in avgpool2d_ctypes; accept missing.
     cuda_set_device = getattr(m, "cuda_set_device", None)
 
     required = [
@@ -73,9 +54,8 @@ def try_get_cuda_env() -> Optional[CudaEnv]:
     ]
     for name in required:
         if not hasattr(m, name):
-            # print(f"Missing required CUDA wrapper: {name}")
+
             return None
-    # return None
 
     return CudaEnv(
         lib=lib,
@@ -116,7 +96,7 @@ def assert_allclose_by_dtype(
         elif op == "exp":
             np.testing.assert_allclose(actual, ref, rtol=2e-6, atol=3e-7)
         elif op == "transpose":
-            # transpose is exact reorder; still allow tiny noise if kernel casts
+
             np.testing.assert_allclose(actual, ref, rtol=0.0, atol=0.0)
         else:
             np.testing.assert_allclose(actual, ref, rtol=1e-5, atol=1e-6)

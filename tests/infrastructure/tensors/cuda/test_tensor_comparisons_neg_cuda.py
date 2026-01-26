@@ -41,20 +41,20 @@ def _get_cuda_device(index: int = 0) -> Device:
     Best-effort helper to obtain a CUDA Device instance across possible Device APIs.
     """
     if hasattr(Device, "cuda") and callable(getattr(Device, "cuda")):
-        return Device.cuda(index)  # type: ignore[attr-defined]
+        return Device.cuda(index)
 
     try:
-        return Device("cuda", index)  # type: ignore[call-arg]
+        return Device("cuda", index)
     except Exception:
         pass
 
     try:
-        return Device(f"cuda:{index}")  # type: ignore[call-arg]
+        return Device(f"cuda:{index}")
     except Exception:
         pass
 
     try:
-        return Device(kind="cuda", index=index)  # type: ignore[call-arg]
+        return Device(kind="cuda", index=index)
     except Exception as e:
         raise RuntimeError(
             "Unable to construct a CUDA Device; update _get_cuda_device() for this repo."
@@ -165,9 +165,6 @@ class TestTensorComparisonsNegCuda(unittest.TestCase):
         _d2h(self.lib, int(t.data), host)
         return host
 
-    # ----------------------------
-    # __neg__
-    # ----------------------------
     def test_neg_cuda_f32_matches_numpy(self) -> None:
         rng = np.random.default_rng(0)
         x = rng.standard_normal((4, 7), dtype=np.float32)
@@ -194,12 +191,9 @@ class TestTensorComparisonsNegCuda(unittest.TestCase):
         y = self._read_cuda_tensor_to_host(y_t)
         np.testing.assert_allclose(y, -x, rtol=1e-12, atol=1e-12)
 
-    # ----------------------------
-    # __gt__ / __ge__ / __lt__ / __le__
-    # ----------------------------
     def _assert_mask(self, y: np.ndarray) -> None:
         self.assertEqual(y.dtype, np.float32)
-        # mask should be exactly 0.0 or 1.0
+
         u = np.unique(y)
         self.assertTrue(
             set(u.tolist()).issubset({0.0, 1.0}), f"mask values not in {{0,1}}: {u}"
@@ -228,15 +222,12 @@ class TestTensorComparisonsNegCuda(unittest.TestCase):
         a = rng.standard_normal((4, 4), dtype=np.float32)
         a_t = self._make_cuda_tensor_from_host(a)
 
-        # _as_tensor_like() rejects numpy scalar types; use a Python float.
         s = 0.25
         y_t = a_t > s
 
         y = self._read_cuda_tensor_to_host(y_t)
         self._assert_mask(y)
-        ref = (a > np.float32(s)).astype(
-            np.float32
-        )  # match float32 comparison semantics
+        ref = (a > np.float32(s)).astype(np.float32)
         np.testing.assert_array_equal(y, ref)
 
     def test_ge_tensor_tensor_cuda_f32(self) -> None:
@@ -273,7 +264,6 @@ class TestTensorComparisonsNegCuda(unittest.TestCase):
         a = rng.standard_normal((7,), dtype=np.float32)
         a_t = self._make_cuda_tensor_from_host(a)
 
-        # _as_tensor_like() rejects numpy scalar types; use a Python float.
         s = -0.1
         y_t = a_t <= s
 

@@ -12,11 +12,6 @@ from unittest.mock import patch
 import numpy as np
 
 
-# --------------------------------------------------------------------------------------
-# MNIST helpers (match your infrastructure dataset tests)
-# --------------------------------------------------------------------------------------
-
-
 def _idx_images_payload(n: int, rows: int = 28, cols: int = 28) -> bytes:
     header = struct.pack(">IIII", 2051, n, rows, cols)
     count = n * rows * cols
@@ -39,13 +34,8 @@ def _write_gzip_bytes(dst: Path, raw_payload: bytes) -> None:
         f.write(compressed)
 
 
-# --------------------------------------------------------------------------------------
-# CIFAR helpers (match your infrastructure dataset tests)
-# --------------------------------------------------------------------------------------
-
-
 def _cifar_batch_dict(n: int, *, num_classes: int, kind: str) -> dict:
-    # CIFAR stores data as (N, 3072) uint8
+
     count = n * 3072
     data = bytes((i % 256 for i in range(count)))
     data_arr = np.frombuffer(data, dtype=np.uint8).reshape(n, 3072)
@@ -107,7 +97,6 @@ def _make_cifar10_archive_bytes(*, train_n: int, test_n: int) -> bytes:
         (f"{folder}/test_batch", pickle.dumps(d_test, protocol=pickle.HIGHEST_PROTOCOL))
     )
 
-    # optional meta
     members.append(
         (
             f"{folder}/batches.meta",
@@ -136,11 +125,6 @@ def _make_cifar100_archive_bytes(*, train_n: int, test_n: int) -> bytes:
         ),
     ]
     return _tar_gz_bytes(members)
-
-
-# --------------------------------------------------------------------------------------
-# Presentation wrapper tests
-# --------------------------------------------------------------------------------------
 
 
 class TestDatasetLoadersMNIST(TestCase):
@@ -221,7 +205,6 @@ class TestDatasetLoadersMNIST(TestCase):
             root = Path(tmpdir)
             raw_dir = root / "mnist" / "raw"
 
-            # Pre-create exactly what MNIST expects so download=False is safe.
             _write_gzip_bytes(
                 raw_dir / "train-images-idx3-ubyte.gz", _idx_images_payload(train_n)
             )
@@ -314,7 +297,6 @@ class TestDatasetLoadersCIFAR(TestCase):
             base = raw_dir / "cifar-10-batches-py"
             base.mkdir(parents=True, exist_ok=True)
 
-            # Minimal valid CIFAR-10 layout: data_batch_1..5 + test_batch
             sizes = [1, 1, 0, 0, 0]
             for i, n_i in enumerate(sizes, start=1):
                 d = _cifar_batch_dict(n_i, num_classes=10, kind="cifar10")

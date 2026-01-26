@@ -1,4 +1,3 @@
-# tests/infrastructure/reduce/test_reduce_ops_cuda_ext.py
 """
 Unit tests for CUDA Tensor-boundary reduce wrappers (reduce_cuda_ext.py).
 
@@ -50,20 +49,20 @@ def _get_cuda_device(index: int = 0) -> Device:
     Best-effort helper to obtain a CUDA Device instance across possible Device APIs.
     """
     if hasattr(Device, "cuda") and callable(getattr(Device, "cuda")):
-        return Device.cuda(index)  # type: ignore[attr-defined]
+        return Device.cuda(index)
 
     try:
-        return Device("cuda", index)  # type: ignore[call-arg]
+        return Device("cuda", index)
     except Exception:
         pass
 
     try:
-        return Device(f"cuda:{index}")  # type: ignore[call-arg]
+        return Device(f"cuda:{index}")
     except Exception:
         pass
 
     try:
-        return Device(kind="cuda", index=index)  # type: ignore[call-arg]
+        return Device(kind="cuda", index=index)
     except Exception as e:
         raise RuntimeError(
             "Unable to construct a CUDA Device; update _get_cuda_device() for this repo."
@@ -126,10 +125,10 @@ def _d2h(lib: ctypes.CDLL, src_dev: int, dst: np.ndarray) -> None:
 
 def _tols_sum(dtype: np.dtype, numel: int) -> tuple[float, float]:
     if dtype == np.float32:
-        # atomicAdd reduction order is nondeterministic; error grows with numel
+
         if numel >= 100_000:
             return (2e-5, 1e-4)
-        # was (1e-5, 1e-6) — slightly too strict on some inputs
+
         return (2e-5, 5e-6)
     return (1e-12, 1e-12)
 
@@ -170,10 +169,6 @@ class TestReduceCudaExt(unittest.TestCase):
             cls.cuda_device = _get_cuda_device(cls.device_index)
         except Exception as e:
             raise unittest.SkipTest(f"Unable to construct CUDA Device: {e}") from e
-
-    # ---------------------------------------------------------------------
-    # helpers: CUDA Tensor <-> host
-    # ---------------------------------------------------------------------
 
     def _make_cuda_tensor_from_host(self, x: np.ndarray) -> Tensor:
         """Allocate device memory, copy host -> device, and wrap as CUDA Tensor."""
@@ -220,10 +215,6 @@ class TestReduceCudaExt(unittest.TestCase):
             host = np.empty(shape, dtype=np.dtype(t.dtype))
         _d2h(self.lib, int(t.data), host)
         return host[0:1] if shape == () else host
-
-    # ---------------------------------------------------------------------
-    # sum_all / mean_all
-    # ---------------------------------------------------------------------
 
     def _run_sum_all_case(self, dtype: np.dtype, *, shape: tuple[int, ...]) -> None:
         rng = np.random.default_rng(0)
@@ -277,10 +268,6 @@ class TestReduceCudaExt(unittest.TestCase):
     def test_mean_all_forward_f64(self) -> None:
         self._run_mean_all_case(np.float64, shape=(200_000,))
 
-    # ---------------------------------------------------------------------
-    # sum_axis2d_forward
-    # ---------------------------------------------------------------------
-
     def _run_sum_axis2d_forward_case(
         self, dtype: np.dtype, *, rows: int, cols: int, axis: int
     ) -> None:
@@ -312,10 +299,6 @@ class TestReduceCudaExt(unittest.TestCase):
 
     def test_sum_axis2d_forward_f64_axis0(self) -> None:
         self._run_sum_axis2d_forward_case(np.float64, rows=19, cols=29, axis=0)
-
-    # ---------------------------------------------------------------------
-    # sum_axis2d_backward (broadcast)
-    # ---------------------------------------------------------------------
 
     def _run_sum_axis2d_backward_case(
         self, dtype: np.dtype, *, rows: int, cols: int, axis: int
@@ -365,10 +348,6 @@ class TestReduceCudaExt(unittest.TestCase):
     def test_sum_axis2d_backward_f64_axis0(self) -> None:
         self._run_sum_axis2d_backward_case(np.float64, rows=13, cols=37, axis=0)
 
-    # ---------------------------------------------------------------------
-    # backward fill helpers (scalar -> vector)
-    # ---------------------------------------------------------------------
-
     def _run_sum_backward_fill_case(self, dtype: np.dtype, *, numel: int) -> None:
         rng = np.random.default_rng(4)
         grad_out = np.array(rng.standard_normal(), dtype=dtype)
@@ -412,9 +391,6 @@ class TestReduceCudaExt(unittest.TestCase):
         self.assertEqual(np.dtype(gx_t.dtype), np.dtype(dtype))
 
         gx = self._read_cuda_tensor_to_host(gx_t)
-        # ref = (np.ones((numel,), dtype=dtype) * (grad_out / dtype.type(numel))).astype(
-        #     dtype, copy=False
-        # )
 
         dt = np.dtype(dtype)
         scale = dt.type(numel)
@@ -428,10 +404,6 @@ class TestReduceCudaExt(unittest.TestCase):
 
     def test_mean_backward_fill_forward_f64(self) -> None:
         self._run_mean_backward_fill_case(np.float64, numel=65_537)
-
-    # ---------------------------------------------------------------------
-    # max axis2d ext (optional parity tests)
-    # ---------------------------------------------------------------------
 
     def _run_max_axis2d_forward_case(
         self, dtype: np.dtype, *, rows: int, cols: int, axis: int
@@ -522,10 +494,6 @@ class TestReduceCudaExt(unittest.TestCase):
     def test_max_axis2d_backward_f64_axis0(self) -> None:
         self._run_max_axis2d_backward_case(np.float64, rows=13, cols=37, axis=0)
 
-    # ---------------------------------------------------------------------
-    # validation tests
-    # ---------------------------------------------------------------------
-
     def test_sum_axis2d_forward_rejects_non_2d(self) -> None:
         rng = np.random.default_rng(8)
         x = rng.standard_normal((2, 3, 4), dtype=np.float32)
@@ -543,7 +511,7 @@ class TestReduceCudaExt(unittest.TestCase):
             _ = sum_axis2d_forward(x_t, axis=2, device=self.device_index, sync=True)
 
     def test_sum_axis2d_backward_rejects_shape_mismatch(self) -> None:
-        # axis=1 expects (rows,), give (cols,)
+
         rng = np.random.default_rng(10)
         rows, cols = 5, 7
         grad_out_wrong = rng.standard_normal((cols,), dtype=np.float32)
@@ -558,11 +526,11 @@ class TestReduceCudaExt(unittest.TestCase):
         x_np = np.ones((2, 3), dtype=np.float32)
 
         if hasattr(Tensor, "from_numpy") and callable(getattr(Tensor, "from_numpy")):
-            x_cpu = Tensor.from_numpy(x_np, device=Device("cpu"))  # type: ignore[call-arg]
+            x_cpu = Tensor.from_numpy(x_np, device=Device("cpu"))
         else:
             try:
-                x_cpu = Tensor(x_np.shape, device=Device("cpu"), requires_grad=False)  # type: ignore[call-arg]
-                x_cpu._data = x_np  # type: ignore[attr-defined]
+                x_cpu = Tensor(x_np.shape, device=Device("cpu"), requires_grad=False)
+                x_cpu._data = x_np
             except Exception as e:
                 raise unittest.SkipTest(
                     f"Unable to construct CPU tensor in this repo; update test_raises_on_cpu_tensor: {e}"
@@ -570,11 +538,6 @@ class TestReduceCudaExt(unittest.TestCase):
 
         with self.assertRaises(TypeError):
             _ = sum_all_forward(x_cpu, device=self.device_index, sync=True)
-
-        # ---------------------------------------------------------------------
-
-    # sum_to_shape (unbroadcast reduction)
-    # ---------------------------------------------------------------------
 
     def _sum_to_shape_cpu(
         self, x: np.ndarray, out_shape: tuple[int, ...]
@@ -632,7 +595,6 @@ class TestReduceCudaExt(unittest.TestCase):
         y = self._read_cuda_tensor_to_host(y_t)
         ref = self._sum_to_shape_cpu(x, out_shape)
 
-        # Reduction uses atomics for some shapes/kernels => tolerate like sum.
         rtol, atol = _tols_sum(np.dtype(dtype), int(x.size))
         np.testing.assert_allclose(y, ref, rtol=rtol, atol=atol)
 
@@ -651,7 +613,7 @@ class TestReduceCudaExt(unittest.TestCase):
         )
 
     def test_sum_to_shape_f32_reduce_both_broadcast_dims(self) -> None:
-        # typical broadcast-backward case: (B, C, H, W) -> (1, C, 1, 1)
+
         self._run_sum_to_shape_case(
             np.float32,
             in_shape=(3, 4, 5, 6),
@@ -673,7 +635,7 @@ class TestReduceCudaExt(unittest.TestCase):
         with self.assertRaises(ValueError):
             _ = sum_to_shape_forward(
                 x_t,
-                out_shape=(2, 3, 1),  # rank mismatch
+                out_shape=(2, 3, 1),
                 device=self.device_index,
                 sync=True,
             )
@@ -686,7 +648,7 @@ class TestReduceCudaExt(unittest.TestCase):
         with self.assertRaises(ValueError):
             _ = sum_to_shape_forward(
                 x_t,
-                out_shape=(2, 2, 4),  # 2 is neither 1 nor 3
+                out_shape=(2, 2, 4),
                 device=self.device_index,
                 sync=True,
             )

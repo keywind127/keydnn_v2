@@ -25,16 +25,12 @@ class TestModelSaveLoadLinearJSON(unittest.TestCase):
         """
         np.random.seed(0)
 
-        # Build a tiny model (top-level container) that includes Linear.
-        # Do NOT pass `device=...` here: let Linear create its own CPU device.
         model = Sequential(
             Linear(in_features=3, out_features=2, bias=True),
         )
 
-        # Access first layer
-        lin: Linear = model[0]  # type: ignore[assignment]
+        lin: Linear = model[0]
 
-        # Overwrite weights/bias with deterministic values (avoid init randomness)
         W = np.array(
             [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]],
             dtype=np.float32,
@@ -43,15 +39,13 @@ class TestModelSaveLoadLinearJSON(unittest.TestCase):
 
         lin.weight.copy_from_numpy(W)
         self.assertIsNotNone(lin.bias)
-        lin.bias.copy_from_numpy(b)  # type: ignore[union-attr]
+        lin.bias.copy_from_numpy(b)
 
-        # Create deterministic input
         x_np = np.array(
             [[1.0, 0.0, -1.0], [2.0, 1.0, 0.5]],
             dtype=np.float32,
         )
 
-        # Construct input tensor on the SAME device the layer uses
         x = Tensor(shape=x_np.shape, device=lin.device, requires_grad=False)
         x.copy_from_numpy(x_np)
 
@@ -61,7 +55,6 @@ class TestModelSaveLoadLinearJSON(unittest.TestCase):
             ckpt_path = Path(td) / "linear_model.json"
             model.save_json(ckpt_path)
 
-            # Sanity: JSON exists and has the right shape
             self.assertTrue(ckpt_path.exists())
             payload = json.loads(ckpt_path.read_text(encoding="utf-8"))
             self.assertEqual(payload.get("format"), "keydnn.json.ckpt.v1")
@@ -70,12 +63,12 @@ class TestModelSaveLoadLinearJSON(unittest.TestCase):
 
             loaded = Sequential.load_json(ckpt_path)
 
-        loaded_lin: Linear = loaded[0]  # type: ignore[assignment]
+        loaded_lin: Linear = loaded[0]
 
         np.testing.assert_allclose(loaded_lin.weight.to_numpy(), W, rtol=0.0, atol=0.0)
         self.assertIsNotNone(loaded_lin.bias)
         np.testing.assert_allclose(
-            loaded_lin.bias.to_numpy(),  # type: ignore[union-attr]
+            loaded_lin.bias.to_numpy(),
             b,
             rtol=0.0,
             atol=0.0,
@@ -99,7 +92,6 @@ class TestModelSaveLoadLinearJSON(unittest.TestCase):
             payload = json.loads(ckpt_path.read_text(encoding="utf-8"))
             state = payload["state"]
 
-            # Remove one parameter entry to force failure
             some_key = next(iter(state.keys()))
             del state[some_key]
 
@@ -121,9 +113,8 @@ class TestModelSaveLoadLinearJSON(unittest.TestCase):
         np.random.seed(0)
 
         model = Sequential(Linear(in_features=3, out_features=2, bias=False))
-        lin: Linear = model[0]  # type: ignore[assignment]
+        lin: Linear = model[0]
 
-        # Deterministic weights
         W = np.array([[1.0, -2.0, 3.0], [0.5, 1.5, -4.0]], dtype=np.float32)
         lin.weight.copy_from_numpy(W)
         self.assertIsNone(lin.bias)
@@ -139,7 +130,7 @@ class TestModelSaveLoadLinearJSON(unittest.TestCase):
             model.save_json(ckpt_path)
             loaded = Sequential.load_json(ckpt_path)
 
-        loaded_lin: Linear = loaded[0]  # type: ignore[assignment]
+        loaded_lin: Linear = loaded[0]
         self.assertIsNone(loaded_lin.bias)
         np.testing.assert_allclose(loaded_lin.weight.to_numpy(), W, rtol=0.0, atol=0.0)
 
@@ -160,21 +151,20 @@ class TestModelSaveLoadLinearJSON(unittest.TestCase):
             Linear(in_features=4, out_features=2, bias=True),
         )
 
-        lin0: Linear = model[0]  # type: ignore[assignment]
-        lin1: Linear = model[1]  # type: ignore[assignment]
+        lin0: Linear = model[0]
+        lin1: Linear = model[1]
 
-        # Deterministic weights/bias
         W0 = np.arange(12, dtype=np.float32).reshape(4, 3) / 10.0
         b0 = np.array([0.1, -0.2, 0.3, -0.4], dtype=np.float32)
         lin0.weight.copy_from_numpy(W0)
         self.assertIsNotNone(lin0.bias)
-        lin0.bias.copy_from_numpy(b0)  # type: ignore[union-attr]
+        lin0.bias.copy_from_numpy(b0)
 
         W1 = np.arange(8, dtype=np.float32).reshape(2, 4) / 20.0
         b1 = np.array([0.25, -0.75], dtype=np.float32)
         lin1.weight.copy_from_numpy(W1)
         self.assertIsNotNone(lin1.bias)
-        lin1.bias.copy_from_numpy(b1)  # type: ignore[union-attr]
+        lin1.bias.copy_from_numpy(b1)
 
         x_np = np.array([[1.0, -1.0, 2.0], [0.0, 0.5, -0.5]], dtype=np.float32)
         x = Tensor(shape=x_np.shape, device=lin0.device, requires_grad=False)
@@ -187,15 +177,13 @@ class TestModelSaveLoadLinearJSON(unittest.TestCase):
             model.save_json(ckpt_path)
             loaded = Sequential.load_json(ckpt_path)
 
-        # Ensure layers restored
         self.assertEqual(len(loaded), 2)
         self.assertIsInstance(loaded[0], Linear)
         self.assertIsInstance(loaded[1], Linear)
 
-        loaded0: Linear = loaded[0]  # type: ignore[assignment]
-        loaded1: Linear = loaded[1]  # type: ignore[assignment]
+        loaded0: Linear = loaded[0]
+        loaded1: Linear = loaded[1]
 
-        # Ensure weights map to the correct layer (order preserved)
         np.testing.assert_allclose(loaded0.weight.to_numpy(), W0, rtol=0.0, atol=0.0)
         np.testing.assert_allclose(loaded1.weight.to_numpy(), W1, rtol=0.0, atol=0.0)
 
@@ -235,7 +223,6 @@ class TestModelSaveLoadLinearJSON(unittest.TestCase):
             payload = json.loads(ckpt_path.read_text(encoding="utf-8"))
             state = payload["state"]
 
-            # Pick one param and corrupt its shape metadata
             some_key = next(iter(state.keys()))
             state[some_key]["shape"] = [999, 999]
 
@@ -261,7 +248,6 @@ class TestModelSaveLoadLinearJSON(unittest.TestCase):
             model.save_json(ckpt_path)
             loaded = Sequential.load_json(ckpt_path)
 
-        # This would fail if `_layers` was not reconstructed
         self.assertEqual(len(loaded), 2)
         _ = loaded[0]
         _ = loaded[1]

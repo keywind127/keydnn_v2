@@ -134,9 +134,6 @@ class TestConv2dCudaDevPtrOps(unittest.TestCase):
             candidates=["conv2d_backward_cuda_devptr", "conv2d_backward_devptr"],
         )
 
-        # ------------------------------------------------------------------
-        # Helpers may NOT be re-exported from ops_conv; fall back to ctypes.
-        # ------------------------------------------------------------------
         try:
             cls.cuda_malloc = resolve_func(
                 ops_conv, candidates=["cuda_malloc", "malloc_cuda"]
@@ -145,16 +142,15 @@ class TestConv2dCudaDevPtrOps(unittest.TestCase):
                 ops_conv, candidates=["cuda_free", "free_cuda"]
             )
         except AttributeError:
-            # Most repos keep malloc/free under a low-level ctypes wrapper module
+
             from src.keydnn.infrastructure.native_cuda.python.avgpool2d_ctypes import (
-                cuda_malloc,  # type: ignore
-                cuda_free,  # type: ignore
+                cuda_malloc,
+                cuda_free,
             )
 
             cls.cuda_malloc = cuda_malloc
             cls.cuda_free = cuda_free
 
-        # H2D / D2H memcpy: your fill_cuda.py already uses avgpool2d_ctypes for H2D.
         try:
             cls.memcpy_h2d = resolve_func(
                 ops_conv,
@@ -162,7 +158,7 @@ class TestConv2dCudaDevPtrOps(unittest.TestCase):
             )
         except AttributeError:
             from src.keydnn.infrastructure.native_cuda.python.avgpool2d_ctypes import (
-                cuda_memcpy_h2d,  # type: ignore
+                cuda_memcpy_h2d,
             )
 
             cls.memcpy_h2d = cuda_memcpy_h2d
@@ -173,16 +169,16 @@ class TestConv2dCudaDevPtrOps(unittest.TestCase):
                 candidates=["cuda_memcpy_d2h", "memcpy_d2h"],
             )
         except AttributeError:
-            # Many repos put D2H either alongside H2D or in a separate memcpy_ctypes.
+
             try:
                 from src.keydnn.infrastructure.native_cuda.python.avgpool2d_ctypes import (
-                    cuda_memcpy_d2h,  # type: ignore
+                    cuda_memcpy_d2h,
                 )
 
                 cls.memcpy_d2h = cuda_memcpy_d2h
             except Exception:
                 from src.keydnn.infrastructure.native_cuda.python.ops.memcpy_ctypes import (
-                    cuda_memcpy_d2h,  # type: ignore
+                    cuda_memcpy_d2h,
                 )
 
                 cls.memcpy_d2h = cuda_memcpy_d2h
@@ -195,11 +191,8 @@ class TestConv2dCudaDevPtrOps(unittest.TestCase):
         cls.fwd_devptr = staticmethod(cls.fwd_devptr)
         cls.bwd_devptr = staticmethod(cls.bwd_devptr)
 
-    # -------------------------
-    # Dev buffer helpers
-    # -------------------------
     def _malloc_dev(self, nbytes: int) -> int:
-        # Follow your internal convention: allocate at least 1 byte.
+
         return int(self.cuda_malloc(self.env.lib, int(nbytes if nbytes > 0 else 1)))
 
     def _free_dev(self, dev: int) -> None:
@@ -214,9 +207,6 @@ class TestConv2dCudaDevPtrOps(unittest.TestCase):
         self.memcpy_d2h(self.env.lib, out, int(dev))
         return out
 
-    # -------------------------
-    # Forward tests
-    # -------------------------
     def _run_forward_devptr(self, dtype: np.dtype, *, with_bias: bool) -> None:
         dtype = np.dtype(dtype)
 
@@ -232,7 +222,6 @@ class TestConv2dCudaDevPtrOps(unittest.TestCase):
 
         y_ref = _conv2d_forward_ref(x, w, b, stride=stride, padding=padding)
 
-        # Allocate device buffers
         itemsize = int(dtype.itemsize)
         x_bytes = int(x.size * itemsize)
         w_bytes = int(w.size * itemsize)
@@ -293,13 +282,9 @@ class TestConv2dCudaDevPtrOps(unittest.TestCase):
     def test_forward_devptr_float64_with_bias(self) -> None:
         self._run_forward_devptr(np.float64, with_bias=True)
 
-    # -------------------------
-    # Backward tests
-    # -------------------------
     def _run_backward_devptr(self, dtype: np.dtype, *, with_bias: bool) -> None:
         dtype = np.dtype(dtype)
 
-        # Keep small; native backward commonly uses atomicAdd (non-deterministic order)
         N, C_in, C_out = 2, 2, 3
         H, W = 6, 5
         K_h, K_w = 3, 3
@@ -340,7 +325,6 @@ class TestConv2dCudaDevPtrOps(unittest.TestCase):
             self._h2d(w_dev, w)
             self._h2d(go_dev, grad_out)
 
-            # NOTE: wrapper is responsible for zeroing gx_pad + grad_w, but gx_dev is written by crop.
             self.bwd_devptr(
                 self.env.lib,
                 x_dev=int(x_dev),
@@ -371,7 +355,6 @@ class TestConv2dCudaDevPtrOps(unittest.TestCase):
             self.assertEqual(grad_x.shape, grad_x_ref.shape)
             self.assertEqual(grad_w.shape, grad_w_ref.shape)
 
-            # Backward may use atomicAdd; order differs -> slightly looser thresholds for fp32
             if dtype == np.float32:
                 np.testing.assert_allclose(grad_x, grad_x_ref, rtol=3e-4, atol=3e-4)
                 np.testing.assert_allclose(grad_w, grad_w_ref, rtol=3e-4, atol=3e-4)
@@ -387,7 +370,7 @@ class TestConv2dCudaDevPtrOps(unittest.TestCase):
                     grad_b, grad_b_ref, dtype, op="conv2d_backward_cuda_devptr_grad_b"
                 )
             else:
-                # Nothing to check; grad_b not requested
+
                 pass
 
         finally:

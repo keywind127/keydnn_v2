@@ -1,4 +1,3 @@
-# tests/infrastructure/ops/test_unary_cuda_ext.py
 """
 Unit tests for CUDA Tensor-boundary unary ops wrapper (unary_cuda_ext.py).
 
@@ -33,20 +32,20 @@ from src.keydnn.infrastructure.ops.unary_cuda_ext import exp_forward
 def _get_cuda_device(index: int = 0) -> Device:
     """Best-effort helper to obtain a CUDA Device instance across possible Device APIs."""
     if hasattr(Device, "cuda") and callable(getattr(Device, "cuda")):
-        return Device.cuda(index)  # type: ignore[attr-defined]
+        return Device.cuda(index)
 
     try:
-        return Device("cuda", index)  # type: ignore[call-arg]
+        return Device("cuda", index)
     except Exception:
         pass
 
     try:
-        return Device(f"cuda:{index}")  # type: ignore[call-arg]
+        return Device(f"cuda:{index}")
     except Exception:
         pass
 
     try:
-        return Device(kind="cuda", index=index)  # type: ignore[call-arg]
+        return Device(kind="cuda", index=index)
     except Exception as e:
         raise RuntimeError(
             "Unable to construct a CUDA Device; update _get_cuda_device()."
@@ -202,11 +201,11 @@ class TestUnaryCudaExt(unittest.TestCase):
         x_np = np.ones((4,), dtype=np.float32)
 
         if hasattr(Tensor, "from_numpy") and callable(getattr(Tensor, "from_numpy")):
-            x_cpu = Tensor.from_numpy(x_np, device=Device("cpu"))  # type: ignore[call-arg]
+            x_cpu = Tensor.from_numpy(x_np, device=Device("cpu"))
         else:
             try:
-                x_cpu = Tensor(x_np.shape, device=Device("cpu"), requires_grad=False)  # type: ignore[call-arg]
-                x_cpu._data = x_np  # type: ignore[attr-defined]
+                x_cpu = Tensor(x_np.shape, device=Device("cpu"), requires_grad=False)
+                x_cpu._data = x_np
             except Exception as e:
                 raise unittest.SkipTest(
                     f"Unable to construct CPU tensor in this repo; update test_raises_on_cpu_tensor: {e}"

@@ -13,19 +13,17 @@ except ImportError as e:
         "Install it with: pip install python-dotenv"
     ) from e
 
-# Load repo_root/.env by walking upward from this test file.
+
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 _REPO_ROOT = os.path.abspath(os.path.join(_THIS_DIR, "..", ".."))
 load_dotenv(os.path.join(_REPO_ROOT, ".env"))
 
-# If using MinGW and the produced DLL depends on libstdc++/libgcc,
-# prepend MinGW bin to PATH so ctypes can load dependencies.
+
 MINGW_BIN = os.getenv("KEYDNN_MINGW_BIN")
 if sys.platform.startswith("win") and MINGW_BIN:
     os.environ["PATH"] = MINGW_BIN + os.pathsep + os.environ.get("PATH", "")
 
-# Import your ctypes wrapper.
-# Adjust import path if your module name differs.
+
 from src.keydnn.infrastructure.native.python.conv2d_transpose_ctypes import (
     load_keydnn_native,
     conv2d_transpose_forward_f32_ctypes,
@@ -88,7 +86,7 @@ def _ref_conv2d_transpose_forward(
                                 y[n, co, oh, ow] += xv * w[ci, co, kh, kw]
 
         if b is not None:
-            # Bias add per (n, co)
+
             for co in range(C_out):
                 y[n, co, :, :] += b[co]
 
@@ -195,7 +193,6 @@ class TestConv2DTransposeCtypesF32(unittest.TestCase):
         w = rng.standard_normal((C_in, C_out, K_h, K_w), dtype=np.float32)
         b = rng.standard_normal((C_out,), dtype=np.float32)
 
-        # Ensure deterministic check around bounds:
         x[0, 0, 0, 0] = 2.0
         w[0, 0, 0, 0] = 3.0
 
@@ -387,10 +384,10 @@ class TestConv2DTransposeCtypesF32(unittest.TestCase):
             s_h = int(rng.integers(1, 4))
             s_w = int(rng.integers(1, 4))
 
-            pad_h = int(rng.integers(0, K_h))  # typical range
+            pad_h = int(rng.integers(0, K_h))
             pad_w = int(rng.integers(0, K_w))
 
-            out_pad_h = int(rng.integers(0, min(s_h, 2)))  # keep tiny
+            out_pad_h = int(rng.integers(0, min(s_h, 2)))
             out_pad_w = int(rng.integers(0, min(s_w, 2)))
 
             H_out, W_out = _out_size_transpose(
@@ -405,7 +402,6 @@ class TestConv2DTransposeCtypesF32(unittest.TestCase):
             use_bias = bool(rng.integers(0, 2))
             b = rng.standard_normal((C_out,), dtype=np.float32) if use_bias else None
 
-            # Forward
             y_cpp = np.zeros((N, C_out, H_out, W_out), dtype=np.float32)
             conv2d_transpose_forward_f32_ctypes(
                 self.lib,
@@ -449,7 +445,6 @@ class TestConv2DTransposeCtypesF32(unittest.TestCase):
 
             np.testing.assert_allclose(y_cpp, y_ref, rtol=0, atol=0)
 
-            # Backward
             grad_out = rng.standard_normal((N, C_out, H_out, W_out), dtype=np.float32)
             grad_x_cpp = np.zeros((N, C_in, H_in, W_in), dtype=np.float32)
             grad_w_cpp = np.zeros((C_in, C_out, K_h, K_w), dtype=np.float32)
@@ -499,7 +494,7 @@ class TestConv2DTransposeCtypesF32(unittest.TestCase):
             np.testing.assert_allclose(grad_w_cpp, grad_w_ref, rtol=1e-6, atol=1e-5)
 
     def test_rejects_wrong_dtypes(self) -> None:
-        # forward f32 should reject float64 x
+
         N, C_in, C_out = 1, 1, 1
         H_in, W_in = 3, 3
         K_h, K_w = 3, 3
@@ -517,7 +512,7 @@ class TestConv2DTransposeCtypesF32(unittest.TestCase):
         with self.assertRaises(TypeError):
             conv2d_transpose_forward_f32_ctypes(
                 self.lib,
-                x=x_f64,  # wrong
+                x=x_f64,
                 w=w_f32,
                 b=None,
                 y=y_f32,

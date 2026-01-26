@@ -1,4 +1,3 @@
-# tests/infrastructure/models/saving_and_loading/cuda/test_pool2d.py
 from __future__ import annotations
 
 import json
@@ -24,7 +23,7 @@ def _cuda_available() -> bool:
     we assume CUDA ops are available for the test environment.
     """
     try:
-        from src.keydnn.infrastructure.native_cuda.python.maxpool2d_ctypes import (  # type: ignore
+        from src.keydnn.infrastructure.native_cuda.python.maxpool2d_ctypes import (
             load_keydnn_cuda_native,
         )
 
@@ -41,7 +40,6 @@ def _make_input(*, device: Device) -> Tensor:
     x_np = np.arange(1 * 1 * 4 * 4, dtype=np.float32).reshape(1, 1, 4, 4)
     x = Tensor(shape=x_np.shape, device=device, requires_grad=False, dtype=x_np.dtype)
 
-    # CUDA tensors may start with devptr=0; ensure allocation before H2D copy.
     if device.is_cuda():
         x._ensure_cuda_alloc(dtype=np.dtype(x_np.dtype))
 
@@ -54,6 +52,7 @@ class _PoolingRoundtripMixin:
     Mixin that implements pooling JSON round-trip tests for a given device.
     Subclasses must set `DEVICE: Device`.
     """
+
     DEVICE: Device
 
     def _assert_state_is_empty(self, payload: dict) -> None:
@@ -155,8 +154,8 @@ class _PoolingRoundtripMixin:
         self.assertIsInstance(loaded[1], AvgPool2d)
         self.assertIsInstance(loaded[2], GlobalAvgPool2d)
 
-        mp: MaxPool2d = loaded[0]  # type: ignore[assignment]
-        ap: AvgPool2d = loaded[1]  # type: ignore[assignment]
+        mp: MaxPool2d = loaded[0]
+        ap: AvgPool2d = loaded[1]
 
         self.assertEqual(mp.kernel_size, (2, 2))
         self.assertEqual(mp.stride, (2, 2))

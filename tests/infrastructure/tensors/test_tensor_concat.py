@@ -7,9 +7,6 @@ from src.keydnn.domain.device._device import Device
 from src.keydnn.infrastructure.tensor._tensor import Tensor
 
 
-# -----------------------------
-# Helpers (match your style)
-# -----------------------------
 def _tensor_from_numpy(
     arr: np.ndarray, device: Device, requires_grad: bool = False
 ) -> Tensor:
@@ -81,7 +78,6 @@ class TestTensorConcatForward(TestCase):
         a = _tensor_from_numpy(np.ones((2, 3), dtype=np.float32), self.device)
         b = _tensor_from_numpy(np.ones((4, 3), dtype=np.float32), self.device)
 
-        # concat on axis=1 requires dim0 to match -> should raise
         with self.assertRaises(ValueError):
             _ = Tensor.concat([a, b], axis=1)
 

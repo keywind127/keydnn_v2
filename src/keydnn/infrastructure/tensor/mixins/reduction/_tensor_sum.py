@@ -73,7 +73,7 @@ def tensor_sum_cuda(self: ITensor, axis: Optional[int] = None, keepdims: bool = 
     # -----------------------
 
     # NOTE: keep current dtype policy (float32) until Tensor tracks dtype end-to-end
-    dtype = np.float32  # TODO: replace with self.dtype if you track it
+    dtype = np.float32
 
     # Normalize/validate axis
     axis_ = None

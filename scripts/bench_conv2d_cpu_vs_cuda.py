@@ -17,7 +17,7 @@ IMPORTANT (current CUDA boundary design)
 ---------------------------------------
 If `conv2d_cuda_ext` implementation still performs D2H/H2D internally
 (because the ops wrapper is NumPy-facing), then the CUDA timings include
-those host copies. This script still gives you an apples-to-apples "what the
+those host copies. This script still gives an apples-to-apples "what the
 current API costs" comparison, but it will understate the true kernel-only speedup.
 
 Usage

@@ -9,9 +9,9 @@ class FakeCudaBackend:
 
     def __init__(self) -> None:
         self.active_device = 0
-        self.set_device_calls = []  # [device_index, ...]
-        self.malloc_calls = []  # [(active_device, nbytes), ...]
-        self.free_calls = []  # [(active_device, ptr), ...]
+        self.set_device_calls = []
+        self.malloc_calls = []
+        self.free_calls = []
         self._next_ptr = 0x1000
 
     def cuda_set_device(self, lib, device_index: int) -> None:
@@ -34,7 +34,7 @@ class FakeCudaBackend:
 
 class TestCudaMemoryPool(unittest.TestCase):
     def setUp(self) -> None:
-        # Patch the REAL module that pool imports from inside malloc/free/empty_cache
+
         self.fake = FakeCudaBackend()
 
         self.p_set = patch(
@@ -57,12 +57,11 @@ class TestCudaMemoryPool(unittest.TestCase):
         self.p_malloc.start()
         self.p_free.start()
 
-        # Import AFTER patching for maximum robustness
         from keydnn.infrastructure.tensor._cuda_memory_pool import CudaMemoryPool
 
         self.CudaMemoryPool = CudaMemoryPool
 
-        self.lib = object()  # safe now since we never call into real bindings
+        self.lib = object()
 
     def tearDown(self) -> None:
         self.p_free.stop()
@@ -77,11 +76,11 @@ class TestCudaMemoryPool(unittest.TestCase):
         self.assertEqual(len(self.fake.malloc_calls), 1)
 
         pool.free(self.lib, device_index=0, dev_ptr=p1, nbytes=1024)
-        self.assertEqual(len(self.fake.free_calls), 0)  # cached
+        self.assertEqual(len(self.fake.free_calls), 0)
 
         p2 = pool.malloc(self.lib, device_index=0, nbytes=1024)
         self.assertEqual(p2, p1)
-        self.assertEqual(len(self.fake.malloc_calls), 1)  # still 1 call => reused
+        self.assertEqual(len(self.fake.malloc_calls), 1)
 
     def test_per_device_isolated(self) -> None:
         pool = self.CudaMemoryPool(max_cached_bytes_per_device=1 << 30)
@@ -94,14 +93,13 @@ class TestCudaMemoryPool(unittest.TestCase):
         self.assertEqual(len(self.fake.malloc_calls), 2)
 
     def test_cache_limit_forces_cuda_free(self) -> None:
-        pool = self.CudaMemoryPool(max_cached_bytes_per_device=1024)  # 1KB cache
+        pool = self.CudaMemoryPool(max_cached_bytes_per_device=1024)
 
         p = pool.malloc(self.lib, device_index=0, nbytes=4096)
         self.assertEqual(len(self.fake.malloc_calls), 1)
 
         pool.free(self.lib, device_index=0, dev_ptr=p, nbytes=4096)
 
-        # Should be freed immediately because cache limit is too small
         self.assertEqual(len(self.fake.free_calls), 1)
 
     def test_empty_cache_calls_cuda_free(self) -> None:
@@ -113,23 +111,21 @@ class TestCudaMemoryPool(unittest.TestCase):
         pool.free(self.lib, device_index=0, dev_ptr=p1, nbytes=512)
         pool.free(self.lib, device_index=0, dev_ptr=p2, nbytes=512)
 
-        self.assertEqual(len(self.fake.free_calls), 0)  # still cached
+        self.assertEqual(len(self.fake.free_calls), 0)
 
         pool.empty_cache(self.lib, device_index=0)
-        self.assertEqual(len(self.fake.free_calls), 2)  # freed both cached blocks
+        self.assertEqual(len(self.fake.free_calls), 2)
 
     def test_free_unknown_size_still_works_for_pool_owned_ptr(self) -> None:
         pool = self.CudaMemoryPool(max_cached_bytes_per_device=1 << 30)
 
         p = pool.malloc(self.lib, device_index=0, nbytes=1024)
 
-        # nbytes is "unknown" to caller, but pool knows alloc size from ptr map,
-        # so it should NOT call cuda_free; it should cache safely.
         pool.free(self.lib, device_index=0, dev_ptr=p, nbytes=0)
 
-        self.assertEqual(len(self.fake.free_calls), 0)  # cached
+        self.assertEqual(len(self.fake.free_calls), 0)
         p2 = pool.malloc(self.lib, device_index=0, nbytes=1024)
-        self.assertEqual(p2, p)  # reused
+        self.assertEqual(p2, p)
 
     def test_stats_smoke(self) -> None:
         pool = self.CudaMemoryPool(max_cached_bytes_per_device=1 << 30)

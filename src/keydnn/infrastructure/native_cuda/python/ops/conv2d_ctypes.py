@@ -384,9 +384,6 @@ class _Conv2dCudaExports:
     )
 
 
-# Optional convenience helpers (mirrors how you often use load_keydnn_cuda_native)
-
-
 def load_and_conv2d_forward_cuda(**kwargs) -> None:
     """
     Load the KeyDNN CUDA native library and run `conv2d_forward_cuda`.

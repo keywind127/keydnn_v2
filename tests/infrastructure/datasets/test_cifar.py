@@ -1,4 +1,3 @@
-# tests/infrastructure/datasets/test_cifar.py
 import io
 import pickle
 import tarfile
@@ -33,8 +32,7 @@ def _cifar_batch_dict(n: int, *, num_classes: int, kind: str) -> dict:
     dict
         Pickle payload matching CIFAR python batch format.
     """
-    # CIFAR stores data as (N, 3072) uint8 in row-major, channel-first layout:
-    # [R(1024), G(1024), B(1024)]
+
     count = n * 3072
     data = bytes((i % 256 for i in range(count)))
     data_arr = np.frombuffer(data, dtype=np.uint8).reshape(n, 3072)
@@ -45,7 +43,7 @@ def _cifar_batch_dict(n: int, *, num_classes: int, kind: str) -> dict:
     if kind == "cifar10":
         return {b"data": data_arr, b"labels": labels_arr}
     if kind == "cifar100":
-        # CIFAR-100 uses fine_labels (100 classes) and coarse_labels (20 superclasses)
+
         coarse = bytes((i % 20 for i in range(n)))
         coarse_arr = np.frombuffer(coarse, dtype=np.uint8).reshape(n).tolist()
         return {
@@ -94,9 +92,6 @@ def _make_cifar10_archive_bytes(*, train_n: int, test_n: int) -> bytes:
     """
     folder = "cifar-10-batches-py"
 
-    # CIFAR-10 expects data_batch_1..5 and test_batch.
-    # We'll create 5 small training batches that sum to train_n.
-    # Split train_n across 5 batches (some can be 0).
     sizes = [train_n // 5] * 5
     for i in range(train_n % 5):
         sizes[i] += 1
@@ -112,7 +107,6 @@ def _make_cifar10_archive_bytes(*, train_n: int, test_n: int) -> bytes:
     payload_test = pickle.dumps(d_test, protocol=pickle.HIGHEST_PROTOCOL)
     members.append((f"{folder}/test_batch", payload_test))
 
-    # Optional metadata files (not required by our loader)
     members.append(
         (
             f"{folder}/batches.meta",

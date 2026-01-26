@@ -66,7 +66,7 @@ class TestConv2dPoolingActivationCompatibility(unittest.TestCase):
 
     def test_conv2d_maxpool_sigmoid_chain(self):
         pool = MaxPool2d(kernel_size=2, stride=2, padding=0)
-        # (1,3,8,8)->(1,3,4,4)
+
         self._run_chain(pool, expect_shape=(1, 3, 4, 4))
 
     def test_conv2d_avgpool_sigmoid_chain(self):

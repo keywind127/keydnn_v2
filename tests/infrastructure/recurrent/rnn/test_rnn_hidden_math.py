@@ -18,7 +18,7 @@ class TestRNNFiniteDifference(TestCase):
     """
     Mathematical gradient check via finite differences.
 
-    This validates that BPTT (as wired by your autograd + slicing + stack)
+    This validates that BPTT (as wired by autograd + slicing + stack)
     produces approximately correct gradients w.r.t. h0.
     """
 
@@ -29,7 +29,7 @@ class TestRNNFiniteDifference(TestCase):
         """
         Make parameters deterministic so the finite-difference check is stable.
         """
-        # Simple deterministic patterns
+                                       
         Wih = (np.arange(D * H, dtype=np.float32).reshape(D, H) / 10.0) - 0.2
         Whh = (np.arange(H * H, dtype=np.float32).reshape(H, H) / 15.0) - 0.1
 
@@ -54,22 +54,22 @@ class TestRNNFiniteDifference(TestCase):
     def test_rnn_h0_grad_matches_finite_difference(self):
         np.random.seed(123)
 
-        # Keep small for numeric grad check
+                                           
         T, N, D, H = 3, 2, 2, 2
-        eps = 1e-3  # finite-diff step (float32-friendly)
+        eps = 1e-3                                       
 
         rnn = RNN(input_size=D, hidden_size=H, bias=True)
         self._set_deterministic_params(rnn, D=D, H=H)
 
-        # Fixed input
+                     
         x_np = (np.random.randn(T, N, D)).astype(np.float32)
         h0_np = (np.random.randn(N, H)).astype(np.float32)
 
-        # Autograd gradient
+                           
         x = _tensor_from_numpy(x_np, self.device, requires_grad=False)
         h0 = _tensor_from_numpy(h0_np, self.device, requires_grad=True)
 
-        # Clear any stale grads on parameters if your engine accumulates
+                                                                        
         for p in rnn.parameters():
             p.zero_grad()
 
@@ -80,12 +80,12 @@ class TestRNNFiniteDifference(TestCase):
         self.assertIsNotNone(h0.grad, "h0.grad must be populated for grad check")
         g_auto = h0.grad.to_numpy().astype(np.float32)
 
-        # Finite differences gradient
+                                     
         g_num = np.zeros_like(h0_np, dtype=np.float32)
 
         base = self._loss_value(
             rnn, x_np, h0_np
-        )  # not strictly needed, but useful for debugging
+        )                                                 
 
         for i in range(N):
             for j in range(H):
@@ -99,8 +99,8 @@ class TestRNNFiniteDifference(TestCase):
 
                 g_num[i, j] = (L_pos - L_neg) / (2.0 * eps)
 
-        # Compare
-        # Tolerances: float32 + tanh + finite diff -> allow a bit of slack
+                 
+                                                                          
         self.assertTrue(
             np.allclose(g_auto, g_num, atol=2e-3, rtol=2e-2),
             msg=(

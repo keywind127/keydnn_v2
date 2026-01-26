@@ -44,7 +44,6 @@ class TestPool2dFunction(unittest.TestCase):
 
         (grad_x,) = MaxPool2dFn.backward(ctx, grad_out)
 
-        # CPU reference
         y_ref, argmax_idx = maxpool2d_forward_cpu(
             x_np, kernel_size=2, stride=2, padding=0
         )
@@ -78,7 +77,6 @@ class TestPool2dFunction(unittest.TestCase):
 
         (grad_x,) = AvgPool2dFn.backward(ctx, grad_out)
 
-        # CPU reference
         y_ref = avgpool2d_forward_cpu(
             x_np, kernel_size=(2, 3), stride=(2, 1), padding=(1, 0)
         )

@@ -8,9 +8,6 @@ from src.keydnn.infrastructure.fully_connected._dense import Dense
 from src.keydnn.infrastructure.tensor._tensor import Tensor
 
 
-# -----------------------------
-# CUDA test utilities (same style as your Linear CUDA tests)
-# -----------------------------
 def _cuda_available() -> bool:
     try:
         _ = Tensor._get_cuda_lib()
@@ -48,7 +45,6 @@ def _cuda_sync() -> None:
         m.cuda_synchronize(lib)
         return
 
-    # optional fallback if you ever expose direct export
     if hasattr(lib, "keydnn_cuda_synchronize"):
         import ctypes
 
@@ -111,7 +107,6 @@ class TestDenseCuda(TestCase):
         self.assertEqual(d.in_features, 3)
         self.assertEqual(y.shape, (2, 4))
 
-        # After build, params should show up (weight + bias)
         params = list(d.parameters())
         unique = {id(p) for p in params}
         self.assertEqual(len(unique), 2)
@@ -122,7 +117,6 @@ class TestDenseCuda(TestCase):
         self.assertIsNotNone(lin.bias)
         self.assertEqual(lin.bias.shape, (4,))
 
-        # Ensure param buffers exist
         lin.weight._ensure_cuda_alloc(dtype=np.float32)
         lin.bias._ensure_cuda_alloc(dtype=np.float32)
         self.assertNotEqual(int(lin.weight.data), 0)
@@ -154,10 +148,9 @@ class TestDenseCuda(TestCase):
     def test_dense_cuda_device_mismatch_raises_when_device_specified(self):
         dev0 = _make_cuda_device(0)
 
-        # Try to see if cuda:1 is usable; otherwise skip.
         try:
             dev1 = _make_cuda_device(1)
-            # attempt a minimal set_device to validate dev1 exists
+
             _cuda_set_device(dev1)
         except Exception as e:
             self.skipTest(
@@ -166,7 +159,6 @@ class TestDenseCuda(TestCase):
 
         d = Dense(4, bias=True, device=dev0)
 
-        # x on dev1 should raise device mismatch before/inside forward
         x = Tensor(shape=(2, 3), device=dev1)
         x._ensure_cuda_alloc(dtype=np.float32)
 
@@ -177,7 +169,6 @@ class TestDenseCuda(TestCase):
         dev = _make_cuda_device(0)
         d = Dense(4, bias=True, device=dev)
 
-        # build
         x_np = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=np.float32)
         x = _cuda_tensor_from_numpy(x_np, dev, requires_grad=False)
         _ = d.forward(x)
@@ -185,11 +176,9 @@ class TestDenseCuda(TestCase):
         lin = d._linear
         self.assertIsNotNone(lin)
 
-        # ensure buffers
         lin.weight._ensure_cuda_alloc(dtype=np.float32)
         lin.bias._ensure_cuda_alloc(dtype=np.float32)
 
-        # write zeros into params
         W0 = np.zeros((4, 3), dtype=np.float32)
         b0 = np.zeros((4,), dtype=np.float32)
 
@@ -211,7 +200,6 @@ class TestDenseCuda(TestCase):
         dev = _make_cuda_device(0)
         d = Dense(2, bias=True, device=dev)
 
-        # build with in_features=3
         x_np = np.array([[1.0, 0.0, -1.0], [2.0, 3.0, 4.0]], dtype=np.float32)
         x = _cuda_tensor_from_numpy(x_np, dev, requires_grad=False)
         _ = d.forward(x)
@@ -255,13 +243,11 @@ class TestDenseCuda(TestCase):
         lin = d._linear
         self.assertIsNotNone(lin)
 
-        # parents order: (x, weight, bias)
         self.assertEqual(len(ctx.parents), 3)
         self.assertIs(ctx.parents[0], x)
         self.assertIs(ctx.parents[1], lin.weight)
         self.assertIs(ctx.parents[2], lin.bias)
 
-        # saved_tensors: (x, weight)
         self.assertEqual(len(ctx.saved_tensors), 2)
         self.assertIs(ctx.saved_tensors[0], x)
         self.assertIs(ctx.saved_tensors[1], lin.weight)
@@ -292,13 +278,10 @@ class TestDenseCuda(TestCase):
           out = d(x)
           out.backward(ones)
         Check x.grad, weight.grad, bias.grad numerically by readback.
-
-        Assumes your CUDA backward works for this graph and bias grad uses CUDA axis reduction.
         """
         dev = _make_cuda_device(0)
         d = Dense(2, bias=True, device=dev)
 
-        # Build
         x_np = np.array([[1.0, 0.0, -1.0], [2.0, 3.0, 4.0]], dtype=np.float32)
         x = _cuda_tensor_from_numpy(x_np, dev, requires_grad=True)
         out = d.forward(x)
@@ -306,7 +289,6 @@ class TestDenseCuda(TestCase):
         lin = d._linear
         self.assertIsNotNone(lin)
 
-        # Ensure params allocated and set deterministic values
         lin.weight.requires_grad = True
         lin.bias.requires_grad = True
         lin.weight._ensure_cuda_alloc(dtype=np.float32)
@@ -321,7 +303,6 @@ class TestDenseCuda(TestCase):
         m.cudaMemcpyHtoD(lib, int(lin.bias.data), b, int(b.nbytes))
         _cuda_sync()
 
-        # Re-run forward with deterministic params
         out = d.forward(x)
 
         go_np = np.ones(out.shape, dtype=np.float32)
@@ -348,7 +329,6 @@ class TestDenseCuda(TestCase):
             np.ones((2, 3), dtype=np.float32), dev, requires_grad=False
         )
 
-        # Build once
         _ = d.forward(x)
 
         lin = d._linear
@@ -358,7 +338,6 @@ class TestDenseCuda(TestCase):
         if lin.bias is not None:
             lin.bias.requires_grad = False
 
-        # Ensure param buffers exist (avoid "data == 0" checks)
         lin.weight._ensure_cuda_alloc(dtype=np.float32)
         if lin.bias is not None:
             lin.bias._ensure_cuda_alloc(dtype=np.float32)

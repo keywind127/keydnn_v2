@@ -163,7 +163,6 @@ class TestBidirectionalWithGRU(unittest.TestCase):
             return_state=False,
         )
 
-        # set deterministic params on cloned layers
         _set_gru_deterministic_params(bi.forward_layer, D=D, H=H, seed=123)
         _set_gru_deterministic_params(bi.backward_layer, D=D, H=H, seed=456)
 
@@ -173,10 +172,10 @@ class TestBidirectionalWithGRU(unittest.TestCase):
         y = bi.forward(x)
         y_np = y.to_numpy()
 
-        y_f = _unwrap_output(bi.forward_layer.forward(x))  # Tensor (T,N,H)
-        x_rev = _reverse_time(x)  # Tensor (T,N,D)
-        y_b_rev = _unwrap_output(bi.backward_layer.forward(x_rev))  # Tensor (T,N,H)
-        y_b = _reverse_time(y_b_rev)  # align to original time
+        y_f = _unwrap_output(bi.forward_layer.forward(x))
+        x_rev = _reverse_time(x)
+        y_b_rev = _unwrap_output(bi.backward_layer.forward(x_rev))
+        y_b = _reverse_time(y_b_rev)
         y_ref = Tensor.concat([y_f, y_b], axis=-1).to_numpy()
 
         self.assertEqual(y.shape, (T, N, 2 * H))
@@ -263,10 +262,6 @@ class TestBidirectionalWithGRU(unittest.TestCase):
         self.assertTrue(_has_any_grad(bi.backward_layer))
 
     def test_get_config_and_from_config_roundtrip(self):
-        """
-        Requires your Bidirectional.from_config to reconstruct the wrapped layer
-        (which you already do in other tests for RNN/LSTM).
-        """
         layer = GRU(
             input_size=3,
             hidden_size=4,
@@ -289,7 +284,6 @@ class TestBidirectionalWithGRU(unittest.TestCase):
         self.assertEqual(bi2.return_sequences, bi1.return_sequences)
         self.assertEqual(bi2.return_state, bi1.return_state)
 
-        # forward/backward layers should exist (new API)
         self.assertTrue(hasattr(bi2, "forward_layer"))
         self.assertTrue(hasattr(bi2, "backward_layer"))
 

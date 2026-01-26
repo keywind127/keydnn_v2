@@ -1,4 +1,3 @@
-# tests/infrastructure/models/saving_and_loading/cuda/test_activations.py
 from __future__ import annotations
 
 from pathlib import Path
@@ -22,7 +21,7 @@ from src.keydnn.infrastructure.activations._modules import (
 
 def _cuda_available() -> bool:
     try:
-        from src.keydnn.infrastructure.native_cuda.python.maxpool2d_ctypes import (  # type: ignore
+        from src.keydnn.infrastructure.native_cuda.python.maxpool2d_ctypes import (
             load_keydnn_cuda_native,
         )
 
@@ -76,7 +75,7 @@ class TestModelSaveLoadActivationsJSON(unittest.TestCase):
             self.assertIn("arch", payload)
             self.assertIn("state", payload)
             self.assertIsInstance(payload["state"], dict)
-            # Activations are parameter-free -> state should be empty
+
             self.assertEqual(len(payload["state"]), 0)
 
             loaded = Sequential.load_json(ckpt_path)
@@ -88,10 +87,10 @@ class TestModelSaveLoadActivationsJSON(unittest.TestCase):
         self.assertIsInstance(loaded[3], Tanh)
         self.assertIsInstance(loaded[4], Softmax)
 
-        loaded_lrelu: LeakyReLU = loaded[2]  # type: ignore[assignment]
+        loaded_lrelu: LeakyReLU = loaded[2]
         self.assertAlmostEqual(float(getattr(loaded_lrelu, "alpha")), 0.123, places=7)
 
-        loaded_softmax: Softmax = loaded[4]  # type: ignore[assignment]
+        loaded_softmax: Softmax = loaded[4]
         self.assertEqual(int(getattr(loaded_softmax, "_axis")), 1)
 
     def test_save_load_json_activation_forward_matches_cpu(self) -> None:

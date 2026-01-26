@@ -34,8 +34,7 @@ def _tol(dtype: np.dtype) -> tuple[float, float]:
     if dtype == np.float32:
         return 1e-5, 1e-6
     if dtype == np.float64:
-        # Still use a small-but-nonzero tol because the native C++ kernel path
-        # may not be bit-identical to the pure numpy reference in all cases.
+
         return 1e-10, 1e-12
     return 1e-5, 1e-6
 
@@ -48,7 +47,7 @@ class TestConv2dTransposeFn(unittest.TestCase):
         np.random.seed(0)
 
         x_np = np.random.randn(2, 3, 5, 4).astype(np.float32)
-        w_np = np.random.randn(3, 4, 3, 2).astype(np.float32)  # (C_in, C_out, Kh, Kw)
+        w_np = np.random.randn(3, 4, 3, 2).astype(np.float32)
         b_np = np.random.randn(4).astype(np.float32)
 
         x = tensor_from_numpy(x_np, self.device, False)
@@ -162,7 +161,6 @@ class TestConv2dTransposeFn(unittest.TestCase):
         self.assertIsNotNone(w.grad)
         self.assertIsNotNone(b.grad)
 
-        # Reference grads with grad_out=ones (matching loss=sum)
         y_ref = conv2d_transpose_forward_cpu(
             x_np,
             w_np,
@@ -187,7 +185,6 @@ class TestConv2dTransposeFn(unittest.TestCase):
         np.testing.assert_allclose(x.grad.to_numpy(), gx_ref, rtol=rtol, atol=atol)
         np.testing.assert_allclose(w.grad.to_numpy(), gw_ref, rtol=rtol, atol=atol)
 
-        # Bias grad tends to be a straightforward reduction; keep slightly tighter
         np.testing.assert_allclose(b.grad.to_numpy(), gb_ref, rtol=1e-6, atol=1e-6)
 
     def test_backward_none_bias_returns_none(self) -> None:
@@ -223,8 +220,6 @@ class TestConv2dTransposeFn(unittest.TestCase):
 
         self.assertIsNotNone(x.grad)
         self.assertIsNotNone(w.grad)
-        # no bias => no b.grad to check
-        # (Conv2dTransposeFn.backward returns (grad_x, grad_w) only)
 
     def test_forward_respects_out_requires_grad_flag(self) -> None:
         rng = np.random.default_rng(11)
@@ -233,7 +228,6 @@ class TestConv2dTransposeFn(unittest.TestCase):
         w_np = rng.standard_normal((1, 2, 2, 2), dtype=np.float32)
         b_np = rng.standard_normal((2,), dtype=np.float32)
 
-        # Case A: parents do not require grad -> output should not require grad
         x0 = tensor_from_numpy(x_np, self.device, False)
         w0 = tensor_from_numpy(w_np, self.device, False)
         b0 = tensor_from_numpy(b_np, self.device, False)
@@ -244,7 +238,6 @@ class TestConv2dTransposeFn(unittest.TestCase):
         )
         self.assertFalse(y0.requires_grad)
 
-        # Case B: one parent requires grad -> output should require grad
         x1 = tensor_from_numpy(x_np, self.device, True)
         w1 = tensor_from_numpy(w_np, self.device, False)
         b1 = tensor_from_numpy(b_np, self.device, False)
@@ -264,10 +257,6 @@ class TestConv2dTransposeFn(unittest.TestCase):
         x = tensor_from_numpy(x_np, Device("cpu"), False)
         w = tensor_from_numpy(w_np, Device("cpu"), False)
 
-        # Fake: different device string should raise
-        # (We can't allocate actual CUDA tensors here, so emulate mismatch by swapping)
-        # If your Device supports "cuda:0" but Tensor can't allocate it in this test env,
-        # you can remove this test. Keeping it guarded:
         try:
             cuda_dev = Device("cuda:0")
         except Exception:

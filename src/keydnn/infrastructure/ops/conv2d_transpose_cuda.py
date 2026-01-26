@@ -73,7 +73,7 @@ def _dtype_itemsize(dtype: np.dtype) -> int:
 
 def _probe_dev_range(lib: ctypes.CDLL, base_dev: int, nbytes_required: int) -> None:
     """
-    Best-effort device range probe (optional).
+    Best-effort device range probe.
 
     Mirrors conv2d_cuda.py behavior: if `keydnn_cuda_memcpy_d2h` exists, probe the
     last byte in the requested range to catch undersized/invalid allocations.
@@ -223,7 +223,7 @@ def conv2d_transpose_forward_cuda(*args: Any, **kwargs: Any) -> np.ndarray:
 
     y = np.empty((N, C_out, H_out, W_out), dtype=dtype)
 
-    # Set device (optional)
+    # Set device
     if device_index is not None:
         cuda_set_device(lib, int(device_index))
 
@@ -433,7 +433,7 @@ def conv2d_transpose_backward_cuda(
     grad_x = np.empty_like(x)
     grad_w = np.empty_like(w)
 
-    # Set device (optional)
+    # Set device
     if device_index is not None:
         cuda_set_device(lib, int(device_index))
 

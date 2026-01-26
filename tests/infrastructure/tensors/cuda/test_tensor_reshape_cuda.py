@@ -1,4 +1,3 @@
-# tests/infrastructure/tensors/test_tensor_reshape_cuda.py
 from __future__ import annotations
 
 import unittest
@@ -44,8 +43,6 @@ class _CudaTestMixin:
         if dev_ptr == 0:
             raise RuntimeError("cuda_malloc returned nullptr")
 
-        # IMPORTANT: use the compatibility alias; do not pass raw numpy scalars
-        # Signature: cudaMemcpyHtoD(lib, dst_dev, src_host, nbytes)
         m.cudaMemcpyHtoD(lib, int(dev_ptr), arr, nbytes)
 
         t = Tensor._from_devptr(
@@ -76,7 +73,6 @@ class _CudaTestMixin:
         nbytes = int(out.nbytes)
         src_dev = int(t.data)
 
-        # Signature: cudaMemcpyDtoH(lib, dst_host, src_dev, nbytes)
         m.cudaMemcpyDtoH(lib, out, src_dev, nbytes)
         return out
 
@@ -112,10 +108,10 @@ class TestTensorReshapeCudaForward(TestCase, _CudaTestMixin):
         x = self._cuda_tensor_from_numpy(x_np, requires_grad=False)
 
         with self.assertRaises(ValueError):
-            _ = x.reshape((5, 5))  # numel mismatch
+            _ = x.reshape((5, 5))
 
     def test_reshape_cuda_requires_allocated_input(self):
-        # raw CUDA tensor without allocation should have data==0 (per your contract)
+
         x = Tensor((2, 3, 4), Device("cuda:0"), requires_grad=False, dtype=np.float32)
         self.assertEqual(int(x.data), 0)
 
@@ -166,10 +162,6 @@ class TestTensorReshapeCudaBackward(TestCase, _CudaTestMixin):
         self.assertTrue(np.allclose(got, expected, rtol=1e-5, atol=1e-6))
 
     def test_reshape_cuda_backward_wrong_device_grad_out_raises(self):
-        """
-        If your reshape backward checks for same-device grad_out,
-        this ensures it fails fast when grad_out is CPU.
-        """
         x_np = np.random.randn(2, 3, 4).astype(np.float32)
         x = self._cuda_tensor_from_numpy(x_np, requires_grad=True)
 

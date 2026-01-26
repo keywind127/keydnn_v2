@@ -34,10 +34,6 @@ from src.keydnn.infrastructure.native_cuda.python.global_avgpool2d_ctypes import
     global_avgpool2d_backward_cuda,
 )
 
-# ---------------------------------------------------------------------
-# NumPy reference implementations (match your CPU semantics)
-# ---------------------------------------------------------------------
-
 
 def global_avgpool2d_forward_cpu(x: np.ndarray) -> np.ndarray:
     """
@@ -81,11 +77,6 @@ def global_avgpool2d_backward_cpu(
     )
 
 
-# ---------------------------------------------------------------------
-# Tests
-# ---------------------------------------------------------------------
-
-
 class TestGlobalAvgPool2DCudaCtypes(unittest.TestCase):
     """
     Correctness tests for CUDA GlobalAvgPool2D via ctypes.
@@ -97,20 +88,19 @@ class TestGlobalAvgPool2DCudaCtypes(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        # Try to load the CUDA DLL; if unavailable, skip.
+
         try:
             cls.lib = load_keydnn_cuda_native()
         except (OSError, FileNotFoundError) as e:
             raise unittest.SkipTest(f"CUDA native DLL unavailable: {e}")
 
-        # Try to set device 0; if fails, skip.
         try:
             cuda_set_device(cls.lib, 0)
         except RuntimeError as e:
             raise unittest.SkipTest(f"CUDA device unavailable: {e}")
 
     def _rng(self) -> np.random.Generator:
-        # Deterministic tests
+
         return np.random.default_rng(12345)
 
     def _tols(self, dtype: np.dtype) -> tuple[float, float]:
@@ -124,12 +114,8 @@ class TestGlobalAvgPool2DCudaCtypes(unittest.TestCase):
         rng = self._rng()
         x = rng.standard_normal((N, C, H, W)).astype(dtype, copy=False)
 
-        # Reference
         y_ref = global_avgpool2d_forward_cpu(x)
 
-        # Device allocations:
-        # - x_dev holds full input
-        # - y_dev holds N*C contiguous values (flattened y)
         x_dev = cuda_from_host(self.lib, x)
         y_flat = np.empty((N * C,), dtype=dtype)
         y_dev = cuda_malloc(self.lib, y_flat.nbytes)
@@ -146,7 +132,6 @@ class TestGlobalAvgPool2DCudaCtypes(unittest.TestCase):
                 dtype=dtype,
             )
 
-            # copy back
             cuda_memcpy_d2h(self.lib, y_flat, y_dev)
             cuda_synchronize(self.lib)
 
@@ -165,12 +150,8 @@ class TestGlobalAvgPool2DCudaCtypes(unittest.TestCase):
         rng = self._rng()
         grad_out = rng.standard_normal((N, C, 1, 1)).astype(dtype, copy=False)
 
-        # Reference
         grad_x_ref = global_avgpool2d_backward_cpu(grad_out, x_shape=(N, C, H, W))
 
-        # Device allocations:
-        # - grad_out_dev holds N*C contiguous values (flattened grad_out)
-        # - grad_x_dev holds full (N*C*H*W)
         go_flat = grad_out.reshape(N * C)
         go_dev = cuda_from_host(self.lib, go_flat)
 
@@ -199,10 +180,6 @@ class TestGlobalAvgPool2DCudaCtypes(unittest.TestCase):
         rtol, atol = self._tols(dtype)
         np.testing.assert_allclose(grad_x, grad_x_ref, rtol=rtol, atol=atol)
 
-    # -------------------------
-    # Forward tests
-    # -------------------------
-
     def test_forward_f32_matches_numpy_small(self) -> None:
         self._run_forward_case(np.float32, N=2, C=3, H=4, W=5)
 
@@ -210,7 +187,7 @@ class TestGlobalAvgPool2DCudaCtypes(unittest.TestCase):
         self._run_forward_case(np.float64, N=2, C=3, H=4, W=5)
 
     def test_forward_f32_matches_numpy_edge_hw1(self) -> None:
-        # H=W=1 => output equals input per (n,c)
+
         self._run_forward_case(np.float32, N=3, C=4, H=1, W=1)
 
     def test_forward_f64_matches_numpy_edge_hw1(self) -> None:
@@ -222,10 +199,6 @@ class TestGlobalAvgPool2DCudaCtypes(unittest.TestCase):
     def test_forward_f64_larger_spatial(self) -> None:
         self._run_forward_case(np.float64, N=1, C=8, H=32, W=33)
 
-    # -------------------------
-    # Backward tests
-    # -------------------------
-
     def test_backward_f32_matches_numpy_small(self) -> None:
         self._run_backward_case(np.float32, N=2, C=3, H=4, W=5)
 
@@ -233,7 +206,7 @@ class TestGlobalAvgPool2DCudaCtypes(unittest.TestCase):
         self._run_backward_case(np.float64, N=2, C=3, H=4, W=5)
 
     def test_backward_f32_edge_hw1(self) -> None:
-        # H=W=1 => grad_x == grad_out broadcast
+
         self._run_backward_case(np.float32, N=2, C=7, H=1, W=1)
 
     def test_backward_f64_edge_hw1(self) -> None:
@@ -244,10 +217,6 @@ class TestGlobalAvgPool2DCudaCtypes(unittest.TestCase):
 
     def test_backward_f64_larger_spatial(self) -> None:
         self._run_backward_case(np.float64, N=1, C=8, H=31, W=29)
-
-    # -------------------------
-    # Basic shape + sanity tests
-    # -------------------------
 
     def test_forward_output_shape_is_n_c_1_1(self) -> None:
         dtype = np.float32

@@ -15,8 +15,7 @@ from src.keydnn.infrastructure.losses._functions import (
 
 
 def _cpu() -> Device:
-    # Adjust if your Device constructor differs.
-    # Common patterns: Device("cpu") or Device("cpu:0")
+
     return Device("cpu")
 
 
@@ -28,7 +27,7 @@ def _tensor_from_np(arr: np.ndarray, *, requires_grad: bool = False) -> Tensor:
 
 
 def _scalar_from_float(x: float) -> Tensor:
-    # A scalar tensor: shape=()
+
     t = Tensor(shape=(), device=_cpu(), requires_grad=False)
     t.copy_from_numpy(np.array(x, dtype=np.float32))
     return t
@@ -36,7 +35,7 @@ def _scalar_from_float(x: float) -> Tensor:
 
 def _as_scalar_float(t: Tensor) -> float:
     v = t.to_numpy()
-    # Supports either shape=() or shape=(1,)
+
     return float(np.asarray(v).reshape(-1)[0])
 
 
@@ -92,7 +91,6 @@ class TestSSEFn(unittest.TestCase):
         ctx = Context(parents=(pred, target), backward_fn=lambda _g: ())
         loss = SSEFn.forward(ctx, pred, target)
 
-        # (0^2 + 1^2 + 1^2) = 2
         self.assertAlmostEqual(_as_scalar_float(loss), 2.0, places=6)
 
     def test_backward_grads_match_analytic(self):
@@ -167,7 +165,6 @@ class TestMSEFn(unittest.TestCase):
         ctx = Context(parents=(pred, target), backward_fn=lambda _g: ())
         loss = MSEFn.forward(ctx, pred, target)
 
-        # SSE=2, N=3 => 2/3
         self.assertAlmostEqual(_as_scalar_float(loss), 2.0 / 3.0, places=6)
 
     def test_backward_grads_match_analytic(self):
@@ -336,14 +333,11 @@ class TestBinaryCrossEntropyFn(unittest.TestCase):
             BinaryCrossEntropyFn.forward, pred_np, target_np, eps=1e-4
         )
 
-        # Finite diff around log can be sensitive; tolerances slightly looser
         np.testing.assert_allclose(grad_pred.to_numpy(), numeric, rtol=2e-3, atol=2e-3)
 
     def test_shape_mismatch_raises(self):
         pred = tensor_from_np(np.array([0.2, 0.7, 0.9], dtype=np.float32))
-        target = tensor_from_np(
-            np.array([[0.0, 1.0, 1.0]], dtype=np.float32)
-        )  # different shape
+        target = tensor_from_np(np.array([[0.0, 1.0, 1.0]], dtype=np.float32))
 
         ctx = Context(parents=(pred, target), backward_fn=lambda _g: ())
         with self.assertRaises(ValueError):
@@ -478,9 +472,7 @@ class TestCategoricalCrossEntropyFn(unittest.TestCase):
 
     def test_shape_mismatch_raises(self):
         pred = tensor_from_np(np.array([[0.2, 0.8]], dtype=np.float32))
-        target = tensor_from_np(
-            np.array([[1.0, 0.0, 0.0]], dtype=np.float32)
-        )  # different C
+        target = tensor_from_np(np.array([[1.0, 0.0, 0.0]], dtype=np.float32))
 
         ctx = Context(parents=(pred, target), backward_fn=lambda _g: ())
         with self.assertRaises(ValueError):

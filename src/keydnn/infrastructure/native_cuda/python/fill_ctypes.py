@@ -19,7 +19,7 @@ from pathlib import Path
 import numpy as np
 
 from .maxpool2d_ctypes import (
-    load_keydnn_cuda_native,  # you already use this loader elsewhere
+    load_keydnn_cuda_native,
     cuda_malloc,
     cuda_free,
     cuda_memset,
@@ -115,7 +115,7 @@ def cuda_fill(
 
 
 # ---------------------------------------------------------------------
-# Convenience helpers for Tensor.zeros / Tensor.ones (optional)
+# Convenience helpers for Tensor.zeros / Tensor.ones
 # ---------------------------------------------------------------------
 
 

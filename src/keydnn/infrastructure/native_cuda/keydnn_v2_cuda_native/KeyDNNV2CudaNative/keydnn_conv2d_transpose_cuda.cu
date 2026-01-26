@@ -149,12 +149,6 @@ static int launch_conv2d_transpose_forward_cudnn(
         )
     );
 
-    // NOTE:
-    // Some cuDNN distributions (especially split-header setups / older drops)
-    // do not expose a "BackwardDataOutputDim" query in the headers you have.
-    // We therefore skip explicit dimension validation here and rely on cuDNN
-    // to error out if descriptors are inconsistent.
-
     // Algo (v7)
     cudnnConvolutionBwdDataAlgoPerf_t perf;
     int returned = 0;
@@ -230,7 +224,7 @@ static int launch_conv2d_transpose_backward_cudnn(
     const T* grad_out,   // dL/dy: (N, C_out, H_out, W_out)
     T* grad_x,           // dL/dx: (N, C_in, H_in, W_in)
     T* grad_w,           // dL/dw: (C_in, C_out, K_h, K_w)
-    T* grad_b,           // dL/db: (C_out,) or nullptr (if you want bias grad)
+    T* grad_b,           // dL/db: (C_out,) or nullptr
     int N, int C_in, int H_in, int W_in,
     int C_out, int H_out, int W_out,
     int K_h, int K_w,
@@ -404,7 +398,7 @@ static int launch_conv2d_transpose_backward_cudnn(
 
 
 
-    // ---- 3) grad_b (optional) ----
+    // ---- 3) grad_b ----
     if (grad_b) {
         KEYDNN_CUDNN_CHECK(cudnnCreateTensorDescriptor(&b_desc));
         _set_tensor4d_nchw(b_desc, dt, 1, C_out, 1, 1);

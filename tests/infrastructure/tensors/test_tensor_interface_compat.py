@@ -18,13 +18,13 @@ def _iter_effective_member_names(cls: Type[Any]) -> Set[str]:
     names: Set[str] = set()
 
     for base in cls.__mro__:
-        # Skip very-base objects to reduce noise (optional, but helps)
+
         if base is object:
             continue
 
         d: Dict[str, Any] = getattr(base, "__dict__", {})
         for name, obj in d.items():
-            # Include everything here; filtering happens later
+
             names.add(name)
 
     return names
@@ -54,8 +54,6 @@ class TestITensorMatchesTensorInterface(unittest.TestCase):
         tensor_names = {n for n in tensor_names_all if _include_name(n)}
         itensor_names = {n for n in itensor_names_all if _include_name(n)}
 
-        # Remove common Protocol bookkeeping that isn't meaningful for interface parity.
-        # (You can extend this ignore list if your environment adds more Protocol internals.)
         ignore = {
             "__annotations__",
             "__dict__",

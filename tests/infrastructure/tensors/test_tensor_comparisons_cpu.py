@@ -26,7 +26,7 @@ class TestTensorComparisonsCPU(unittest.TestCase):
 
         y_np = y.to_numpy()
         self.assertEqual(y_np.dtype, np.float32)
-        # Ensure all values are exactly 0.0 or 1.0
+
         self.assertTrue(np.all((y_np == 0.0) | (y_np == 1.0)))
 
     def test_gt_tensor_tensor_matches_numpy(self) -> None:
@@ -88,7 +88,7 @@ class TestTensorComparisonsCPU(unittest.TestCase):
     def test_gt_tensor_scalar_matches_numpy(self) -> None:
         rng = np.random.default_rng(4)
         a = rng.standard_normal((5, 5)).astype(np.float32)
-        s = 0.25  # python float
+        s = 0.25
 
         a_t = self._make_cpu_tensor(a)
         y_t = a_t > s
@@ -139,7 +139,6 @@ class TestTensorComparisonsCPU(unittest.TestCase):
         a_t = self._make_cpu_tensor(a)
         b_t = self._make_cpu_tensor(b)
 
-        # Your Tensor CPU path uses _binary_op_shape_check, so ValueError is expected.
         with self.assertRaises(ValueError):
             _ = a_t >= b_t
 

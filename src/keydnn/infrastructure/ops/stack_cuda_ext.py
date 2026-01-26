@@ -28,7 +28,7 @@ Notes
 -----
 - This module assumes input tensors are contiguous CUDA tensors.
 - The underlying backward kernel writes into `dx` buffers without accumulation
-  (overwrite semantics). If you need accumulation, do it outside this module.
+  (overwrite semantics).
 - Temporary device allocations made by the ctypes wrappers (pointer arrays) are
   explicitly freed here.
 

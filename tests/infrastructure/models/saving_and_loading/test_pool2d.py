@@ -29,32 +29,24 @@ class TestModelSaveLoadPoolingJSON(unittest.TestCase):
     """
 
     def _make_input(self) -> Tensor:
-        # Deterministic input (N, C, H, W)
+
         x_np = np.arange(1 * 1 * 4 * 4, dtype=np.float32).reshape(1, 1, 4, 4)
         x = Tensor(
             shape=x_np.shape,
             device=Tensor(shape=(), device=Tensor(shape=(), device=None).device).device,
-        )  # noqa: E501
-        # The above is intentionally NOT correct. We must not create Device manually, and
-        # we also can't access device without a safe default. Instead, always use a CPU
-        # tensor by creating a dummy tensor and reusing its device.
+        )
+
         raise NotImplementedError
 
 
-# ---------------------------------------------------------------------------
-# Correct version (no weird device hacks)
-# ---------------------------------------------------------------------------
-
-from src.keydnn.domain.device._device import Device  # noqa: E402
+from src.keydnn.domain.device._device import Device
 
 
 class TestModelSaveLoadPoolingJSON(unittest.TestCase):
     def _make_input(self) -> Tensor:
-        # Deterministic input (N, C, H, W)
+
         x_np = np.arange(1 * 1 * 4 * 4, dtype=np.float32).reshape(1, 1, 4, 4)
-        # IMPORTANT: Use default CPU device via the framework's Device("cpu")
-        # If you previously had match/case identity issues, your duck-typed device fix
-        # should make this safe.
+
         x = Tensor(shape=x_np.shape, device=Device("cpu"), requires_grad=False)
         x.copy_from_numpy(x_np)
         return x
@@ -78,7 +70,7 @@ class TestModelSaveLoadPoolingJSON(unittest.TestCase):
             self.assertIn("arch", payload)
             self.assertIn("state", payload)
             self.assertIsInstance(payload["state"], dict)
-            # Pooling has no parameters => state should be empty
+
             self.assertEqual(len(payload["state"]), 0)
 
             loaded = Sequential.load_json(ckpt)
@@ -111,7 +103,7 @@ class TestModelSaveLoadPoolingJSON(unittest.TestCase):
             self.assertEqual(payload.get("format"), "keydnn.json.ckpt.v1")
             self.assertIn("arch", payload)
             self.assertIn("state", payload)
-            # Pooling has no parameters => state should be empty
+
             self.assertEqual(len(payload["state"]), 0)
 
             loaded = Sequential.load_json(ckpt)
@@ -144,7 +136,7 @@ class TestModelSaveLoadPoolingJSON(unittest.TestCase):
             self.assertEqual(payload.get("format"), "keydnn.json.ckpt.v1")
             self.assertIn("arch", payload)
             self.assertIn("state", payload)
-            # Pooling has no parameters => state should be empty
+
             self.assertEqual(len(payload["state"]), 0)
 
             loaded = Sequential.load_json(ckpt)
@@ -178,9 +170,8 @@ class TestModelSaveLoadPoolingJSON(unittest.TestCase):
         self.assertIsInstance(loaded[1], AvgPool2d)
         self.assertIsInstance(loaded[2], GlobalAvgPool2d)
 
-        # Ensure configs survived
-        mp: MaxPool2d = loaded[0]  # type: ignore[assignment]
-        ap: AvgPool2d = loaded[1]  # type: ignore[assignment]
+        mp: MaxPool2d = loaded[0]
+        ap: AvgPool2d = loaded[1]
         self.assertEqual(mp.kernel_size, (2, 2))
         self.assertEqual(mp.stride, (2, 2))
         self.assertEqual(mp.padding, (0, 0))

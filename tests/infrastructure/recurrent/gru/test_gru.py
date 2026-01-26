@@ -143,7 +143,6 @@ class TestGRUCellForward(unittest.TestCase):
         cell = GRUCell(input_size=D, hidden_size=H, bias=True)
         _set_gru_deterministic_params(cell, D=D, H=H, seed=123)
 
-        # Inputs
         x_np = (np.arange(N * D, dtype=np.float32).reshape(N, D) / 10.0) - 0.2
         h_np = (np.arange(N * H, dtype=np.float32).reshape(N, H) / 12.0) + 0.1
 
@@ -187,7 +186,6 @@ class TestGRUCellBackward(unittest.TestCase):
         cell = GRUCell(input_size=D, hidden_size=H, bias=True)
         _set_gru_deterministic_params(cell, D=D, H=H, seed=999)
 
-        # ensure requires_grad set
         for p in cell.parameters():
             _unwrap_param_tensor(p).requires_grad = True
 
@@ -335,7 +333,6 @@ class TestGRUSequenceModule(unittest.TestCase):
         self.assertEqual(x.grad.shape, x.shape)
         self.assertTrue(np.isfinite(x.grad.to_numpy()).all())
 
-        # also check some parameter grad exists
         any_param_grad = False
         for p in gru.parameters():
             pt = _unwrap_param_tensor(p)

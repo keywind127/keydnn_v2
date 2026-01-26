@@ -44,7 +44,7 @@ from src.keydnn.infrastructure.native_cuda.python.global_avgpool2d_ctypes import
     load_keydnn_cuda_native,
     cuda_set_device,
     cuda_from_host,
-    cuda_from_host_any,  # supports int64 buffers (argmax idx)
+    cuda_from_host_any,
     cuda_malloc,
     cuda_free,
     cuda_memcpy_d2h,
@@ -60,13 +60,8 @@ from src.keydnn.infrastructure.ops.reduce_cuda import (
     max_axis2d_backward_cuda,
     sum_axis2d_forward_cuda,
     sum_axis2d_backward_cuda,
-    sum_to_shape_cuda,  # NEW
+    sum_to_shape_cuda,
 )
-
-
-# -----------------------------------------------------------------------------
-# NumPy references
-# -----------------------------------------------------------------------------
 
 
 def sum_all_cpu(x: np.ndarray) -> np.ndarray:
@@ -171,9 +166,9 @@ def sum_to_shape_cpu(x: np.ndarray, *, out_shape: tuple[int, ...]) -> np.ndarray
     if reduce_axes:
         y = x.sum(axis=tuple(reduce_axes), keepdims=True, dtype=x.dtype)
     else:
-        # still materialize copy for consistency
+
         y = x.astype(x.dtype, copy=True)
-    # ensure exact out_shape (keepdims already matches, but guard anyway)
+
     return y.reshape(out_shape).astype(x.dtype, copy=False)
 
 
@@ -189,11 +184,6 @@ def _tols_default(dtype: np.dtype) -> tuple[float, float]:
     if dtype == np.float32:
         return (1e-5, 1e-6)
     return (1e-12, 1e-12)
-
-
-# -----------------------------------------------------------------------------
-# Tests
-# -----------------------------------------------------------------------------
 
 
 class TestReduceCudaOps(unittest.TestCase):
@@ -220,10 +210,6 @@ class TestReduceCudaOps(unittest.TestCase):
 
     def _rng(self) -> np.random.Generator:
         return np.random.default_rng(13579)
-
-    # -------------------------
-    # sum_all forward
-    # -------------------------
 
     def _run_sum_all_forward_case(self, dtype: np.dtype, *, numel: int) -> None:
         rng = self._rng()
@@ -264,10 +250,6 @@ class TestReduceCudaOps(unittest.TestCase):
     def test_sum_all_forward_f64_large(self) -> None:
         self._run_sum_all_forward_case(np.float64, numel=100_003)
 
-    # -------------------------
-    # mean_all forward
-    # -------------------------
-
     def _run_mean_all_forward_case(self, dtype: np.dtype, *, numel: int) -> None:
         rng = self._rng()
         x = rng.standard_normal((numel,)).astype(dtype, copy=False)
@@ -307,10 +289,6 @@ class TestReduceCudaOps(unittest.TestCase):
     def test_mean_all_forward_f64_large(self) -> None:
         self._run_mean_all_forward_case(np.float64, numel=200_000)
 
-    # -------------------------
-    # sum backward fill
-    # -------------------------
-
     def _run_sum_backward_fill_case(self, dtype: np.dtype, *, numel: int) -> None:
         rng = self._rng()
         grad_out = np.array(rng.standard_normal(), dtype=dtype)
@@ -347,10 +325,6 @@ class TestReduceCudaOps(unittest.TestCase):
     def test_sum_backward_fill_f64(self) -> None:
         self._run_sum_backward_fill_case(np.float64, numel=12_345)
 
-    # -------------------------
-    # mean backward fill
-    # -------------------------
-
     def _run_mean_backward_fill_case(self, dtype: np.dtype, *, numel: int) -> None:
         rng = self._rng()
         grad_out = np.array(rng.standard_normal(), dtype=dtype)
@@ -386,10 +360,6 @@ class TestReduceCudaOps(unittest.TestCase):
 
     def test_mean_backward_fill_f64(self) -> None:
         self._run_mean_backward_fill_case(np.float64, numel=65_537)
-
-    # -------------------------
-    # max axis2d forward/backward
-    # -------------------------
 
     def _run_max_axis2d_forward_case(
         self, dtype: np.dtype, *, rows: int, cols: int, axis: int
@@ -500,10 +470,6 @@ class TestReduceCudaOps(unittest.TestCase):
     def test_max_axis2d_backward_f64_axis0(self) -> None:
         self._run_max_axis2d_backward_case(np.float64, rows=13, cols=37, axis=0)
 
-    # -------------------------
-    # sum axis2d forward/backward
-    # -------------------------
-
     def _run_sum_axis2d_forward_case(
         self, dtype: np.dtype, *, rows: int, cols: int, axis: int
     ) -> None:
@@ -598,10 +564,6 @@ class TestReduceCudaOps(unittest.TestCase):
     def test_sum_axis2d_backward_f64_axis0(self) -> None:
         self._run_sum_axis2d_backward_case(np.float64, rows=19, cols=31, axis=0)
 
-    # -------------------------
-    # NEW: sum_to_shape
-    # -------------------------
-
     def _run_sum_to_shape_case(
         self,
         dtype: np.dtype,
@@ -635,33 +597,32 @@ class TestReduceCudaOps(unittest.TestCase):
             cuda_free(self.lib, x_dev)
             cuda_free(self.lib, y_dev)
 
-        # If your kernel uses atomics, numerical behavior is similar to reductions.
         rtol, atol = _tols_sum(dtype, int(np.prod(in_shape)))
         np.testing.assert_allclose(y_host, y_ref, rtol=rtol, atol=atol)
 
     def test_sum_to_shape_f32_reduce_last_dim(self) -> None:
-        # (2, 3, 4) -> (2, 3, 1) : sum over last axis
+
         self._run_sum_to_shape_case(np.float32, in_shape=(2, 3, 4), out_shape=(2, 3, 1))
 
     def test_sum_to_shape_f64_reduce_last_dim(self) -> None:
         self._run_sum_to_shape_case(np.float64, in_shape=(2, 3, 4), out_shape=(2, 3, 1))
 
     def test_sum_to_shape_f32_reduce_middle_dim(self) -> None:
-        # (5, 7, 3) -> (5, 1, 3) : sum over axis=1
+
         self._run_sum_to_shape_case(np.float32, in_shape=(5, 7, 3), out_shape=(5, 1, 3))
 
     def test_sum_to_shape_f64_reduce_middle_dim(self) -> None:
         self._run_sum_to_shape_case(np.float64, in_shape=(5, 7, 3), out_shape=(5, 1, 3))
 
     def test_sum_to_shape_f32_reduce_multi_axes(self) -> None:
-        # (4, 6, 5) -> (1, 6, 1) : sum over axes 0 and 2
+
         self._run_sum_to_shape_case(np.float32, in_shape=(4, 6, 5), out_shape=(1, 6, 1))
 
     def test_sum_to_shape_f64_reduce_multi_axes(self) -> None:
         self._run_sum_to_shape_case(np.float64, in_shape=(4, 6, 5), out_shape=(1, 6, 1))
 
     def test_sum_to_shape_identity_no_reduction(self) -> None:
-        # in == out should behave like a copy/materialization (numerically identical)
+
         self._run_sum_to_shape_case(np.float32, in_shape=(3, 2, 5), out_shape=(3, 2, 5))
 
     def test_sum_to_shape_rejects_rank_mismatch(self) -> None:
@@ -679,7 +640,7 @@ class TestReduceCudaOps(unittest.TestCase):
                     x_dev=int(x_dev),
                     y_dev=int(y_dev),
                     in_shape=(2, 3, 4),
-                    out_shape=(2, 3),  # rank mismatch
+                    out_shape=(2, 3),
                     dtype=dtype,
                     sync=True,
                     zero_y=True,
@@ -703,7 +664,7 @@ class TestReduceCudaOps(unittest.TestCase):
                     x_dev=int(x_dev),
                     y_dev=int(y_dev),
                     in_shape=(2, 3, 4),
-                    out_shape=(2, 2, 4),  # invalid: out dim neither 1 nor equal
+                    out_shape=(2, 2, 4),
                     dtype=dtype,
                     sync=True,
                     zero_y=True,
@@ -711,10 +672,6 @@ class TestReduceCudaOps(unittest.TestCase):
         finally:
             cuda_free(self.lib, x_dev)
             cuda_free(self.lib, y_dev)
-
-    # -------------------------
-    # Edge / validation tests
-    # -------------------------
 
     def test_max_axis2d_ties_choose_first_argmax_like_numpy(self) -> None:
         dtype = np.float32

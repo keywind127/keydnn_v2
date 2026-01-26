@@ -41,11 +41,9 @@ class TestConv2dNoBias(unittest.TestCase):
         self.assertIsNotNone(conv.weight.grad)
         self.assertIsNone(conv.bias, "bias should be None when bias=False")
 
-        # shape checks
         self.assertEqual(x.grad.shape, x.shape)
         self.assertEqual(conv.weight.grad.shape, conv.weight.shape)
 
-        # finite grad checks
         self.assertTrue(np.all(np.isfinite(x.grad.to_numpy())))
         self.assertTrue(np.all(np.isfinite(conv.weight.grad.to_numpy())))
 

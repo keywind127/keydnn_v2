@@ -1,4 +1,3 @@
-# tests/infrastructure/tensors/test_tensor_stack_cuda.py
 from __future__ import annotations
 
 import unittest
@@ -234,9 +233,8 @@ class TestTensorStackCudaBackward(TestCase, _CudaTestMixin):
         a = self._cuda_tensor_from_numpy(a_np, requires_grad=True)
         b = self._cuda_tensor_from_numpy(b_np, requires_grad=True)
 
-        s = Tensor.stack([a, b], axis=0)  # CUDA tensor
+        s = Tensor.stack([a, b], axis=0)
 
-        # Wrong-device grad_out (CPU). Tensor.backward should reject this.
         grad_out_cpu = Tensor(
             s.shape, Device("cpu"), requires_grad=False, dtype=np.float32
         )
