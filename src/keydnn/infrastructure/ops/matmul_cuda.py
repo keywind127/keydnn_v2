@@ -23,7 +23,7 @@ def _probe_dev_range(lib: ctypes.CDLL, base_dev: int, nbytes_required: int) -> N
     """
     Best-effort guard: verify [base_dev, base_dev+nbytes_required) looks readable by probing the last byte.
 
-    If the address is out of range / invalid, your native memcpy_d2h should fail (non-zero status),
+    If the address is out of range / invalid, native memcpy_d2h should fail (non-zero status),
     which we surface as RuntimeError. This prevents silent OOB when caller passes inconsistent dims.
     """
     if nbytes_required <= 0:
@@ -183,7 +183,7 @@ def matmul_cuda(*args: Any, **kwargs: Any) -> None:
         dtype=np.dtype(dtype),
     )
 
-    # Optional sync (kept compatible; your DtoH copy usually synchronizes anyway)
+    # Optional sync (kept compatible; DtoH copy usually synchronizes anyway)
     if _sync and hasattr(lib, "keydnn_cuda_synchronize"):
         fn = lib.keydnn_cuda_synchronize
         fn.argtypes = []

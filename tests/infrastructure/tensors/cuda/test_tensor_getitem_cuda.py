@@ -1,4 +1,3 @@
-# tests/infrastructure/tensors/cuda/test_tensor_getitem_cuda.py
 from __future__ import annotations
 
 import unittest
@@ -10,8 +9,8 @@ from src.keydnn.infrastructure.tensor._tensor import Tensor
 
 def _cuda_available() -> bool:
     try:
-        # Use a known-good loader in your tree
-        from src.keydnn.infrastructure.native_cuda.python.avgpool2d_ctypes import (  # type: ignore
+
+        from src.keydnn.infrastructure.native_cuda.python.avgpool2d_ctypes import (
             load_keydnn_cuda_native,
         )
 
@@ -99,7 +98,7 @@ class TestTensorGetItemCudaForward(unittest.TestCase):
         x_np = np.random.randn(3, 4).astype(np.float32)
         x = _make_cuda_tensor_from_numpy(x_np, device=self.dev, requires_grad=False)
 
-        y = x[1, 2]  # scalar
+        y = x[1, 2]
         got = _cuda_to_numpy(y)
         exp = np.array(x_np[1, 2], dtype=np.float32)
 
@@ -125,12 +124,11 @@ class TestTensorGetItemCudaForward(unittest.TestCase):
         x_np = np.arange(24, dtype=np.float32).reshape(4, 6)
         x.copy_from_numpy(x_np)
 
-        # non-contiguous view (column slice)
-        view = x.to_numpy()[:, 1:5]  # shape (4,4), typically non-contiguous
+        view = x.to_numpy()[:, 1:5]
         self.assertFalse(view.flags["C_CONTIGUOUS"])
 
         v = Tensor(shape=view.shape, device=self.dev, requires_grad=False, ctx=None)
-        v.copy_from_numpy(view)  # may store non-contig depending on your implementation
+        v.copy_from_numpy(view)
 
         v_cuda = v.to(self.dev, copy=True)
         v_back = v_cuda.to(self.dev, copy=True).to_numpy()
@@ -152,23 +150,21 @@ class TestTensorGetItemCudaBackward(unittest.TestCase):
         key = (slice(1, 4), slice(2, 5))
         y = x[key]
 
-        # grad_out = ones like y (on CUDA)
         go_np = np.ones(y.shape, dtype=np.float32)
         grad_out = _make_cuda_tensor_from_numpy(
             go_np, device=self.dev, requires_grad=False
         )
 
-        # Run backward fn directly (consistent with your other unit tests)
         ctx = getattr(y, "_ctx", None) or getattr(y, "ctx", None)
         self.assertIsNotNone(ctx)
 
-        grads = ctx.backward_fn(grad_out)  # type: ignore[attr-defined]
+        grads = ctx.backward_fn(grad_out)
         self.assertIsInstance(grads, tuple)
         self.assertEqual(len(grads), 1)
         gx = grads[0]
         self.assertIsNotNone(gx)
 
-        gx_np = _cuda_to_numpy(gx)  # type: ignore[arg-type]
+        gx_np = _cuda_to_numpy(gx)
 
         exp = np.zeros_like(x_np)
         exp[key] += go_np
@@ -178,7 +174,7 @@ class TestTensorGetItemCudaBackward(unittest.TestCase):
         x_np = np.random.randn(4, 6).astype(np.float32)
         x = _make_cuda_tensor_from_numpy(x_np, device=self.dev, requires_grad=True)
 
-        rows = np.array([1, 1, 3, 1], dtype=np.int64)  # repeats to test accumulation
+        rows = np.array([1, 1, 3, 1], dtype=np.int64)
         cols = np.array([2, 2, 0, 5], dtype=np.int64)
         key = (rows, cols)
         y = x[key]
@@ -191,14 +187,14 @@ class TestTensorGetItemCudaBackward(unittest.TestCase):
         ctx = getattr(y, "_ctx", None) or getattr(y, "ctx", None)
         self.assertIsNotNone(ctx)
 
-        grads = ctx.backward_fn(grad_out)  # type: ignore[attr-defined]
+        grads = ctx.backward_fn(grad_out)
         gx = grads[0]
         self.assertIsNotNone(gx)
 
-        gx_np = _cuda_to_numpy(gx)  # type: ignore[arg-type]
+        gx_np = _cuda_to_numpy(gx)
 
         exp = np.zeros_like(x_np)
-        np.add.at(exp, key, go_np)  # must accumulate at repeated indices
+        np.add.at(exp, key, go_np)
         np.testing.assert_allclose(gx_np, exp, rtol=0, atol=0)
 
     def test_getitem_cuda_backward_grad_out_wrong_device_raises(self):
@@ -207,7 +203,6 @@ class TestTensorGetItemCudaBackward(unittest.TestCase):
 
         y = x[1:3, 2:4]
 
-        # grad_out on CPU should raise in CUDA backward
         go_np = np.ones(y.shape, dtype=np.float32)
         grad_out_cpu = Tensor(
             shape=go_np.shape, device=self.cpu, requires_grad=False, ctx=None
@@ -218,7 +213,7 @@ class TestTensorGetItemCudaBackward(unittest.TestCase):
         self.assertIsNotNone(ctx)
 
         with self.assertRaises(RuntimeError):
-            _ = ctx.backward_fn(grad_out_cpu)  # type: ignore[attr-defined]
+            _ = ctx.backward_fn(grad_out_cpu)
 
 
 if __name__ == "__main__":

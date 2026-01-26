@@ -118,13 +118,11 @@ class TestPad2DCudaCtypes(unittest.TestCase):
 
             y_pad = self._copy_out(y_pad_dev, (N, C, H_pad, W_pad), dtype)
 
-            # tolerances
             if dtype == np.float32:
                 rtol, atol = 1e-6, 1e-6
             else:
                 rtol, atol = 1e-12, 1e-12
 
-            # Special handling if pad_value is -inf: comparisons still work with assert_allclose
             np.testing.assert_allclose(y_pad, y_ref, rtol=rtol, atol=atol)
 
         finally:
@@ -157,7 +155,7 @@ class TestPad2DCudaCtypes(unittest.TestCase):
         y_dev = self._alloc_out(int(x.nbytes), zero=True)
 
         try:
-            # pad on GPU
+
             pad2d_cuda(
                 self.lib,
                 x_dev=x_dev,
@@ -174,7 +172,6 @@ class TestPad2DCudaCtypes(unittest.TestCase):
                 sync=True,
             )
 
-            # crop on GPU
             crop2d_cuda(
                 self.lib,
                 x_pad_dev=x_pad_dev,
@@ -205,10 +202,6 @@ class TestPad2DCudaCtypes(unittest.TestCase):
             cuda_free(self.lib, x_dev)
             cuda_free(self.lib, x_pad_dev)
             cuda_free(self.lib, y_dev)
-
-    # -------------------------
-    # Actual tests
-    # -------------------------
 
     def test_pad2d_f32_zero_padding_matches_numpy(self) -> None:
         self._run_pad_case(
@@ -286,7 +279,7 @@ class TestPad2DCudaCtypes(unittest.TestCase):
                 W=W,
                 p_h=0,
                 p_w=0,
-                pad_value=123.0,  # should not matter when no padding
+                pad_value=123.0,
                 dtype=dtype,
                 device=0,
                 sync=True,
@@ -303,7 +296,7 @@ class TestPad2DCudaCtypes(unittest.TestCase):
         """
         pad2d_cuda/crop2d_cuda should reject non-f32/f64.
         """
-        # We won't actually run CUDA here; just verify the python wrapper rejects dtype.
+
         with self.assertRaises(TypeError):
             pad2d_cuda(
                 self.lib,
@@ -316,7 +309,7 @@ class TestPad2DCudaCtypes(unittest.TestCase):
                 p_h=1,
                 p_w=1,
                 pad_value=0.0,
-                dtype=np.float16,  # unsupported
+                dtype=np.float16,
                 device=0,
                 sync=False,
             )
@@ -334,7 +327,7 @@ class TestPad2DCudaCtypes(unittest.TestCase):
                 p_w=1,
                 H=1,
                 W=1,
-                dtype=np.int32,  # unsupported
+                dtype=np.int32,
                 device=0,
                 sync=False,
             )

@@ -27,7 +27,7 @@ def _supports_tensor_mul() -> bool:
     try:
         a = make_cpu_tensor(np.array([1.0], dtype=np.float32))
         b = make_cpu_tensor(np.array([2.0], dtype=np.float32))
-        _ = a * b  # type: ignore[operator]
+        _ = a * b
         return True
     except Exception:
         return False
@@ -117,7 +117,7 @@ class TestExpWrapper(unittest.TestCase):
 
     def test_exp_raises_on_non_tensor(self) -> None:
         with self.assertRaises(TypeError):
-            _ = exp(123)  # type: ignore[arg-type]
+            _ = exp(123)
 
     def test_exp_output_matches_numpy(self) -> None:
         x_np = np.array([[-2.0, -0.5, 0.0, 0.5, 3.0]], dtype=np.float32)

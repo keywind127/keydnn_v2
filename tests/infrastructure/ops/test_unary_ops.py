@@ -39,8 +39,6 @@ class TestUnaryCudaOps(unittest.TestCase):
         try:
             self.env.cudaMemcpyHtoD(self.env.lib, int(x_dev), x, int(x.nbytes))
 
-            # expected signature:
-            # exp_cuda(lib, x_dev=..., y_dev=..., numel=..., dtype=..., sync=True)
             self.exp_cuda(
                 self.env.lib,
                 x_dev=int(x_dev),

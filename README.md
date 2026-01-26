@@ -17,10 +17,10 @@ It is designed to be both:
 - Extensive **unit tests** (CPU↔CUDA parity) and standalone **microbenchmarks** under `scripts/`
 - Keras-style training loop (`Model.fit`) with callbacks (EarlyStopping, ModelCheckpoint) and JSON checkpointing
 
-> **Status:** Work in progress (pre-stable). APIs may change as the framework evolves.
+> **Status: v2.0.0** (stable). Public APIs are intended to be stable within the v2 series.
 
-> **Documentation:** A comprehensive, module-level API reference is planned for future releases.  
-> Current documentation focuses on examples, architecture, and tested usage patterns.
+> **Documentation:** Module-level API reference will be expanded incrementally.
+> Current docs emphasize examples, architecture, and tested usage patterns.
 
 ---
 
@@ -35,10 +35,16 @@ It is designed to be both:
 
 ## Installation
 
-> **Platform support (current):** Windows is the primary supported platform (CPU + CUDA).  
-> Linux/macOS builds are available for **CPU-only** (native CPU kernels), but are currently **experimental** and not yet officially supported/tested.
+> **Platform support (v2.0.0):** Windows 10/11 x64 is the supported platform (CPU + CUDA).
+> Linux/macOS may build for CPU-only use, but are not officially supported or CI-validated yet.
 
-### From source (recommended for development)
+### From PyPI
+
+```bash
+pip install keydnn
+```
+
+### From source (development)
 
 ```bash
 git clone https://github.com/keywind127/keydnn_v2.git
@@ -910,7 +916,7 @@ The test suite is split into two categories:
 
 ### Next (near-term)
 
-- Packaging polish: publish pre-releases (alpha/beta), tighten install story, and provide wheels where feasible
+- Packaging polish: wheels where feasible, improve install story, add CI
 - Add CI: CPU-only by default, optional CUDA jobs for environments with GPUs
 - Reduce remaining correctness-first CPU fallbacks on CUDA (e.g., indexing/concat general-axis paths)
 - Improve developer docs: architecture diagram, backend boundaries, and contributor guide
@@ -927,8 +933,8 @@ The test suite is split into two categories:
 
 ## Disclaimer
 
-KeyDNN is a **work in progress** and not intended for production use.  
-APIs, internal design, and backend coverage may change as the framework evolves.
+KeyDNN is a research/learning-oriented framework and is not production-hardened.
+The v2 public API is intended to be stable; internal design and backend coverage will continue to evolve.
 
 The project prioritizes:
 

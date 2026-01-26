@@ -16,9 +16,7 @@ class TestMaxPool2dTieBreaking(unittest.TestCase):
         Implementation detail:
         - This codebase uses np.argmax, which returns the first maximum in flattened order.
         """
-        # 1x1x2x2 window with three equal maxima (5.0)
-        # Flatten order: [ (0,0), (0,1), (1,0), (1,1) ]
-        # First max is at (0,0).
+
         x = np.array([[[[5.0, 5.0], [5.0, 1.0]]]], dtype=np.float32)
 
         y, argmax_idx = maxpool2d_forward_cpu(x, kernel_size=2, stride=2, padding=0)

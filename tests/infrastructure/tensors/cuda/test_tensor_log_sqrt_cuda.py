@@ -1,4 +1,3 @@
-# tests/infrastructure/tensors/cuda/test_tensor_log_sqrt_cuda.py
 from __future__ import annotations
 
 import unittest
@@ -8,7 +7,7 @@ import numpy as np
 def _cuda_available() -> bool:
     try:
         from src.keydnn.infrastructure.native_cuda.python.maxpool2d_ctypes import (
-            load_keydnn_cuda_native,  # type: ignore
+            load_keydnn_cuda_native,
         )
 
         _ = load_keydnn_cuda_native()
@@ -28,25 +27,19 @@ class _CudaTestBase(unittest.TestCase):
         cls.Device = Device
         cls.dev = Device("cuda:0")
 
-        # Load CUDA lib and set device
         lib = Tensor._get_cuda_lib()
         from src.keydnn.infrastructure.native_cuda.python.maxpool2d_ctypes import (
-            cuda_set_device,  # type: ignore
+            cuda_set_device,
         )
 
         cuda_set_device(lib, 0)
 
-        # Use the dedicated memcpy ops module (GetProcAddress-based)
         from src.keydnn.infrastructure.native_cuda.python.ops import (
-            memcpy_ctypes as mc,  # type: ignore
+            memcpy_ctypes as mc,
         )
 
         cls.lib = lib
         cls.mc = mc
-
-    # -------------------------
-    # helpers: cuda <-> numpy
-    # -------------------------
 
     def _cuda_tensor_from_numpy(self, arr: np.ndarray, *, requires_grad: bool):
         Tensor = self.Tensor
@@ -57,7 +50,6 @@ class _CudaTestBase(unittest.TestCase):
         if not arr.flags["C_CONTIGUOUS"]:
             arr = np.ascontiguousarray(arr)
 
-        # Ensure device allocation and upload
         t._ensure_cuda_alloc(dtype=np.dtype(arr.dtype))
         self.assertNotEqual(int(t.data), 0)
 
@@ -86,7 +78,7 @@ class _CudaTestBase(unittest.TestCase):
 class TestTensorLogCudaForward(_CudaTestBase):
     def test_log_cuda_forward_matches_numpy(self) -> None:
         rng = np.random.default_rng(0)
-        # log requires positive inputs
+
         x_np = rng.uniform(low=0.1, high=3.0, size=(4, 7)).astype(np.float32)
 
         x = self._cuda_tensor_from_numpy(x_np, requires_grad=False)
@@ -122,7 +114,6 @@ class TestTensorLogCudaBackward(_CudaTestBase):
         ctx = getattr(y, "_ctx", None) or getattr(y, "ctx", None)
         self.assertIsNotNone(ctx)
 
-        # grad_out = ones on CUDA
         grad_out = self.Tensor.full(y.shape, 1.0, device=self.dev, requires_grad=False)
 
         backward_fn = getattr(ctx, "backward_fn")
@@ -157,7 +148,7 @@ class TestTensorLogCudaBackward(_CudaTestBase):
 class TestTensorSqrtCudaForward(_CudaTestBase):
     def test_sqrt_cuda_forward_matches_numpy(self) -> None:
         rng = np.random.default_rng(2)
-        # sqrt requires non-negative inputs
+
         x_np = rng.uniform(low=0.0, high=9.0, size=(5, 6)).astype(np.float32)
 
         x = self._cuda_tensor_from_numpy(x_np, requires_grad=False)
@@ -184,7 +175,7 @@ class TestTensorSqrtCudaForward(_CudaTestBase):
 class TestTensorSqrtCudaBackward(_CudaTestBase):
     def test_sqrt_cuda_backward_matches_half_over_sqrt(self) -> None:
         rng = np.random.default_rng(3)
-        # keep strictly positive to avoid division-by-zero in derivative
+
         x_np = rng.uniform(low=0.2, high=9.0, size=(4, 4)).astype(np.float32)
 
         x = self._cuda_tensor_from_numpy(x_np, requires_grad=True)

@@ -55,7 +55,6 @@ SRC_DIR = os.path.join(ROOT_DIR, "src")
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
-# tracer utils (your local helper module)
 from _funct_call_debug_utils import trace_calls, timed_trace
 
 
@@ -350,7 +349,7 @@ def main() -> None:
         if args.trace_timed:
             # timed_trace: shows calls + inclusive/self time per function
             with timed_trace(
-                include_stdlib=True,  # allow ctypes/numpy etc if you include them
+                include_stdlib=True,
                 include_modules_prefix=trace_prefixes,
                 limit=int(args.trace_limit),
                 sort_by=str(args.trace_sort),
@@ -358,7 +357,6 @@ def main() -> None:
             ):
                 yield
         else:
-            # trace_calls: your existing counts-only tracer
             with trace_calls(
                 only_modules=list(trace_only_modules),
                 limit=int(args.trace_limit),
@@ -432,14 +430,12 @@ def main() -> None:
         with _maybe_trace("zero_grad", rec_i):
             dt_zg = _time_step(_zg, sync_after=sync_after)
 
-        # optional eval (forces potential sync / D2H)
         dt_eval = 0.0
         if args.eval_each_iter:
 
             def _eval():
                 _ = pred.to_numpy()
 
-            # If you want to trace eval too, add "eval" as a stage and wrap it.
             dt_eval = _time_step(_eval, sync_after=sync_after)
 
         t_iter1 = time.perf_counter()

@@ -654,7 +654,7 @@ def sum_to_shape_cuda(
 
     if zero_y:
         nbytes_y = int(np.prod(out_shape, dtype=np.int64)) * np.dtype(dtype).itemsize
-        # allow empty outputs: memset(0 bytes) is fine, but your wrapper might not like it.
+        # allow empty outputs: memset(0 bytes) is fine, but wrapper might not like it.
         if nbytes_y > 0:
             cuda_memset(lib, int(y_dev), 0, int(nbytes_y))
 

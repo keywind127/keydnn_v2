@@ -59,11 +59,10 @@ class TestConv2dWithActivations(unittest.TestCase):
         expect_range_minus1_1 : bool, optional
             If True, asserts output values are within [-1, 1].
         """
-        # ---- input ----
+
         x_np = np.random.randn(2, 3, 8, 8).astype(np.float32)
         x = tensor_from_numpy(x_np, self.device, requires_grad=True)
 
-        # ---- layers ----
         conv = Conv2d(
             in_channels=3,
             out_channels=4,
@@ -74,11 +73,9 @@ class TestConv2dWithActivations(unittest.TestCase):
             device=self.device,
         )
 
-        # ---- forward ----
         y = conv.forward(x)
         z = activation.forward(y)
 
-        # shape sanity check (Conv2d keeps spatial dims with padding=1, k=3, stride=1)
         self.assertEqual(z.shape, (2, 4, 8, 8))
 
         z_np = z.to_numpy()
@@ -94,24 +91,20 @@ class TestConv2dWithActivations(unittest.TestCase):
             self.assertTrue(np.all(z_np >= -1.0))
             self.assertTrue(np.all(z_np <= 1.0))
 
-        # ---- backward ----
         loss = z.sum()
         loss.backward()
 
-        # ---- gradient checks ----
         self.assertIsNotNone(x.grad, "x.grad should not be None")
         self.assertIsNotNone(conv.weight.grad, "conv.weight.grad should not be None")
 
         if conv.bias is not None:
             self.assertIsNotNone(conv.bias.grad, "conv.bias.grad should not be None")
 
-        # shape consistency
         self.assertEqual(x.grad.shape, x.shape)
         self.assertEqual(conv.weight.grad.shape, conv.weight.shape)
         if conv.bias is not None:
             self.assertEqual(conv.bias.grad.shape, conv.bias.shape)
 
-        # gradients should be finite
         self.assertTrue(np.all(np.isfinite(x.grad.to_numpy())))
         self.assertTrue(np.all(np.isfinite(conv.weight.grad.to_numpy())))
         if conv.bias is not None:

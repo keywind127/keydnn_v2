@@ -27,7 +27,7 @@ class TestTensorSqrtForwardBackward(TestCase, _TensorFactoryMixin):
         self.assertTrue(np.allclose(y.to_numpy(), expected, rtol=1e-5, atol=1e-6))
 
     def test_sqrt_backward_matches_closed_form(self):
-        # y = sqrt(x), loss = sum(y) => dL/dx = 0.5 / sqrt(x)
+
         x_np = np.random.rand(2, 3).astype(np.float32) + 1e-3
         x = self._tensor_from_numpy(x_np, requires_grad=True)
 

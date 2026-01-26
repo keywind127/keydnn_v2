@@ -7,7 +7,7 @@ import numpy as np
 def _cuda_available() -> bool:
     try:
         from src.keydnn.infrastructure.native_cuda.python.maxpool2d_ctypes import (
-            load_keydnn_cuda_native,  # type: ignore
+            load_keydnn_cuda_native,
         )
 
         _ = load_keydnn_cuda_native()
@@ -82,7 +82,7 @@ class TestTensorSumToShapeCPU(unittest.TestCase):
         )
         x.copy_from_numpy(x_np)
 
-        y = x.sum_to_shape((3, 1))  # keep middle dim, reduce others
+        y = x.sum_to_shape((3, 1))
         self.assertTrue(y.device.is_cpu())
         self.assertEqual(tuple(y.shape), (3, 1))
 
@@ -115,11 +115,9 @@ class TestTensorSumToShapeCPU(unittest.TestCase):
         )
         x.copy_from_numpy(x_np)
 
-        # target dim 2 is not 1 or 3 -> not broadcastable to source
         with self.assertRaises(ValueError):
             _ = x.sum_to_shape((2, 2, 1))
 
-        # target rank > src rank
         with self.assertRaises(ValueError):
             _ = x.sum_to_shape((1, 2, 3, 4))
 
@@ -150,21 +148,18 @@ class TestTensorSumToShapeCUDA(unittest.TestCase):
 
         lib = Tensor._get_cuda_lib()
         from src.keydnn.infrastructure.native_cuda.python.maxpool2d_ctypes import (
-            cuda_set_device,  # type: ignore
+            cuda_set_device,
         )
 
         cuda_set_device(lib, 0)
 
         from src.keydnn.infrastructure.native_cuda.python.ops import (
-            memcpy_ctypes as mc,  # type: ignore
+            memcpy_ctypes as mc,
         )
 
         cls.lib = lib
         cls.mc = mc
 
-    # -------------------------
-    # helpers: choose correct memcpy symbols
-    # -------------------------
     def _memcpy_htod(
         self, *, dst_dev: int, src_host: np.ndarray, nbytes: int, sync: bool
     ) -> None:
@@ -197,9 +192,6 @@ class TestTensorSumToShapeCUDA(unittest.TestCase):
             return
         raise RuntimeError("memcpy_ctypes missing memcpy_dtoh/cuda_memcpy_d2h")
 
-    # -------------------------
-    # helpers: cuda <-> numpy
-    # -------------------------
     def _cuda_tensor_from_numpy(self, arr: np.ndarray, *, requires_grad: bool):
         if not arr.flags["C_CONTIGUOUS"]:
             arr = np.ascontiguousarray(arr)
@@ -229,9 +221,6 @@ class TestTensorSumToShapeCUDA(unittest.TestCase):
         )
         return out[0:1] if shape == () else out
 
-    # -------------------------
-    # tests
-    # -------------------------
     def test_sum_to_shape_cuda_reduces_values(self) -> None:
         rng = np.random.default_rng(10)
         x_np = rng.standard_normal((2, 3, 4)).astype(np.float32)
@@ -255,7 +244,7 @@ class TestTensorSumToShapeCUDA(unittest.TestCase):
         x_np = rng.standard_normal((5, 7)).astype(np.float32)
 
         x = self._cuda_tensor_from_numpy(x_np, requires_grad=False)
-        y = x.sum_to_shape((7,))  # drop leading dim via sum
+        y = x.sum_to_shape((7,))
 
         self.assertTrue(y.device.is_cuda())
         self.assertEqual(tuple(y.shape), (7,))

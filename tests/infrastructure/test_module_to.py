@@ -27,18 +27,16 @@ def _tensor_supports_numpy_load() -> bool:
 
 class TestModuleToAndToInPlace(TestCase):
     def test_module_to_moves_parameters_and_rebinds(self):
-        # This test is meaningful only if CUDA is actually functional
+
         device_cpu = Device("cpu")
         device_cuda = Device("cuda:0")
 
-        # Make sure numeric testing is possible
         self.assertTrue(
             _tensor_supports_numpy_load(),
             "Cannot run Module.to() tests because Tensor cannot be loaded from NumPy "
             "(need Tensor(data=...) or from_numpy/copy_from_numpy).",
         )
 
-        # Build a nested module hierarchy using base Module + child Module
         class Child(Module):
             def __init__(self):
                 super().__init__()
@@ -61,7 +59,6 @@ class TestModuleToAndToInPlace(TestCase):
 
         m = Parent()
 
-        # Load deterministic values
         m.p.fill(1.0)
         m.child.w.fill(2.0)
 
@@ -70,27 +67,22 @@ class TestModuleToAndToInPlace(TestCase):
         p_before_id = id(p_before)
         w_before_id = id(w_before)
 
-        # Probe CUDA availability/functionality using the actual transfer
         try:
             _ = m.p.to(device_cuda, copy=True).to(device_cpu, copy=True)
         except Exception as e:
             self.skipTest(f"CUDA backend not functional for Tensor.to(): {e!r}")
 
-        # Out-of-place module move: should rebind params (new object identities)
         m.to(device_cuda)
 
         self.assertTrue(m.p.device.is_cuda())
         self.assertTrue(m.child.w.device.is_cuda())
 
-        # Rebinding: object identity should change if to() returns a new tensor
         self.assertNotEqual(id(m.p), p_before_id)
         self.assertNotEqual(id(m.child.w), w_before_id)
 
-        # Registry + attribute should agree
         self.assertIs(m._parameters["p"], m.p)
         self.assertIs(m.child._parameters["w"], m.child.w)
 
-        # Values should be preserved
         np.testing.assert_allclose(
             m.p.to(Device("cpu"), copy=True).to_numpy(),
             np.ones((1, 3), dtype=np.float32),
@@ -131,19 +123,16 @@ class TestModuleToAndToInPlace(TestCase):
         p_id = id(m.p)
         w_id = id(m.child.w)
 
-        # Probe CUDA functionality
         try:
             _ = m.p.to(device_cuda, copy=True).to(device_cpu, copy=True)
         except Exception as e:
             self.skipTest(f"CUDA backend not functional for Tensor.to(): {e!r}")
 
-        # Move in-place to CUDA
         m.to_(device_cuda)
 
         self.assertEqual(id(m.p), p_id)
         self.assertEqual(id(m.child.w), w_id)
 
-        # Check values immediately after CPU->CUDA by round-tripping each param
         p_cuda_back = m.p.to(device_cpu, copy=True).to_numpy()
         w_cuda_back = m.child.w.to(device_cpu, copy=True).to_numpy()
 
@@ -154,13 +143,11 @@ class TestModuleToAndToInPlace(TestCase):
             w_cuda_back, np.full((2, 2), 4.0, np.float32), rtol=0, atol=0
         )
 
-        # Move in-place back to CPU
         m.to_(device_cpu)
 
         self.assertEqual(id(m.p), p_id)
         self.assertEqual(id(m.child.w), w_id)
 
-        # Final check on CPU
         np.testing.assert_allclose(
             m.p.to_numpy(), np.full((1, 3), 3.0, np.float32), rtol=0, atol=0
         )

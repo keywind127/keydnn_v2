@@ -53,7 +53,7 @@ import numpy as np
 
 from ..avgpool2d_ctypes import load_keydnn_cuda_native
 
-# Windows-only GetProcAddress pattern (matches your matmul_ctypes style)
+# Windows-only GetProcAddress pattern
 _GetProcAddress = ctypes.windll.kernel32.GetProcAddress
 _GetProcAddress.argtypes = [wintypes.HMODULE, wintypes.LPCSTR]
 _GetProcAddress.restype = wintypes.LPVOID

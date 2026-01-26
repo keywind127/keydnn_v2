@@ -59,11 +59,6 @@ class TestTensorInfrastructure(TestCase):
         with self.assertRaises(RuntimeError):
             tensor.to_numpy()
 
-    # def test_fill_on_cuda_raises(self):
-    #     tensor = Tensor((2, 3), Device("cuda:0"))
-    #     with self.assertRaises(RuntimeError):
-    #         tensor.fill(1.0)
-
     def test_invalid_shape_negative_dimension_raises(self):
         """numpy.zeros rejects negative dimensions (current behavior)."""
         with self.assertRaises(ValueError):
@@ -101,7 +96,7 @@ class TestTensorAutogradFields(TestCase):
         self.assertIsNone(t.grad)
 
     def test_zero_grad_clears_grad(self):
-        # See note in original test: we avoid setting private _grad.
+
         t = Tensor((2, 3), Device("cpu"), requires_grad=True)
         t.zero_grad()
         self.assertIsNone(t.grad)
@@ -167,14 +162,14 @@ class TestTensorGetItem(TestCase):
 
     def test_getitem_forward_integer_index_reduces_dim(self):
         x = self._make_arange((3, 4), requires_grad=False)
-        y = x[1]  # shape (4,)
+        y = x[1]
         expected = x.to_numpy()[1]
         self.assertEqual(y.shape, expected.shape)
         self.assertTrue(np.array_equal(y.to_numpy(), expected))
 
     def test_getitem_forward_scalar_index(self):
         x = self._make_arange((3, 4), requires_grad=False)
-        y = x[2, 1]  # scalar
+        y = x[2, 1]
         expected = x.to_numpy()[2, 1]
         self.assertEqual(y.shape, ())
         self.assertAlmostEqual(
@@ -183,8 +178,8 @@ class TestTensorGetItem(TestCase):
 
     def test_getitem_backward_basic_slice_scatter(self):
         x = self._make_arange((3, 4), requires_grad=True)
-        y = x[:, 1:3]  # (3,2)
-        loss = y.sum()  # scalar
+        y = x[:, 1:3]
+        loss = y.sum()
         loss.backward()
 
         grad = x.grad.to_numpy()
@@ -194,7 +189,7 @@ class TestTensorGetItem(TestCase):
 
     def test_getitem_backward_single_element(self):
         x = self._make_arange((2, 2), requires_grad=True)
-        y = x[1, 0]  # scalar
+        y = x[1, 0]
         y.backward()
 
         grad = x.grad.to_numpy()
@@ -204,7 +199,7 @@ class TestTensorGetItem(TestCase):
 
     def test_getitem_backward_negative_index(self):
         x = self._make_arange((3, 4), requires_grad=True)
-        y = x[-1, -2]  # scalar -> x[2,2]
+        y = x[-1, -2]
         y.backward()
 
         grad = x.grad.to_numpy()
@@ -214,7 +209,7 @@ class TestTensorGetItem(TestCase):
 
     def test_getitem_backward_step_slice(self):
         x = self._make_arange((6,), requires_grad=True)
-        y = x[::2]  # indices 0,2,4
+        y = x[::2]
         loss = y.sum()
         loss.backward()
 
@@ -226,11 +221,11 @@ class TestTensorGetItem(TestCase):
         self.assertTrue(np.array_equal(grad, expected))
 
     def test_getitem_backward_fancy_index_accumulates_repeats(self):
-        # This ensures you used np.add.at (or equivalent) for fancy indexing.
+
         x = Tensor((5,), Device("cpu"), requires_grad=True)
         x.copy_from_numpy(np.zeros((5,), dtype=np.float32))
 
-        y = x[[1, 1, 3]]  # repeated index 1
+        y = x[[1, 1, 3]]
         loss = y.sum()
         loss.backward()
 
@@ -245,7 +240,7 @@ class TestTensorGetItem(TestCase):
         x.copy_from_numpy(np.arange(5, dtype=np.float32))
 
         mask = np.array([True, False, True, False, True])
-        y = x[mask]  # shape (3,)
+        y = x[mask]
         loss = y.sum()
         loss.backward()
 
@@ -262,11 +257,6 @@ class TestTensorGetItem(TestCase):
         x2 = self._make_arange((3, 4), requires_grad=False)
         y2 = x2[:, :2]
         self.assertFalse(y2.requires_grad)
-
-    # def test_getitem_on_cuda_raises(self):
-    #     t = Tensor((2, 3), Device("cuda:0"))
-    #     with self.assertRaises(Exception):
-    #         _ = t[0]
 
 
 class TestTensorStack(TestCase):
@@ -369,10 +359,6 @@ class TestTensorStack(TestCase):
             _ = Tensor.stack([a, b], axis=0)
 
     def test_stack_on_cuda_raises_or_not_supported(self):
-        """
-        Your current Tensor ops are CPU-first. If stack isn't implemented for CUDA,
-        it should raise.
-        """
         a = Tensor((2, 3), Device("cuda:0"), requires_grad=False)
         b = Tensor((2, 3), Device("cuda:0"), requires_grad=False)
 
@@ -430,13 +416,12 @@ class TestTensorReshape(TestCase):
         self.assertIsNotNone(x.grad)
         self.assertEqual(x.grad.shape, x.shape)
 
-        # d(sum)/dx = 1 everywhere
         expected = np.ones((2, 3), dtype=np.float32)
         self.assertTrue(np.array_equal(x.grad.to_numpy(), expected))
 
     def test_reshape_backward_chained_reshapes(self):
         x = self._make_arange((2, 3), requires_grad=True)
-        y = x.reshape((6,)).reshape((3, 2))  # reshape chain
+        y = x.reshape((6,)).reshape((3, 2))
         loss = y.sum()
         loss.backward()
 
@@ -444,13 +429,13 @@ class TestTensorReshape(TestCase):
         self.assertTrue(np.array_equal(x.grad.to_numpy(), expected))
 
     def test_reshape_after_getitem_keeps_grad_path(self):
-        # x[t] uses __getitem__ (scatter backward), then reshape should reshape grad for that slice.
+
         x = Tensor((4, 2, 3), Device("cpu"), requires_grad=True)
         x.copy_from_numpy(np.arange(24, dtype=np.float32).reshape(4, 2, 3))
 
         t_pick = 2
-        x_t = x[t_pick]  # shape (2,3)
-        y = x_t.reshape((6,))  # shape (6,)
+        x_t = x[t_pick]
+        y = x_t.reshape((6,))
         loss = y.sum()
         loss.backward()
 
@@ -463,7 +448,6 @@ class TestTensorReshape(TestCase):
     def test_reshape_invalid_shape_raises(self):
         x = self._make_arange((2, 3), requires_grad=False)
 
-        # 2*3=6 cannot reshape to 5
         with self.assertRaises(Exception):
             _ = x.reshape((5,))
 

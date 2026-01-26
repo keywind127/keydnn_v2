@@ -21,7 +21,7 @@ class TestRNNReturnModes(unittest.TestCase):
       - seq2seq: output is the full sequence h_seq of shape (T, N, H)
       - seq2one: output is the final state h_T of shape (N, H)
 
-    These tests assume your backward-compatible RNN supports:
+    These tests assume backward-compatible RNN supports:
       - return_sequences: bool
       - return_state: bool
       - keras_compat: bool (opt-in Keras-style returns)
@@ -31,9 +31,9 @@ class TestRNNReturnModes(unittest.TestCase):
         self.device = Device("cpu")
         np.random.seed(0)
 
-    # -------------------------
-    # Keras-compat return modes
-    # -------------------------
+                               
+                               
+                               
 
     def test_seq2seq_return_sequences_true_return_state_false(self):
         """
@@ -56,14 +56,14 @@ class TestRNNReturnModes(unittest.TestCase):
         self.assertIsInstance(out, Tensor)
         self.assertEqual(out.shape, (T, N, H))
 
-        # gradients should flow from sequence loss
+                                                  
         loss = out.sum()
         loss.backward()
 
         self.assertIsNotNone(x.grad)
         self.assertEqual(x.grad.shape, x.shape)
 
-        # weight grads should exist
+                                   
         for p in rnn.parameters():
             self.assertIsNotNone(
                 p.grad, "Parameter grad should be populated under seq2seq loss"
@@ -90,7 +90,7 @@ class TestRNNReturnModes(unittest.TestCase):
         self.assertIsInstance(out, Tensor)
         self.assertEqual(out.shape, (N, H))
 
-        # gradients should flow from final-state loss
+                                                     
         loss = out.sum()
         loss.backward()
 
@@ -123,7 +123,7 @@ class TestRNNReturnModes(unittest.TestCase):
         self.assertEqual(h_seq.shape, (T, N, H))
         self.assertEqual(h_T.shape, (N, H))
 
-        # Combine both outputs in loss; grads should still work
+                                                               
         loss = h_seq.sum() + h_T.sum()
         loss.backward()
 
@@ -135,8 +135,8 @@ class TestRNNReturnModes(unittest.TestCase):
 
     def test_seq2one_return_state_true(self):
         """
-        Keras-style seq2one + return_state: forward() returns (h_T, h_T) or (out, h_T)
-        depending on your implementation. The contract we assert is:
+        Keras-style seq2one + return_state: forward() returns (h_T, h_T) or (out, h_T).
+        The contract we assert is:
           - it returns a tuple (out, h_T)
           - both are shape (N, H)
         """
@@ -168,17 +168,16 @@ class TestRNNReturnModes(unittest.TestCase):
         for p in rnn.parameters():
             self.assertIsNotNone(p.grad)
 
-    # -------------------------
-    # Legacy mode: backward-compatible defaults
-    # -------------------------
+                               
+                                               
+                               
 
     def test_legacy_default_returns_hseq_and_hT(self):
         """
         Legacy mode should continue returning (h_seq, h_T).
-        This is your backward-compat contract for existing tests/callers.
         """
         T, N, D, H = 3, 2, 3, 5
-        rnn = RNN(D, H, bias=True)  # legacy defaults
+        rnn = RNN(D, H, bias=True)                   
 
         x_np = np.random.randn(T, N, D).astype(np.float32)
         x = _tensor_from_numpy(x_np, device=self.device, requires_grad=True)
@@ -187,7 +186,7 @@ class TestRNNReturnModes(unittest.TestCase):
         self.assertEqual(h_seq.shape, (T, N, H))
         self.assertEqual(h_T.shape, (N, H))
 
-        # seq2seq loss
+                      
         h_seq.sum().backward()
         self.assertIsNotNone(x.grad)
         self.assertEqual(x.grad.shape, x.shape)

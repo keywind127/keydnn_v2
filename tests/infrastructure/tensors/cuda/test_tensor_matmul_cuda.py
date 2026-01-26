@@ -1,4 +1,3 @@
-# tests/infrastructure/tensors/test_tensor_matmul_cuda.py
 from __future__ import annotations
 
 import unittest
@@ -33,12 +32,10 @@ class _CudaTestMixin:
         arr = np.ascontiguousarray(arr)
         dtype = np.dtype(arr.dtype)
 
-        # Use the same native module used elsewhere in Tensor CUDA code
         from src.keydnn.infrastructure.native_cuda.python import maxpool2d_ctypes as m
 
         lib = Tensor._get_cuda_lib()
 
-        # Ensure correct device is selected (index parsed from Device("cuda:0") => 0)
         dev = Device("cuda:0")
         if hasattr(m, "cuda_set_device"):
             m.cuda_set_device(lib, int(getattr(dev, "index", 0) or 0))
@@ -48,10 +45,8 @@ class _CudaTestMixin:
         if dev_ptr == 0:
             raise RuntimeError("cuda_malloc returned nullptr")
 
-        # Copy host -> device using known-good wrapper
         m.cudaMemcpyHtoD(lib, int(dev_ptr), arr, nbytes)
 
-        # Wrap as Tensor backed by that devptr
         t = Tensor._from_devptr(
             dev_ptr=dev_ptr,
             shape=arr.shape,
@@ -106,24 +101,24 @@ class _CudaTensorFactoryMixin:
         """
         arr = np.asarray(arr, dtype=np.float32)
 
-        # Stage on CPU first
         t_cpu = Tensor(
             arr.shape, Device("cpu"), requires_grad=requires_grad, dtype=np.float32
         )
         t_cpu.copy_from_numpy(arr)
 
-        # Transfer to CUDA using the available API
         if hasattr(t_cpu, "to"):
             t_cuda = t_cpu.to(Device("cuda:0"))
             return t_cuda
 
         if hasattr(t_cpu, "cuda"):
-            t_cuda = t_cpu.cuda()  # type: ignore[attr-defined]
+            t_cuda = t_cpu.cuda()
             return t_cuda
 
         if hasattr(Tensor, "from_numpy"):
-            # Common alternative API
-            return Tensor.from_numpy(arr, device=Device("cuda:0"), requires_grad=requires_grad)  # type: ignore[attr-defined]
+
+            return Tensor.from_numpy(
+                arr, device=Device("cuda:0"), requires_grad=requires_grad
+            )
 
         raise RuntimeError(
             "No supported CPU->CUDA transfer API found. "
@@ -169,27 +164,14 @@ class TestTensorMatmulCudaForward(TestCase, _CudaTestMixin, _CudaTensorFactoryMi
         with self.assertRaises(Exception):
             _ = A @ B
 
-    # def test_matmul_cuda_requires_allocated_inputs(self):
-    #     # Intentionally create CUDA tensors without allocating device memory.
-    #     A = Tensor((3, 4), Device("cuda:0"), requires_grad=False, dtype=np.float32)
-    #     B = Tensor((4, 2), Device("cuda:0"), requires_grad=False, dtype=np.float32)
-
-    #     self.assertEqual(int(A.data), 0)
-    #     self.assertEqual(int(B.data), 0)
-
-    #     with self.assertRaises(RuntimeError):
-    #         _ = A @ B
-
     def test_matmul_cuda_requires_allocated_inputs(self):
-        # Intentionally create CUDA tensors without allocating device memory.
+
         A = Tensor((3, 4), Device("cuda:0"), requires_grad=False, dtype=np.float32)
         B = Tensor((4, 2), Device("cuda:0"), requires_grad=False, dtype=np.float32)
 
-        # Contract: raw CUDA Tensor(...) should not allocate unless explicitly requested.
         self.assertEqual(int(A.data), 0)
         self.assertEqual(int(B.data), 0)
 
-        # CUDA matmul requires allocated device buffers for both inputs.
         with self.assertRaises(RuntimeError):
             _ = A @ B
 
@@ -279,9 +261,8 @@ class TestTensorMatmulCudaBackward(TestCase, _CudaTestMixin):
         A = self._cuda_tensor_from_numpy(A_np, requires_grad=True)
         B = self._cuda_tensor_from_numpy(B_np, requires_grad=True)
 
-        Y = A @ B  # CUDA forward
+        Y = A @ B
 
-        # Wrong-device grad_out (CPU). Tensor.backward should reject this immediately.
         grad_out_cpu = Tensor(
             Y.shape, Device("cpu"), requires_grad=False, dtype=np.float32
         )

@@ -21,7 +21,7 @@ def _tensor_from_numpy(
 def _zero_all_grads(*modules):
     for m in modules:
         for p in m.parameters():
-            # Parameter inherits Tensor in your infra; zero_grad exists on both in your design.
+                                                                                               
             if hasattr(p, "zero_grad"):
                 p.zero_grad()
 
@@ -54,7 +54,7 @@ class TestRNNStackingAndHeads(unittest.TestCase):
         T, N, D = 6, 3, 4
         H1, H2 = 5, 7
 
-        rnn1 = RNN(D, H1, bias=True)  # legacy returns (h_seq, h_T)
+        rnn1 = RNN(D, H1, bias=True)                               
         rnn2 = RNN(H1, H2, bias=True)
 
         x_np = np.random.randn(T, N, D).astype(np.float32)
@@ -66,15 +66,15 @@ class TestRNNStackingAndHeads(unittest.TestCase):
         h2_seq, _h2_T = rnn2.forward(h1_seq)
         self.assertEqual(h2_seq.shape, (T, N, H2))
 
-        # Loss on all timesteps
+                               
         loss = h2_seq.sum()
         loss.backward()
 
-        # Grad should reach the original input
+                                              
         self.assertIsNotNone(x.grad)
         self.assertEqual(x.grad.shape, x.shape)
 
-        # Params in both layers should get grads
+                                                
         for p in rnn1.parameters():
             self.assertIsNotNone(p.grad, "rnn1 parameter grad should exist")
         for p in rnn2.parameters():
@@ -117,7 +117,7 @@ class TestRNNStackingAndHeads(unittest.TestCase):
         """
         T, N, D = 7, 4, 3
         H = 5
-        C = 2  # "num classes" or regression outputs
+        C = 2                                       
 
         rnn = RNN(D, H, bias=True)
         head = Linear(in_features=H, out_features=C, bias=True)
@@ -131,7 +131,7 @@ class TestRNNStackingAndHeads(unittest.TestCase):
         y = head.forward(h_T)
         self.assertEqual(y.shape, (N, C))
 
-        # Simple scalar objective
+                                 
         loss = y.sum()
         loss.backward()
 
@@ -147,11 +147,10 @@ class TestRNNStackingAndHeads(unittest.TestCase):
         """
         Sequence-to-sequence: apply a Linear head at each timestep.
         This uses a reshape trick (flatten time+batch), assuming Tensor.reshape exists.
-        If your framework doesn't have reshape, you can replace with Flatten-like op.
         """
         T, N, D = 4, 3, 2
         H = 6
-        K = 5  # per-timestep output dimension
+        K = 5                                 
 
         rnn = RNN(D, H, bias=True)
         head = Linear(in_features=H, out_features=K, bias=False)
@@ -162,8 +161,8 @@ class TestRNNStackingAndHeads(unittest.TestCase):
         h_seq, _h_T = rnn.forward(x)
         self.assertEqual(h_seq.shape, (T, N, H))
 
-        # Flatten (T,N,H) -> (T*N, H) -> apply Linear -> (T*N, K) -> reshape back
-        # If your Tensor uses .reshape(...) or a dedicated reshape op, use it.
+                                                                                 
+                                                                              
         if not hasattr(h_seq, "reshape"):
             self.skipTest(
                 "Tensor.reshape not available; implement reshape or use Flatten module."
@@ -191,8 +190,6 @@ class TestRNNStackingAndHeads(unittest.TestCase):
         A very small "one step" training sanity check:
           x -> rnn1 -> rnn2 -> h_T -> linear -> loss=sum -> backward
         Ensures the whole composed graph is differentiable.
-
-        (We do not perform optimizer updates here; you already have separate train tests.)
         """
         T, N, D = 5, 2, 3
         H1, H2, C = 4, 4, 1
@@ -213,7 +210,7 @@ class TestRNNStackingAndHeads(unittest.TestCase):
         loss = y.sum()
         loss.backward()
 
-        # Check grads exist
+                           
         self.assertIsNotNone(x.grad)
         for p in (
             list(rnn1.parameters()) + list(rnn2.parameters()) + list(head.parameters())

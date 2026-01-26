@@ -15,7 +15,7 @@ Timing policy
 
 Notes
 -----
-- CUDA path depends on your CUDA-enabled Tensor ops used by Linear:
+- CUDA path depends on CUDA-enabled Tensor ops used by Linear:
   matmul / transpose / stack / add.
 - Bias expansion uses Tensor.stack; that cost is part of the measured forward.
 - Uses device-aware parameter initialization in Linear; for CUDA it performs
@@ -52,7 +52,7 @@ if SRC_DIR not in sys.path:
 
 from keydnn.domain.device._device import Device
 from keydnn.infrastructure.tensor._tensor import Tensor
-from keydnn.infrastructure.fully_connected._linear import Linear  # adjust if your path differs
+from keydnn.infrastructure.fully_connected._linear import Linear
 
 
 # -------------------------
@@ -142,7 +142,7 @@ def _make_tensor_from_numpy_cpu(x: np.ndarray) -> Tensor:
 
 def _make_tensor_from_numpy_cuda(x: np.ndarray, *, cuda_device: Device) -> Tensor:
     """
-    Create a CUDA Tensor and copy host -> device using Tensor APIs already present in your repo.
+    Create a CUDA Tensor and copy host
     We rely on Tensor.from_numpy if available, otherwise fall back to:
       - allocate CUDA tensor
       - _ensure_cuda_alloc
@@ -260,7 +260,7 @@ def bench_case(
     if sanity:
         y_cpu = lin_cpu.forward(x_cpu).to_numpy()
         y_cuda_t = lin_cuda.forward(x_cuda)
-        y_cuda = y_cuda_t.to_numpy()  # relies on your DtoH path for CUDA tensors
+        y_cuda = y_cuda_t.to_numpy()
         # float64 tolerance tighter; float32 more relaxed
         if dtype == np.float64:
             np.testing.assert_allclose(y_cuda, y_cpu, rtol=1e-10, atol=1e-10)

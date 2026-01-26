@@ -458,7 +458,7 @@ class Tensor(
         # (Borrowed pointer => no storage ownership by default)
         obj._storage = None  # type: ignore[attr-defined]
 
-        # --- autograd fields (optional) ---
+        # --- autograd fields ---
         obj._requires_grad = bool(requires_grad)
         obj._grad = None
         obj._ctx = ctx
@@ -544,7 +544,7 @@ class Tensor(
             zeros = np.zeros(self._shape, dtype=self._dtype)
             self.copy_from_numpy(zeros)
 
-        # --- autograd fields (optional) ---
+        # --- autograd fields ---
         self._requires_grad: bool = bool(requires_grad)
         self._grad: Optional["Tensor"] = None
         self._ctx: Optional[Context] = ctx
@@ -2549,7 +2549,7 @@ class Tensor(
             self._data = 0
             return
 
-        # Optional: transitional ownership flag for devptr-only tensors.
+        # transitional ownership flag for devptr-only tensors.
         if bool(getattr(self, "_owns_devptr", False)):
             try:
                 lib = self._get_cuda_lib()

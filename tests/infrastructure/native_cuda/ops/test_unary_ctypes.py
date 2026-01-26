@@ -17,7 +17,6 @@ from src.keydnn.infrastructure.native_cuda.python.ops.unary_ctypes import (
     exp_cuda,
     mul_cuda,
     mul_scalar_cuda,
-    # NEW: in-place wrappers
     mul_inplace_cuda,
     mul_scalar_inplace_cuda,
 )
@@ -133,7 +132,7 @@ class TestUnaryCtypes(_CudaTestCase):
     def test_exp_and_mul_numel_zero_is_ok(self) -> None:
         lib = self.lib
         dtype = np.float32
-        # numel==0 should not crash; allocate minimal buffers to satisfy strict contracts.
+
         x_dev = int(cuda_malloc(lib, 1))
         y_dev = int(cuda_malloc(lib, 1))
         a_dev = int(cuda_malloc(lib, 1))
@@ -221,10 +220,6 @@ class TestUnaryCtypes(_CudaTestCase):
         finally:
             cuda_free(lib, a_dev)
             cuda_free(lib, y_dev)
-
-    # -------------------------------------------------------------------------
-    # NEW: in-place mul tests
-    # -------------------------------------------------------------------------
 
     def _run_mul_inplace(self, dtype: np.dtype) -> None:
         lib = self.lib
@@ -348,7 +343,7 @@ class TestUnaryCtypes(_CudaTestCase):
         lib = self.lib
         dtype = np.dtype(dtype)
 
-        a0 = np.array([0.25], dtype=dtype)  # numel=1
+        a0 = np.array([0.25], dtype=dtype)
         b = np.array([1.5], dtype=dtype)
         a_ref = (a0 * b).astype(dtype, copy=False)
 

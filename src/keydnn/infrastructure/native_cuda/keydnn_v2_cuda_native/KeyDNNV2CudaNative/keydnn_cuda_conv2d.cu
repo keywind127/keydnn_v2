@@ -12,7 +12,6 @@
 static inline int _cuda_to_int(cudaError_t e) { return (int)e; }
 
 // Encode cuDNN failures as a non-zero int distinct from cudaError_t.
-// (Your Python just checks "!= 0", so any non-zero is fine.)
 static inline int _cudnn_to_int(cudnnStatus_t s) {
     // Reserve a high range so it won't collide with cudaError_t codes.
     return 100000 + (int)s;
@@ -140,7 +139,6 @@ static int launch_conv2d_forward_cudnn(
     ));
     if (outN != N || outC != C_out || outH != H_out || outW != W_out) {
         // Mismatch means caller-provided H_out/W_out are inconsistent
-        // Use cudaErrorInvalidValue to match your existing style.
         cudnnDestroyConvolutionDescriptor(conv_desc);
         cudnnDestroyFilterDescriptor(w_desc);
         cudnnDestroyTensorDescriptor(y_desc);
@@ -309,8 +307,6 @@ static int launch_conv2d_backward_cudnn(
     const void* alpha = std::is_same<T, float>::value ? (const void*)&one_f : (const void*)&one_d;
     const void* beta0 = std::is_same<T, float>::value ? (const void*)&zero_f : (const void*)&zero_d;
 
-    // IMPORTANT: Your header says grad buffers are "accumulated; caller zero-init".
-    // We keep beta=0 (overwrite). If you truly want accumulation, pass beta=1.
     cudnnStatus_t s1 = cudnnConvolutionBackwardData(
         handle,
         alpha,

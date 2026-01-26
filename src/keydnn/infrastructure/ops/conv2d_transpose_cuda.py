@@ -73,7 +73,7 @@ def _dtype_itemsize(dtype: np.dtype) -> int:
 
 def _probe_dev_range(lib: ctypes.CDLL, base_dev: int, nbytes_required: int) -> None:
     """
-    Best-effort device range probe (optional).
+    Best-effort device range probe.
 
     Mirrors conv2d_cuda.py behavior: if `keydnn_cuda_memcpy_d2h` exists, probe the
     last byte in the requested range to catch undersized/invalid allocations.
@@ -223,7 +223,7 @@ def conv2d_transpose_forward_cuda(*args: Any, **kwargs: Any) -> np.ndarray:
 
     y = np.empty((N, C_out, H_out, W_out), dtype=dtype)
 
-    # Set device (optional)
+    # Set device
     if device_index is not None:
         cuda_set_device(lib, int(device_index))
 
@@ -433,7 +433,7 @@ def conv2d_transpose_backward_cuda(
     grad_x = np.empty_like(x)
     grad_w = np.empty_like(w)
 
-    # Set device (optional)
+    # Set device
     if device_index is not None:
         cuda_set_device(lib, int(device_index))
 
@@ -677,7 +677,7 @@ def conv2d_transpose_backward_cuda_devptr(*args: Any, **kwargs: Any) -> None:
     -----
     - Bias grad is a reduction over grad_out across (N, H_out, W_out).
       If `grad_b_dev` is provided, this function attempts to compute it on GPU
-      via `sum_to_shape_cuda`. If your build does not expose `sum_to_shape_cuda`,
+      via `sum_to_shape_cuda`. If build does not expose `sum_to_shape_cuda`,
       this will raise.
     - For safety/consistency, if `zeros_cuda` exists we zero `grad_x_dev` and
       `grad_w_dev` before launching the native kernel (covers accumulation-style kernels).

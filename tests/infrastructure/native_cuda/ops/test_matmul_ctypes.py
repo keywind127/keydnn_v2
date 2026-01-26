@@ -36,7 +36,6 @@ class TestMatmulCtypes(_CudaTestCase):
         lib = self.lib
         dtype = np.dtype(dtype)
 
-        # Small sizes for deterministic + fast tests
         M, K, N = 5, 7, 4
 
         A = (np.random.rand(M, K) - 0.5).astype(dtype, copy=False)
@@ -69,7 +68,6 @@ class TestMatmulCtypes(_CudaTestCase):
             C = np.empty_like(C_ref)
             cudaMemcpyDtoH(lib, C, c_dev, nbytes_C)
 
-            # naive GEMM should match exactly for these sizes
             if dtype == np.float32:
                 np.testing.assert_allclose(C, C_ref, rtol=1e-5, atol=1e-6)
             else:
@@ -103,7 +101,7 @@ class TestMatmulCtypes(_CudaTestCase):
     def test_matmul_zero_dim_is_ok(self) -> None:
         lib = self.lib
         dtype = np.float32
-        # M==0 or N==0 should no-op
+
         a_dev = int(cuda_malloc(lib, 1))
         b_dev = int(cuda_malloc(lib, 1))
         c_dev = int(cuda_malloc(lib, 1))

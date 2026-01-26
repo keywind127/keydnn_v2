@@ -34,10 +34,6 @@ class TestTensorFull(TestCase):
         t2 = Tensor.full((4,), 2.0, device=self.cpu, requires_grad=True)
         self.assertTrue(t2.requires_grad)
 
-    # def test_full_on_cuda_raises(self):
-    #     with self.assertRaises(RuntimeError):
-    #         _ = Tensor.full((2, 3), 1.0, device=self.cuda, requires_grad=False)
-
 
 class TestTensorRand(TestCase):
     def setUp(self) -> None:
@@ -51,12 +47,11 @@ class TestTensorRand(TestCase):
         arr = t.to_numpy()
         self.assertEqual(arr.dtype, np.float32)
 
-        # Typical contract: Uniform[0,1)
         self.assertTrue(np.all(arr >= 0.0))
         self.assertTrue(np.all(arr < 1.0))
 
     def test_rand_is_not_all_equal_most_of_the_time(self):
-        # Weak statistical sanity check: random tensor should have some variation.
+
         t = Tensor.rand((50,), device=self.cpu, requires_grad=False)
         arr = t.to_numpy()
         self.assertGreater(np.std(arr), 0.0)
@@ -67,10 +62,6 @@ class TestTensorRand(TestCase):
 
         t2 = Tensor.rand((3, 3), device=self.cpu, requires_grad=True)
         self.assertTrue(t2.requires_grad)
-
-    # def test_rand_on_cuda_raises(self):
-    #     with self.assertRaises(Exception):
-    #         _ = Tensor.rand((2, 3), device=self.cuda, requires_grad=False)
 
 
 if __name__ == "__main__":

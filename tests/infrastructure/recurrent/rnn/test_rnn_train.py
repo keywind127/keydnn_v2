@@ -15,10 +15,6 @@ def _tensor_from_numpy(arr: np.ndarray, device: Device, requires_grad: bool) -> 
 
 
 def _unwrap_param_tensor(p):
-    """
-    Match your Conv2d tests: treat Parameter as Tensor-like
-    or unwrap .data/.tensor if you later change design.
-    """
     if hasattr(p, "to_numpy") and hasattr(p, "copy_from_numpy"):
         return p
     if hasattr(p, "data"):
@@ -44,7 +40,7 @@ def _sgd_step(module, lr: float) -> None:
     for p in module.parameters():
         pt = _unwrap_param_tensor(p)
 
-        # Frozen params or params without grad: skip
+                                                    
         if not getattr(pt, "requires_grad", False):
             continue
         if getattr(pt, "grad", None) is None:
@@ -71,20 +67,20 @@ class TestRNNTinyTraining(TestCase):
         T, N, D, H = 6, 4, 3, 5
         rnn = RNN(input_size=D, hidden_size=H, bias=True)
 
-        # Positive-ish inputs to make initial loss usually > 0 (more stable)
+                                                                            
         x_np = np.random.uniform(0.0, 0.2, size=(T, N, D)).astype(np.float32)
         x = _tensor_from_numpy(x_np, self.device, requires_grad=False)
 
         lr = 5e-2
         steps = 120
 
-        # initial loss
+                      
         _zero_grads(rnn)
         h_seq0, _ = rnn.forward(x)
         loss0 = h_seq0.sum()
         loss0_val = float(loss0.to_numpy())
 
-        # train
+               
         last_val = loss0_val
         for _ in range(steps):
             _zero_grads(rnn)
@@ -94,14 +90,14 @@ class TestRNNTinyTraining(TestCase):
             _sgd_step(rnn, lr)
             last_val = float(loss.to_numpy())
 
-        # final loss
+                    
         _zero_grads(rnn)
         h_seqF, _ = rnn.forward(x)
         lossF = h_seqF.sum()
         lossF_val = float(lossF.to_numpy())
 
-        # Assert: loss decreased by a meaningful margin.
-        # Use a relative threshold, but guard against tiny initial value.
+                                                        
+                                                                         
         self.assertTrue(
             lossF_val < loss0_val - 1e-4 or lossF_val < 0.8 * loss0_val,
             msg=f"Expected loss to decrease. loss0={loss0_val:.6f}, lossF={lossF_val:.6f}, last_step={last_val:.6f}",
@@ -121,13 +117,13 @@ class TestRNNTinyTraining(TestCase):
         x_np = np.random.uniform(0.0, 0.2, size=(T, N, D)).astype(np.float32)
         x = _tensor_from_numpy(x_np, self.device, requires_grad=False)
 
-        # Snapshot params
+                         
         before = []
         for p in rnn.parameters():
             pt = _unwrap_param_tensor(p)
             before.append(pt.to_numpy().copy())
 
-        # Train a bit
+                     
         lr = 5e-2
         steps = 10
         for _ in range(steps):
@@ -137,13 +133,13 @@ class TestRNNTinyTraining(TestCase):
             loss.backward()
             _sgd_step(rnn, lr)
 
-        # Snapshot after
+                        
         after = []
         for p in rnn.parameters():
             pt = _unwrap_param_tensor(p)
             after.append(pt.to_numpy().copy())
 
-        # At least one parameter must change
+                                            
         any_changed = False
         for b, a in zip(before, after):
             if not np.array_equal(b, a):

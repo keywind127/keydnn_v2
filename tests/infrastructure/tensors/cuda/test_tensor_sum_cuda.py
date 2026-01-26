@@ -1,4 +1,3 @@
-# tests/infrastructure/tensors/cuda/test_tensor_sum_cuda.py
 from __future__ import annotations
 
 import unittest
@@ -10,7 +9,7 @@ import numpy as np
 def _cuda_available() -> bool:
     try:
         from src.keydnn.infrastructure.native_cuda.python.maxpool2d_ctypes import (
-            load_keydnn_cuda_native,  # type: ignore
+            load_keydnn_cuda_native,
         )
 
         _ = load_keydnn_cuda_native()
@@ -30,25 +29,19 @@ class _CudaTestBase(unittest.TestCase):
         cls.Device = Device
         cls.dev = Device("cuda:0")
 
-        # Load CUDA lib and set device
         lib = Tensor._get_cuda_lib()
         from src.keydnn.infrastructure.native_cuda.python.maxpool2d_ctypes import (
-            cuda_set_device,  # type: ignore
+            cuda_set_device,
         )
 
         cuda_set_device(lib, 0)
 
-        # Dedicated memcpy ops module (GetProcAddress-based)
-        from src.keydnn.infrastructure.native_cuda.python.ops import (  # type: ignore
+        from src.keydnn.infrastructure.native_cuda.python.ops import (
             memcpy_ctypes as mc,
         )
 
         cls.lib = lib
         cls.mc = mc
-
-    # -------------------------
-    # helpers: cuda <-> numpy
-    # -------------------------
 
     def _cuda_tensor_from_numpy(self, arr: np.ndarray, *, requires_grad: bool):
         Tensor = self.Tensor
@@ -59,7 +52,6 @@ class _CudaTestBase(unittest.TestCase):
         if not arr.flags["C_CONTIGUOUS"]:
             arr = np.ascontiguousarray(arr)
 
-        # Ensure device allocation and upload
         t._ensure_cuda_alloc(dtype=np.dtype(arr.dtype))
         self.assertNotEqual(int(t.data), 0)
 
@@ -72,7 +64,7 @@ class _CudaTestBase(unittest.TestCase):
         return t
 
     def _cuda_to_numpy(self, t) -> np.ndarray:
-        # scalar shape () is supported by numpy empty; nbytes matches dtype.itemsize
+
         out = np.empty(t.shape, dtype=np.dtype(t.dtype))
         if not out.flags["C_CONTIGUOUS"]:
             out = np.ascontiguousarray(out)
@@ -87,11 +79,6 @@ class _CudaTestBase(unittest.TestCase):
 
     def _ctx_of(self, t) -> Any:
         return getattr(t, "_ctx", None) or getattr(t, "ctx", None)
-
-
-# -----------------------------------------------------------------------------
-# Forward tests
-# -----------------------------------------------------------------------------
 
 
 class TestTensorSumCudaForward(_CudaTestBase):
@@ -109,7 +96,6 @@ class TestTensorSumCudaForward(_CudaTestBase):
         got = self._cuda_to_numpy(y).astype(np.float32, copy=False)
         ref = np.array(x_np.sum(), dtype=np.float32)
 
-        # float32 reduction order may differ (atomicAdd)
         np.testing.assert_allclose(got, ref, rtol=2e-5, atol=5e-6)
 
     def test_sum_all_cuda_forward_keepdims_matches_numpy(self) -> None:
@@ -211,11 +197,6 @@ class TestTensorSumCudaForward(_CudaTestBase):
             _ = x.sum(axis=2)
 
 
-# -----------------------------------------------------------------------------
-# Backward tests
-# -----------------------------------------------------------------------------
-
-
 class TestTensorSumCudaBackward(_CudaTestBase):
     def _run_backward_case(
         self,
@@ -228,8 +209,6 @@ class TestTensorSumCudaBackward(_CudaTestBase):
         x = self._cuda_tensor_from_numpy(x_np, requires_grad=True)
         y = x.sum(axis=axis, keepdims=keepdims)
 
-        # Some implementations track autograd via ctx even if requires_grad flag
-        # on the output is not propagated. Accept either behavior.
         ctx = self._ctx_of(y)
         self.assertTrue(
             bool(getattr(y, "requires_grad", False)) or (ctx is not None),
@@ -238,7 +217,6 @@ class TestTensorSumCudaBackward(_CudaTestBase):
         )
         self.assertIsNotNone(ctx, "Expected Tensor.sum to attach a backward Context")
 
-        # grad_out on CUDA (shape matches output)
         grad_out = self.Tensor.full(
             y.shape, float(grad_out_value), device=self.dev, requires_grad=False
         )
@@ -252,7 +230,6 @@ class TestTensorSumCudaBackward(_CudaTestBase):
 
         gx_np = self._cuda_to_numpy(gx)
 
-        # reference
         if axis is None:
             ref = np.ones_like(x_np, dtype=np.float32) * np.float32(grad_out_value)
         else:

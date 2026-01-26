@@ -19,7 +19,7 @@ def _conv2d_forward_ref(
     padding: int | tuple[int, int],
 ) -> np.ndarray:
     """
-    Naive NCHW/OIHW forward reference (matches your CPU semantics).
+    Naive NCHW/OIHW forward reference
     """
     s_h, s_w = _pair(stride)
     p_h, p_w = _pair(padding)
@@ -69,7 +69,7 @@ def _conv2d_backward_ref(
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
     """
     Naive backward reference returning (grad_x, grad_w, grad_b).
-    grad_b matches your semantics: sum over (N,H_out,W_out) if b is not None.
+    grad_b matches semantics: sum over (N,H_out,W_out) if b is not None.
     """
     s_h, s_w = _pair(stride)
     p_h, p_w = _pair(padding)
@@ -132,7 +132,6 @@ class TestConv2dCudaOps(unittest.TestCase):
 
         cls.ops_conv = ops_conv
 
-        # Forward candidates
         cls.conv2d_fwd = resolve_func(
             ops_conv,
             candidates=[
@@ -141,7 +140,7 @@ class TestConv2dCudaOps(unittest.TestCase):
                 "conv2d_forward",
             ],
         )
-        # Backward candidates
+
         cls.conv2d_bwd = resolve_func(
             ops_conv,
             candidates=[
@@ -153,7 +152,6 @@ class TestConv2dCudaOps(unittest.TestCase):
     def _run_forward(self, dtype: np.dtype, *, with_bias: bool) -> None:
         dtype = np.dtype(dtype)
 
-        # Keep small; this wrapper does CPU padding + GPU compute
         N, C_in, C_out = 2, 3, 4
         H, W = 5, 6
         K_h, K_w = 3, 2
@@ -196,7 +194,6 @@ class TestConv2dCudaOps(unittest.TestCase):
     def _run_backward(self, dtype: np.dtype, *, with_bias: bool) -> None:
         dtype = np.dtype(dtype)
 
-        # Small sizes; backward uses atomics in native kernel -> tolerate numeric noise
         N, C_in, C_out = 2, 2, 3
         H, W = 6, 5
         K_h, K_w = 3, 3
@@ -207,7 +204,6 @@ class TestConv2dCudaOps(unittest.TestCase):
         w = np.random.randn(C_out, C_in, K_h, K_w).astype(dtype)
         b = np.random.randn(C_out).astype(dtype) if with_bias else None
 
-        # Compute output shape then grad_out
         y_ref = _conv2d_forward_ref(x, w, b, stride=stride, padding=padding)
         grad_out = np.random.randn(*y_ref.shape).astype(dtype)
 
@@ -231,7 +227,6 @@ class TestConv2dCudaOps(unittest.TestCase):
         self.assertEqual(grad_x.shape, grad_x_ref.shape)
         self.assertEqual(grad_w.shape, grad_w_ref.shape)
 
-        # Backward uses atomicAdd -> order differs; allow slightly looser thresholds
         if dtype == np.float32:
             np.testing.assert_allclose(grad_x, grad_x_ref, rtol=3e-4, atol=3e-4)
             np.testing.assert_allclose(grad_w, grad_w_ref, rtol=3e-4, atol=3e-4)
@@ -261,7 +256,7 @@ class TestConv2dCudaOps(unittest.TestCase):
     def test_rejects_in_channels_mismatch(self) -> None:
         dtype = np.float32
         x = np.random.randn(1, 3, 5, 5).astype(dtype)
-        w = np.random.randn(4, 2, 3, 3).astype(dtype)  # mismatch C_in=2
+        w = np.random.randn(4, 2, 3, 3).astype(dtype)
         with self.assertRaises(ValueError):
             _ = self.conv2d_fwd(
                 self.env.lib,
@@ -284,7 +279,6 @@ class TestConv2dCudaOps(unittest.TestCase):
         y_ref = _conv2d_forward_ref(x, w, b, stride=1, padding=0)
         grad_out = np.random.randn(*y_ref.shape).astype(dtype)
 
-        # Corrupt grad_out (wrong C_out)
         grad_out_bad = grad_out[:, :2, :, :]
 
         with self.assertRaises(ValueError):

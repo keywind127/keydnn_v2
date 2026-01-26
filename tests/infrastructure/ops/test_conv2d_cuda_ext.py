@@ -1,4 +1,3 @@
-# tests/infrastructure/ops/test_conv2d_cuda_ext.py
 """
 Unit tests for CUDA Tensor-boundary conv2d wrapper (conv2d_cuda_ext.py).
 
@@ -32,7 +31,7 @@ from src.keydnn.infrastructure.ops.pool2d_cuda import (
     cuda_free,
 )
 
-# wrapper under test
+
 from src.keydnn.infrastructure.ops.conv2d_cuda_ext import (
     conv2d_forward_cuda_tensor,
     conv2d_backward_cuda_tensor,
@@ -45,20 +44,20 @@ def _get_cuda_device(index: int = 0) -> Device:
     Mirrors the helper used in matmul_cuda_ext tests.
     """
     if hasattr(Device, "cuda") and callable(getattr(Device, "cuda")):
-        return Device.cuda(index)  # type: ignore[attr-defined]
+        return Device.cuda(index)
 
     try:
-        return Device("cuda", index)  # type: ignore[call-arg]
+        return Device("cuda", index)
     except Exception:
         pass
 
     try:
-        return Device(f"cuda:{index}")  # type: ignore[call-arg]
+        return Device(f"cuda:{index}")
     except Exception:
         pass
 
     try:
-        return Device(kind="cuda", index=index)  # type: ignore[call-arg]
+        return Device(kind="cuda", index=index)
     except Exception as e:
         raise RuntimeError(
             "Unable to construct a CUDA Device; update _get_cuda_device() for this repo."
@@ -231,7 +230,7 @@ class TestConv2dCudaExt(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        # Try to load CUDA DLL; skip all tests if unavailable.
+
         try:
             cls.lib = _load_cuda_lib()
         except Exception as e:
@@ -243,13 +242,11 @@ class TestConv2dCudaExt(unittest.TestCase):
         except Exception as e:
             raise unittest.SkipTest(f"Failed to set CUDA device: {e}") from e
 
-        # Ensure memcpy symbols exist; if not, skip (cannot validate numerics).
         try:
             _bind_memcpy_symbols(cls.lib)
         except Exception as e:
             raise unittest.SkipTest(f"CUDA memcpy symbols unavailable: {e}") from e
 
-        # Construct a CUDA Device object for Tensor wrapping.
         try:
             cls.cuda_device = _get_cuda_device(cls.device_index)
         except Exception as e:
@@ -387,7 +384,6 @@ class TestConv2dCudaExt(unittest.TestCase):
         w = rng.standard_normal((C_out, C_in, K_h, K_w), dtype=dtype)
         b = rng.standard_normal((C_out,), dtype=dtype)
 
-        # grad_out shape from forward
         y_ref = _conv2d_forward_ref(x, w, b, stride=stride, padding=padding)
         grad_out = rng.standard_normal(y_ref.shape, dtype=dtype)
 
@@ -415,7 +411,6 @@ class TestConv2dCudaExt(unittest.TestCase):
             x, w, b, grad_out, stride=stride, padding=padding
         )
 
-        # backward uses atomics -> slightly looser tolerance
         np.testing.assert_allclose(gx, gx_ref, rtol=3e-4, atol=3e-4)
         np.testing.assert_allclose(gw, gw_ref, rtol=3e-4, atol=3e-4)
         self.assertIsNotNone(gb)
@@ -488,7 +483,7 @@ class TestConv2dCudaExt(unittest.TestCase):
         rng = np.random.default_rng(6)
         dtype = np.float32
         x = rng.standard_normal((1, 3, 5, 5), dtype=dtype)
-        w = rng.standard_normal((4, 2, 3, 3), dtype=dtype)  # mismatch
+        w = rng.standard_normal((4, 2, 3, 3), dtype=dtype)
 
         x_t = self._make_cuda_tensor_from_host(x)
         w_t = self._make_cuda_tensor_from_host(w)
@@ -509,16 +504,15 @@ class TestConv2dCudaExt(unittest.TestCase):
         x_np = np.ones((1, 1, 5, 5), dtype=np.float32)
         w_np = np.ones((1, 1, 3, 3), dtype=np.float32)
 
-        # Construct CPU tensors in a robust way (mirror matmul test)
         if hasattr(Tensor, "from_numpy") and callable(getattr(Tensor, "from_numpy")):
-            x_cpu = Tensor.from_numpy(x_np, device=Device("cpu"))  # type: ignore[call-arg]
-            w_cpu = Tensor.from_numpy(w_np, device=Device("cpu"))  # type: ignore[call-arg]
+            x_cpu = Tensor.from_numpy(x_np, device=Device("cpu"))
+            w_cpu = Tensor.from_numpy(w_np, device=Device("cpu"))
         else:
             try:
-                x_cpu = Tensor(x_np.shape, device=Device("cpu"), requires_grad=False)  # type: ignore[call-arg]
-                x_cpu._data = x_np  # type: ignore[attr-defined]
-                w_cpu = Tensor(w_np.shape, device=Device("cpu"), requires_grad=False)  # type: ignore[call-arg]
-                w_cpu._data = w_np  # type: ignore[attr-defined]
+                x_cpu = Tensor(x_np.shape, device=Device("cpu"), requires_grad=False)
+                x_cpu._data = x_np
+                w_cpu = Tensor(w_np.shape, device=Device("cpu"), requires_grad=False)
+                w_cpu._data = w_np
             except Exception as e:
                 raise unittest.SkipTest(
                     f"Unable to construct CPU tensors in this repo; update test_raises_on_cpu_tensor: {e}"
@@ -526,8 +520,8 @@ class TestConv2dCudaExt(unittest.TestCase):
 
         with self.assertRaises(TypeError):
             _ = conv2d_forward_cuda_tensor(
-                x_cpu,  # type: ignore[arg-type]
-                w_cpu,  # type: ignore[arg-type]
+                x_cpu,
+                w_cpu,
                 b=None,
                 stride=(1, 1),
                 padding=(0, 0),

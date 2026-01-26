@@ -76,7 +76,7 @@ def tensor_copyfromnumpy_gpu(self: ITensor, arr: np.ndarray) -> None:
     # IMPORTANT: preserve legacy behavior:
     # - accept np.float32, python float, lists, etc.
     # - materialize as ndarray
-    dt = np.dtype(self.dtype)  # default float32 in your codebase
+    dt = np.dtype(self.dtype)  # default float32 in codebase
     arr_nd = np.asarray(arr, dtype=dt)
 
     # Preserve original strict shape check (including scalar shape == ())
@@ -148,7 +148,7 @@ def tensor_copyfromnumpy_cpu(self: ITensor, arr: np.ndarray) -> None:
     # IMPORTANT: preserve legacy behavior:
     # - accept np.float32, python float, lists, etc.
     # - materialize as ndarray
-    dt = np.dtype(self.dtype)  # default float32 in your codebase
+    dt = np.dtype(self.dtype)  # default float32 in codebase
     arr_nd = np.asarray(arr, dtype=dt)
 
     # Preserve original strict shape check (including scalar shape == ())

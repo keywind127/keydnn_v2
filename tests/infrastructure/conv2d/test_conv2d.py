@@ -60,13 +60,12 @@ class TestConv2dCPU(unittest.TestCase):
         b = np.zeros((4,), dtype=np.float32)
 
         y = conv2d_forward_cpu(x, w, b, stride=2, padding=1)
-        # H_out = floor((10+2-3)/2)+1 = 5
-        # W_out = floor((9+2-3)/2)+1  = 5
+
         self.assertEqual(y.shape, (2, 4, 5, 5))
         self.assertEqual(y.dtype, np.float32)
 
     def test_forward_known_values_all_ones_float32(self):
-        # x = ones, w = ones, stride=1, padding=0 => each 2x2 patch sums to 4
+
         x = np.ones((1, 1, 3, 3), dtype=np.float32)
         w = np.ones((1, 1, 2, 2), dtype=np.float32)
 
@@ -78,7 +77,7 @@ class TestConv2dCPU(unittest.TestCase):
         )
 
     def test_backward_matches_finite_difference_float32(self):
-        # Validate grad_x, grad_w, grad_b using finite differences on a tiny case.
+
         np.random.seed(0)
         x = np.random.randn(1, 1, 4, 4).astype(np.float32)
         w = np.random.randn(1, 1, 3, 3).astype(np.float32)
@@ -88,7 +87,7 @@ class TestConv2dCPU(unittest.TestCase):
         padding = 1
 
         y = conv2d_forward_cpu(x, w, b, stride=stride, padding=padding)
-        grad_out = np.ones_like(y, dtype=np.float32)  # L = sum(y)
+        grad_out = np.ones_like(y, dtype=np.float32)
 
         grad_x, grad_w, grad_b = conv2d_backward_cpu(
             x, w, b, grad_out, stride=stride, padding=padding
@@ -117,7 +116,7 @@ class TestConv2dCPU(unittest.TestCase):
         )
 
     def test_forward_and_backward_matches_finite_difference_float64(self):
-        # Same as float32 test, but in float64 to validate dtype paths.
+
         np.random.seed(1)
         x = np.random.randn(1, 1, 4, 4).astype(np.float64)
         w = np.random.randn(1, 1, 3, 3).astype(np.float64)
@@ -129,13 +128,12 @@ class TestConv2dCPU(unittest.TestCase):
         y = conv2d_forward_cpu(x, w, b, stride=stride, padding=padding)
         self.assertEqual(y.dtype, np.float64)
 
-        grad_out = np.ones_like(y, dtype=np.float64)  # L = sum(y)
+        grad_out = np.ones_like(y, dtype=np.float64)
 
         grad_x, grad_w, grad_b = conv2d_backward_cpu(
             x, w, b, grad_out, stride=stride, padding=padding
         )
 
-        # eps a bit smaller for float64
         fd_x = finite_diff_grad_x(
             x.copy(), w.copy(), b.copy(), stride, padding, eps=1e-5
         )
@@ -159,14 +157,13 @@ class TestConv2dCPU(unittest.TestCase):
         )
 
     def test_fallback_preserves_dtype_float16(self):
-        # float16 is unsupported by native path; must fall back to Python reference loop.
+
         x = (np.arange(1 * 1 * 3 * 3).reshape(1, 1, 3, 3) + 1).astype(np.float16)
         w = np.ones((1, 1, 2, 2), dtype=np.float16)
 
         y = conv2d_forward_cpu(x, w, b=None, stride=1, padding=0)
         self.assertEqual(y.dtype, np.float16)
 
-        # Backward: grad_out float16 too, and outputs should preserve dtype for grad_x / grad_w.
         grad_out = np.ones_like(y, dtype=np.float16)
         grad_x, grad_w, grad_b = conv2d_backward_cpu(
             x, w, None, grad_out, stride=1, padding=0
@@ -177,8 +174,7 @@ class TestConv2dCPU(unittest.TestCase):
         self.assertIsNone(grad_b)
 
     def test_forward_native_dispatch_calls_f32_wrapper_when_available(self):
-        # Verify that for float32, we attempt the native path and call conv2d_forward_f32_ctypes.
-        # This test does not require an actual shared library.
+
         x = np.zeros((1, 1, 3, 3), dtype=np.float32)
         w = np.zeros((1, 1, 2, 2), dtype=np.float32)
         b = None
@@ -216,7 +212,7 @@ class TestConv2dCPU(unittest.TestCase):
         self.assertTrue(np.all(y == np.float32(123.0)))
 
     def test_backward_native_dispatch_calls_f32_wrapper_when_available(self):
-        # Verify that for float32, we attempt the native path and call conv2d_backward_f32_ctypes.
+
         x = np.zeros((1, 1, 3, 3), dtype=np.float32)
         w = np.zeros((1, 1, 2, 2), dtype=np.float32)
         b = np.zeros((1,), dtype=np.float32)

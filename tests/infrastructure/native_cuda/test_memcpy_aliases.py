@@ -26,8 +26,10 @@ class _MemcpyAliasMixin:
 
     @classmethod
     def setUpClass(cls) -> None:
-        # Source-of-truth module where the alias functions are defined.
-        from src.keydnn.infrastructure.native_cuda.python import maxpool2d_ctypes as max_mod
+
+        from src.keydnn.infrastructure.native_cuda.python import (
+            maxpool2d_ctypes as max_mod,
+        )
 
         cls._MAX = max_mod
 
@@ -36,10 +38,6 @@ class _MemcpyAliasMixin:
             raise RuntimeError("Test misconfigured: MODULE not set")
         self.m = self.MODULE
         self.lib = _DummyLib()
-
-    # ---------------------------
-    # Existence / identity
-    # ---------------------------
 
     def test_alias_names_exist_and_are_callables(self) -> None:
         for name in (
@@ -68,10 +66,6 @@ class _MemcpyAliasMixin:
             f"{self.MODULE_NAME}: cudaMemcpyDtoH should alias cuda_memcpy_dtoh",
         )
 
-    # ---------------------------
-    # HtoD shim behavior
-    # ---------------------------
-
     def test_cuda_memcpy_htod_accepts_legacy_4_args_and_validates_nbytes(self) -> None:
         """
         cuda_memcpy_htod must accept legacy signature:
@@ -92,10 +86,10 @@ class _MemcpyAliasMixin:
             called.src_host = src_host
 
         try:
-            # Patch where the alias actually delegates
+
             max_m.cuda_memcpy_h2d = _fake_cuda_memcpy_h2d
 
-            src = np.arange(12, dtype=np.float32).reshape(3, 4).T  # non-contiguous
+            src = np.arange(12, dtype=np.float32).reshape(3, 4).T
             self.assertFalse(src.flags["C_CONTIGUOUS"])
             dst_dev = 12345
             nbytes = int(src.nbytes)
@@ -134,10 +128,6 @@ class _MemcpyAliasMixin:
 
         finally:
             max_m.cuda_memcpy_h2d = orig
-
-    # ---------------------------
-    # DtoH shim behavior
-    # ---------------------------
 
     def test_cuda_memcpy_dtoh_accepts_legacy_4_args_and_validates_nbytes(self) -> None:
         """
@@ -196,7 +186,7 @@ class _MemcpyAliasMixin:
         m = self.m
 
         base = np.empty((4, 6), dtype=np.float32)
-        dst_host = base[:, ::2]  # non-contiguous view
+        dst_host = base[:, ::2]
         self.assertFalse(dst_host.flags["C_CONTIGUOUS"])
 
         orig = max_m.cuda_memcpy_d2h
@@ -218,10 +208,6 @@ class _MemcpyAliasMixin:
             )
         finally:
             max_m.cuda_memcpy_d2h = orig
-
-    # ---------------------------
-    # C-style alias names should behave the same
-    # ---------------------------
 
     def test_cudaMemcpyHtoD_and_cudaMemcpyDtoH_legacy_signature(self) -> None:
         max_m = self._MAX

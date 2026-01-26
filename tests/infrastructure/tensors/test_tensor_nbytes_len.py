@@ -7,24 +7,22 @@ import numpy as np
 def _import_infra_tensor():
     """
     Import the *infrastructure* Tensor class (the one that defines __len__ and nbytes).
-    Adjust/extend fallbacks if your repo moved files.
     """
     try:
-        from src.keydnn.infrastructure.tensor import Tensor  # type: ignore
+        from src.keydnn.infrastructure.tensor import Tensor
 
         return Tensor
     except Exception:
         pass
 
     try:
-        from src.keydnn.infrastructure.tensor._tensor import Tensor  # type: ignore
+        from src.keydnn.infrastructure.tensor._tensor import Tensor
 
         return Tensor
     except Exception:
         pass
 
-    # Last resort: direct path you've shown in tracebacks
-    from src.keydnn.infrastructure.tensor._tensor import Tensor  # type: ignore
+    from src.keydnn.infrastructure.tensor._tensor import Tensor
 
     return Tensor
 
@@ -34,20 +32,15 @@ class TestTensorLenAndNbytes(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.Tensor = _import_infra_tensor()
 
-        # Device is usually exposed via presentation API in your repo
-        from src.keydnn.presentation.apis.tensors import Device  # type: ignore
+        from src.keydnn.presentation.apis.tensors import Device
 
         cls.Device = Device
 
-        # Prefer CPU for pure metadata tests
         try:
             cls.cpu = Device("cpu")
         except Exception:
-            cls.cpu = Device.cpu()  # type: ignore[attr-defined]
+            cls.cpu = Device.cpu()
 
-    # ----------------------------
-    # __len__ tests
-    # ----------------------------
     def test_len_scalar_raises_value_error(self) -> None:
         t = self.Tensor((), self.cpu, requires_grad=False, dtype=np.float32)
         with self.assertRaises(ValueError):
@@ -65,9 +58,6 @@ class TestTensorLenAndNbytes(unittest.TestCase):
         t = self.Tensor((0, 10), self.cpu, requires_grad=False, dtype=np.float32)
         self.assertEqual(len(t), 0)
 
-    # ----------------------------
-    # nbytes tests
-    # ----------------------------
     def test_nbytes_scalar(self) -> None:
         t = self.Tensor((), self.cpu, requires_grad=False, dtype=np.float32)
         self.assertEqual(t.nbytes, np.dtype(np.float32).itemsize)
@@ -91,13 +81,11 @@ class TestTensorLenAndNbytes(unittest.TestCase):
     def test_nbytes_metadata_only_does_not_require_storage(self) -> None:
         """
         nbytes must be correct even if backing storage is absent/uninitialized.
-        This should be safe because your implementation is metadata-only.
         """
         shape = (2, 2, 2)
         t = self.Tensor(shape, self.cpu, requires_grad=False, dtype=np.float32)
         expected = int(np.prod(shape)) * np.dtype(np.float32).itemsize
 
-        # Best-effort: clear common storage fields if present.
         for attr in ("_storage", "storage", "_data", "data"):
             if hasattr(t, attr):
                 try:
@@ -111,7 +99,7 @@ class TestTensorLenAndNbytes(unittest.TestCase):
         cases = [
             ((1,), np.float32),
             ((5,), np.float64),
-            ((2, 0, 3), np.float32),  # empty
+            ((2, 0, 3), np.float32),
             ((3, 4), np.float32),
             ((2, 3, 4, 5), np.float64),
         ]

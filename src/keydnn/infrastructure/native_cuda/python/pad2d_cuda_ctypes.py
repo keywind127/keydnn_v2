@@ -30,7 +30,7 @@ from ctypes import (
 )
 import numpy as np
 
-# Reuse the same DLL loader / CUDA utils from your existing maxpool2d ctypes.
+# Reuse the same DLL loader / CUDA utils from existing maxpool2d ctypes.
 from .maxpool2d_ctypes import (
     DevPtr,
     load_keydnn_cuda_native,

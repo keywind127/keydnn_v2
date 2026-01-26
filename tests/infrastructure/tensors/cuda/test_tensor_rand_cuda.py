@@ -1,4 +1,3 @@
-# tests/infrastructure/tensors/cuda/test_tensor_rand_cuda.py
 from __future__ import annotations
 
 import unittest
@@ -41,7 +40,9 @@ class _CudaTestMixin:
         if hasattr(m, "cuda_set_device"):
             m.cuda_set_device(lib, 0)
 
-    def _cuda_tensor_from_numpy(self, arr: np.ndarray, *, requires_grad: bool) -> Tensor:
+    def _cuda_tensor_from_numpy(
+        self, arr: np.ndarray, *, requires_grad: bool
+    ) -> Tensor:
         """
         Create a CUDA tensor initialized from a NumPy array, using:
         - cuda_malloc from maxpool2d_ctypes
@@ -63,7 +64,6 @@ class _CudaTestMixin:
         if dev_ptr == 0:
             raise RuntimeError("cuda_malloc returned nullptr")
 
-        # CFUNCTYPE wrapper: mc.cuda_memcpy_h2d(lib, dst_dev, src_host, nbytes)
         mc.cuda_memcpy_h2d(lib, int(dev_ptr), arr, int(nbytes))
 
         return Tensor._from_devptr(
@@ -98,7 +98,7 @@ class _CudaTestMixin:
         self._cuda_set_device0(lib)
 
         nbytes = int(out.nbytes)
-        # CFUNCTYPE wrapper: mc.cuda_memcpy_d2h(lib, dst_host, src_dev, nbytes)
+
         mc.cuda_memcpy_d2h(lib, out, int(src_dev), int(nbytes))
         return out
 
@@ -146,14 +146,12 @@ class TestTensorRandCuda(TestCase, _CudaTestMixin):
         self.assertTrue(np.all(got >= 0.0))
         self.assertTrue(np.all(got < 1.0 + 1e-7))
 
-        # should not be constant
         self.assertGreater(float(np.std(got)), 0.0)
 
     def test_rand_cuda_allocates_device_memory(self):
         dev = Device("cuda:0")
         t = Tensor.rand((8, 9), device=dev, requires_grad=False)
 
-        # Contract: CUDA rand should result in an allocated devptr
         self.assertNotEqual(int(t.data), 0)
 
         got = self._cuda_to_numpy(t)
@@ -190,7 +188,6 @@ class TestTensorRandCuda(TestCase, _CudaTestMixin):
         """
         dev = Device("cuda:0")
 
-        # allocate a CUDA tensor and fill bytes with a known pattern
         t0 = Tensor((32,), dev, requires_grad=False, dtype=np.float32)
         if int(t0.data) == 0:
             t0._ensure_cuda_alloc(dtype=np.dtype(np.float32))
@@ -198,7 +195,6 @@ class TestTensorRandCuda(TestCase, _CudaTestMixin):
         self._fill_cuda_bytes(t0, 0x7F)
         before = self._cuda_to_numpy(t0).copy()
 
-        # call rand (should not affect t0)
         _ = Tensor.rand((32,), device=dev, requires_grad=False)
 
         after = self._cuda_to_numpy(t0)

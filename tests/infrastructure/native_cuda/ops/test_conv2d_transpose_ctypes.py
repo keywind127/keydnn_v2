@@ -113,7 +113,6 @@ def _conv2d_transpose_backward_ref(
     grad_x = np.zeros_like(x)
     grad_w = np.zeros_like(w)
 
-    # grad_x
     for n in range(N):
         for ci in range(C_in):
             for hi in range(H_in):
@@ -133,7 +132,6 @@ def _conv2d_transpose_backward_ref(
                                 acc += grad_out[n, co, oh, ow] * w[ci, co, kh, kw]
                     grad_x[n, ci, hi, wi] = acc
 
-    # grad_w
     for ci in range(C_in):
         for co in range(C_out):
             for kh in range(K_h):
@@ -188,14 +186,12 @@ class TestConv2dTransposeCtypesCuda(_CudaTestCase):
         lib = self.lib
         dtype = np.dtype(dtype)
 
-        # Small deterministic-ish case
         N, C_in, C_out = 2, 3, 4
         H_in, W_in = 4, 5
         K_h, K_w = 3, 2
         s_h, s_w = 2, 1
         pad_h, pad_w = 1, 0
 
-        # Output size chosen by caller (matches your kernel contract)
         H_out = (H_in - 1) * s_h - 2 * pad_h + K_h
         W_out = (W_in - 1) * s_w - 2 * pad_w + K_w
 
@@ -277,7 +273,6 @@ class TestConv2dTransposeCtypesCuda(_CudaTestCase):
         lib = self.lib
         dtype = np.dtype(dtype)
 
-        # Keep sizes small; backward includes a grad_w kernel that sums over N*H_in*W_in
         N, C_in, C_out = 2, 2, 3
         H_in, W_in = 4, 4
         K_h, K_w = 3, 3
@@ -337,7 +332,6 @@ class TestConv2dTransposeCtypesCuda(_CudaTestCase):
             self._copy_out(grad_x_dev, grad_x)
             self._copy_out(grad_w_dev, grad_w)
 
-            # Gather-style kernels are deterministic; tolerances can be tight
             if dtype == np.float32:
                 np.testing.assert_allclose(grad_x, grad_x_ref, rtol=1e-5, atol=1e-5)
                 np.testing.assert_allclose(grad_w, grad_w_ref, rtol=1e-5, atol=1e-5)
@@ -411,7 +405,6 @@ class TestConv2dTransposeCtypesCuda(_CudaTestCase):
         lib = self.lib
         dtype = np.float32
 
-        # Force H_out = 0 by choosing H_out/W_out directly (kernel contract)
         N, C_in, C_out = 1, 1, 1
         H_in, W_in = 2, 2
         K_h, K_w = 3, 3
@@ -419,7 +412,6 @@ class TestConv2dTransposeCtypesCuda(_CudaTestCase):
         pad_h, pad_w = 0, 0
         H_out, W_out = 0, 0
 
-        # Allocate minimal buffers (kernel should early-exit by guard)
         x_dev = int(cuda_malloc(lib, 1))
         w_dev = int(cuda_malloc(lib, 1))
         y_dev = int(cuda_malloc(lib, 1))

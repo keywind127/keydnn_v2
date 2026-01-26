@@ -26,7 +26,6 @@ class TestTensorSigmoid(unittest.TestCase):
         x = Tensor(shape=x_np.shape, device=device, requires_grad=True, ctx=None)
         x.copy_from_numpy(x_np)
 
-        # loss = sum(sigmoid(x))
         y = x.sigmoid()
         loss = y.sum()
         loss.backward()
@@ -50,5 +49,4 @@ class TestTensorSigmoid(unittest.TestCase):
                 x_neg[i, j] -= eps
                 grad_fd[i, j] = (f(x_pos) - f(x_neg)) / (2.0 * eps)
 
-        # finite-diff is noisy in float32; keep tolerances reasonable
         np.testing.assert_allclose(grad, grad_fd, rtol=2e-2, atol=2e-2)

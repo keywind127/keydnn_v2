@@ -34,7 +34,7 @@ class TestWeightInitializerRegistry(unittest.TestCase):
         self.assertIn("Available:", msg)
 
     def test_register_initializer_no_overwrite_by_default(self):
-        # Register a throwaway initializer name unique to this test.
+
         name = "__unit_test_initializer__"
 
         @WeightInitializer.register_initializer(name, overwrite=True)
@@ -43,7 +43,7 @@ class TestWeightInitializerRegistry(unittest.TestCase):
 
         with self.assertRaises(ValueError):
 
-            @WeightInitializer.register_initializer(name)  # overwrite=False default
+            @WeightInitializer.register_initializer(name)
             def init_b(tensor):
                 return tensor
 
@@ -58,7 +58,6 @@ class TestWeightInitializerRegistry(unittest.TestCase):
         def init_b(tensor):
             return tensor
 
-        # Ensure the registry now points to init_b
         self.assertIs(WeightInitializer.get(name), init_b)
 
     def test_dispatch_calls_initializer(self):

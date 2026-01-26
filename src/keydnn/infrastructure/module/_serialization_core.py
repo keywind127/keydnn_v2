@@ -26,7 +26,7 @@ Each node in the tree has the form:
   "children": { "0": <node>, "1": <node>, ... }
 }
 
-Expected module hooks (optional)
+Expected module hooks
 -------------------------------
 - `get_config(self) -> dict`: returns JSON-serializable constructor/state config.
 - `from_config(cls, cfg: dict) -> Module`: classmethod/constructor alternative.

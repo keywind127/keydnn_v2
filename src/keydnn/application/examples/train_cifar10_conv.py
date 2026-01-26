@@ -28,6 +28,9 @@ import numpy as np
 
 from ..dto.train_cifar10_config import TrainCifar10Config
 
+from ...infrastructure.random import _seed as random_seed
+from ...infrastructure.random import _determinism as determinism
+
 
 def _cuda_available() -> bool:
     """
@@ -293,7 +296,7 @@ def _build_cnn(device):
     """
     from ...infrastructure.models._sequential import Sequential
 
-    # Layers (names may vary in your repo; adjust if needed)
+    # Layers
     from ...infrastructure.convolution._conv2d_module import Conv2d  # type: ignore
     from ...infrastructure.pooling._pooling_module import MaxPool2d  # type: ignore
     from ...infrastructure.flatten._flatten_module import Flatten  # type: ignore
@@ -368,6 +371,9 @@ def run_train_cifar10_conv(cfg: TrainCifar10Config) -> int:
         raise RuntimeError(
             f"Requested device={cfg.device}, but CUDA wrappers are not available."
         )
+
+    random_seed.seed(int(cfg.seed))
+    determinism.set_deterministic(True, cpu_threads=4)
 
     device = _device_from_string(cfg.device)
 

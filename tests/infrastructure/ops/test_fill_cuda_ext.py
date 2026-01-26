@@ -1,4 +1,3 @@
-# tests/infrastructure/ops/test_fill_cuda_ext.py
 """
 Unit tests for CUDA Tensor-boundary fill wrapper (fill_cuda_ext.py).
 
@@ -44,20 +43,20 @@ from src.keydnn.infrastructure.ops.fill_cuda_ext import (
 def _get_cuda_device(index: int = 0) -> Device:
     """Best-effort helper to obtain a CUDA Device instance across possible Device APIs."""
     if hasattr(Device, "cuda") and callable(getattr(Device, "cuda")):
-        return Device.cuda(index)  # type: ignore[attr-defined]
+        return Device.cuda(index)
 
     try:
-        return Device("cuda", index)  # type: ignore[call-arg]
+        return Device("cuda", index)
     except Exception:
         pass
 
     try:
-        return Device(f"cuda:{index}")  # type: ignore[call-arg]
+        return Device(f"cuda:{index}")
     except Exception:
         pass
 
     try:
-        return Device(kind="cuda", index=index)  # type: ignore[call-arg]
+        return Device(kind="cuda", index=index)
     except Exception as e:
         raise RuntimeError(
             "Unable to construct a CUDA Device; update _get_cuda_device() for this repo."
@@ -121,7 +120,7 @@ def _d2h(lib: ctypes.CDLL, src_dev: int, dst: np.ndarray) -> None:
 class TestFillCudaExt(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        # Try to load CUDA DLL; skip all tests if unavailable.
+
         try:
             cls.lib = _load_cuda_lib()
         except Exception as e:
@@ -133,13 +132,11 @@ class TestFillCudaExt(unittest.TestCase):
         except Exception as e:
             raise unittest.SkipTest(f"Failed to set CUDA device: {e}") from e
 
-        # Ensure memcpy symbols exist; if not, skip (cannot validate numerics).
         try:
             _bind_memcpy_symbols(cls.lib)
         except Exception as e:
             raise unittest.SkipTest(f"CUDA memcpy symbols unavailable: {e}") from e
 
-        # Construct a CUDA Device object for Tensor wrapping.
         try:
             cls.cuda_device = _get_cuda_device(cls.device_index)
         except Exception as e:
@@ -190,10 +187,6 @@ class TestFillCudaExt(unittest.TestCase):
         _d2h(self.lib, int(t.data), host)
         return host
 
-    # ----------------------------
-    # In-place ops
-    # ----------------------------
-
     def test_fill_inplace_f32(self) -> None:
         x = np.empty((32,), dtype=np.float32)
         t = self._make_cuda_tensor_from_host(x)
@@ -225,7 +218,7 @@ class TestFillCudaExt(unittest.TestCase):
         np.testing.assert_allclose(out, np.zeros_like(x), rtol=0.0, atol=0.0)
 
     def test_ones_inplace_f64(self) -> None:
-        # This also implicitly covers the ones_cuda fallback path if fill kernel is unstable.
+
         x = np.empty((9,), dtype=np.float64)
         t = self._make_cuda_tensor_from_host(x)
 
@@ -233,10 +226,6 @@ class TestFillCudaExt(unittest.TestCase):
 
         out = self._read_cuda_tensor_to_host(t)
         np.testing.assert_allclose(out, np.ones_like(x), rtol=0.0, atol=0.0)
-
-    # ----------------------------
-    # Allocate + initialize helpers
-    # ----------------------------
 
     def test_zeros_like_allocates_and_zeroes(self) -> None:
         rng = np.random.default_rng(1)
@@ -279,24 +268,15 @@ class TestFillCudaExt(unittest.TestCase):
         ref = np.full_like(x, val, dtype=np.float64)
         np.testing.assert_allclose(y, ref, rtol=0.0, atol=0.0)
 
-    # ----------------------------
-    # Edge cases
-    # ----------------------------
-
     def test_fill_empty_tensor_noop(self) -> None:
-        # numel == 0 should be a no-op; main check is "does not crash".
-        # We don't memcpy back because size is 0.
+
         t = self._make_empty_cuda_tensor((0,), np.float32)
         fill_(t, 7.0, device=self.device_index, sync=True)
         self.assertEqual(tuple(t.shape), (0,))
         self.assertEqual(np.dtype(t.dtype), np.float32)
 
-    # ----------------------------
-    # Error handling
-    # ----------------------------
-
     def test_fill_raises_on_non_float_dtype(self) -> None:
-        # Construct int32 CUDA tensor and assert fill_ rejects it.
+
         x = np.empty((8,), dtype=np.int32)
         t = self._make_cuda_tensor_from_host(x)
 
@@ -307,11 +287,11 @@ class TestFillCudaExt(unittest.TestCase):
         x_np = np.ones((3,), dtype=np.float32)
 
         if hasattr(Tensor, "from_numpy") and callable(getattr(Tensor, "from_numpy")):
-            x_cpu = Tensor.from_numpy(x_np, device=Device("cpu"))  # type: ignore[call-arg]
+            x_cpu = Tensor.from_numpy(x_np, device=Device("cpu"))
         else:
             try:
-                x_cpu = Tensor(x_np.shape, device=Device("cpu"), requires_grad=False)  # type: ignore[call-arg]
-                x_cpu._data = x_np  # type: ignore[attr-defined]
+                x_cpu = Tensor(x_np.shape, device=Device("cpu"), requires_grad=False)
+                x_cpu._data = x_np
             except Exception as e:
                 raise unittest.SkipTest(
                     f"Unable to construct CPU tensors in this repo; update test_fill_raises_on_cpu_tensor: {e}"

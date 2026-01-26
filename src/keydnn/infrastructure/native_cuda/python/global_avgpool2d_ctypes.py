@@ -10,7 +10,7 @@ Assumptions
     - keydnn_cuda_set_device
     - keydnn_cuda_malloc / keydnn_cuda_free
     - keydnn_cuda_memcpy_h2d / keydnn_cuda_memcpy_d2h
-    - keydnn_cuda_memset (optional)
+    - keydnn_cuda_memset
     - keydnn_cuda_synchronize
     - keydnn_cuda_global_avgpool2d_forward_f32 / _f64
     - keydnn_cuda_global_avgpool2d_backward_f32 / _f64

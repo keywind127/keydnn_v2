@@ -14,7 +14,7 @@ from src.keydnn.domain.device._device import Device
 def _cuda_available() -> bool:
     try:
         from src.keydnn.infrastructure.native_cuda.python.maxpool2d_ctypes import (
-            load_keydnn_cuda_native,  # type: ignore
+            load_keydnn_cuda_native,
         )
 
         _ = load_keydnn_cuda_native()
@@ -46,11 +46,6 @@ def _accuracy_from_pred_np(y_true_np: np.ndarray, pred_np: np.ndarray) -> float:
     return float((y_hat == y_true_np).mean())
 
 
-# ======================================================================================
-# Fast contract tests (always run)
-# ======================================================================================
-
-
 class TestModelFitMetricStringArgsContract(unittest.TestCase):
     def test_fit_resolves_metrics_string_acc_and_passes_callable_to_train_on_batch(
         self,
@@ -68,8 +63,7 @@ class TestModelFitMetricStringArgsContract(unittest.TestCase):
 
         m = Model()
 
-        # NEW: provide a minimal forward so build() can run
-        m.forward = lambda x: x  # type: ignore[method-assign]
+        m.forward = lambda x: x
 
         dummy_x = _tensor_from_numpy(
             np.array([[0.0]], dtype=np.float32),
@@ -82,7 +76,7 @@ class TestModelFitMetricStringArgsContract(unittest.TestCase):
         def fake_train_on_batch(
             xb, yb, *, loss, optimizer, metrics=None, metric_names=None, **kwargs
         ):
-            # Record what fit passes down
+
             calls.append(
                 {
                     "metrics": metrics,
@@ -92,31 +86,27 @@ class TestModelFitMetricStringArgsContract(unittest.TestCase):
                 }
             )
 
-            # Ensure metrics got resolved: should be list/seq of callables
             self.assertIsNotNone(metrics)
             self.assertTrue(isinstance(metrics, (list, tuple)))
             self.assertEqual(len(metrics), 1)
             self.assertTrue(callable(metrics[0]))
 
-            # Names should exist and include "acc" (or whatever the resolver uses)
             self.assertIsNotNone(metric_names)
             self.assertTrue(isinstance(metric_names, (list, tuple)))
             self.assertEqual(len(metric_names), 1)
             self.assertEqual(str(metric_names[0]).lower(), "acc")
 
-            # Return logs with the resolved metric key name expected by fit aggregation
             return {"loss": 1.0, str(metric_names[0]): 0.5}
 
-        # Monkeypatch instance method
-        m.train_on_batch = fake_train_on_batch  # type: ignore[assignment]
+        m.train_on_batch = fake_train_on_batch
 
         batches = [("xb1", "yb1"), ("xb2", "yb2")]
 
         hist = m.fit(
             batches,
             None,
-            loss=lambda yp, yt: 1.0,  # unused by stub
-            optimizer=object(),  # unused by stub
+            loss=lambda yp, yt: 1.0,
+            optimizer=object(),
             metrics=["acc"],
             epochs=3,
             verbose=0,
@@ -132,7 +122,6 @@ class TestModelFitMetricStringArgsContract(unittest.TestCase):
         self.assertEqual(hist.history["loss"], [1.0, 1.0, 1.0])
         self.assertEqual(hist.history["acc"], [0.5, 0.5, 0.5])
 
-        # sanity: train_on_batch called epochs * num_batches
         self.assertEqual(len(calls), 3 * len(batches))
 
     def test_fit_rejects_unknown_metric_string(self):
@@ -146,15 +135,14 @@ class TestModelFitMetricStringArgsContract(unittest.TestCase):
 
         m = Model()
 
-        # NEW: provide a minimal forward so build() can run
-        m.forward = lambda x: x  # type: ignore[method-assign]
+        m.forward = lambda x: x
 
         dummy_x = _tensor_from_numpy(
             np.array([[0.0]], dtype=np.float32),
             device=Device("cpu"),
         )
         m.build(dummy_x[:1])
-        
+
         batches = [("xb", "yb")]
 
         with self.assertRaises(ValueError):
@@ -179,8 +167,7 @@ class TestModelFitMetricStringArgsContract(unittest.TestCase):
 
         m = Model()
 
-        # NEW: provide a minimal forward so build() can run
-        m.forward = lambda x: x  # type: ignore[method-assign]
+        m.forward = lambda x: x
 
         dummy_x = _tensor_from_numpy(
             np.array([[0.0]], dtype=np.float32),
@@ -201,11 +188,6 @@ class TestModelFitMetricStringArgsContract(unittest.TestCase):
                 epochs=1,
                 verbose=0,
             )
-
-
-# ======================================================================================
-# Slow integration tests (opt-in via KEYDNN_RUN_SLOW=1)
-# ======================================================================================
 
 
 class _FitMetricStringAccIntegrationMixin:
@@ -239,15 +221,13 @@ class _FitMetricStringAccIntegrationMixin:
     def _xor_tensors(self, device):
         x_np, y_np = _xor_data_numpy()
 
-        # replicate to make batching meaningful
-        repeats = 256  # 4*256 = 1024
+        repeats = 256
         x_big = np.repeat(x_np, repeats=repeats, axis=0)
         y_big = np.repeat(y_np, repeats=repeats, axis=0)
 
         x = _tensor_from_numpy(x_big, device=device, requires_grad=False)
         y = _tensor_from_numpy(y_big, device=device, requires_grad=False)
 
-        # guardrails against silent CPU fallback
         if hasattr(x, "device"):
             self.assertEqual(str(x.device), self.DEVICE_STR)
         if hasattr(y, "device"):
@@ -266,11 +246,6 @@ class _FitMetricStringAccIntegrationMixin:
 
         model = self._build_model(device)
 
-        # NOTE:
-        # This assumes you already implemented:
-        # - loss string resolution: "mse"
-        # - optimizer string resolution: "sgd"
-        # - metrics string resolution: "acc"
         hist = model.fit(
             x,
             y,
@@ -289,7 +264,6 @@ class _FitMetricStringAccIntegrationMixin:
         self.assertIn("acc", hist.history)
         self.assertEqual(len(hist.history["acc"]), len(hist.epoch))
 
-        # Evaluate on canonical XOR points
         x_eval = _tensor_from_numpy(x_base, device=device, requires_grad=False)
         pred = model(x_eval)
         pred_np = np.asarray(pred.to_numpy(), dtype=np.float32)

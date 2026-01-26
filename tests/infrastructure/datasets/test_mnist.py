@@ -23,7 +23,6 @@ def _idx_images_payload(n: int, rows: int = 28, cols: int = 28) -> bytes:
     header = struct.pack(">IIII", 2051, n, rows, cols)
     count = n * rows * cols
 
-    # Pure-Python deterministic pixels (no NumPy)
     pixels = bytes((i % 256 for i in range(count)))
 
     return header + pixels
@@ -43,7 +42,7 @@ def _write_gzip_bytes(dst: Path, raw_payload: bytes) -> None:
     if dst.exists():
         dst.unlink()
 
-    compressed = gzip.compress(raw_payload)  # returns full gzip stream bytes
+    compressed = gzip.compress(raw_payload)
     with dst.open("wb") as f:
         f.write(compressed)
 

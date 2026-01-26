@@ -40,12 +40,9 @@ def _maybe_free_cuda_tensor(t: Tensor, lib, cuda_free_fn) -> None:
         return
 
     if dev_ptr != 0:
-        # try:
-        #     cuda_free_fn(lib, dev_ptr)
-        # except Exception:
-        #     # Don't fail tests due to cleanup issues.
-        #     pass
-        ... # no need to free as cuda allocation and deallocation are managed by CudaStorage
+
+        ...
+
 
 class _CudaTestBase(unittest.TestCase):
     """
@@ -59,7 +56,7 @@ class _CudaTestBase(unittest.TestCase):
         cls._skip_reason = ""
 
         try:
-            # We use maxpool2d_ctypes as the "CUDA utils" source (malloc/free/memcpy).
+
             from src.keydnn.infrastructure.native_cuda.python import (
                 maxpool2d_ctypes as m,
             )
@@ -87,15 +84,12 @@ class _CudaTestBase(unittest.TestCase):
         if not arr.flags["C_CONTIGUOUS"]:
             arr = np.ascontiguousarray(arr)
 
-        # Allocate and copy host -> device
         dev_ptr = m.cuda_malloc(lib, int(arr.nbytes))
 
         try:
-            # Legacy signature: (lib, dst_dev, src_host, nbytes)
-            # Your wrappers should accept this for back-compat.
+
             m.cudaMemcpyHtoD(lib, int(dev_ptr), arr, int(arr.nbytes))
 
-            # Construct Tensor from devptr (expects your updated Tensor supports dtype)
             t = Tensor._from_devptr(
                 dev_ptr=int(dev_ptr),
                 shape=arr.shape,
@@ -107,7 +101,7 @@ class _CudaTestBase(unittest.TestCase):
             return t
 
         except Exception:
-            # Prevent leak if construction/upload fails
+
             try:
                 m.cuda_free(lib, int(dev_ptr))
             except Exception:
@@ -127,7 +121,6 @@ class TestPool2dModuleCuda(_CudaTestBase):
             pool = MaxPool2d(kernel_size=2, stride=2, padding=0)
             y = pool.forward(x)
 
-            # loss = sum(y) => grad_out = ones
             loss = y.sum()
             loss.backward()
 

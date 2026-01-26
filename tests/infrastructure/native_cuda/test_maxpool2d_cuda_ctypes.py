@@ -24,9 +24,7 @@ from typing import Tuple
 import numpy as np
 
 
-# Update import path to match your repo:
-# keydnn/infrastructure/native_cuda/python/maxpool2d_cuda_ctypes.py
-from src.keydnn.infrastructure.native_cuda.python.maxpool2d_ctypes import (  # type: ignore
+from src.keydnn.infrastructure.native_cuda.python.maxpool2d_ctypes import (
     load_keydnn_cuda_native,
     cuda_set_device,
     cuda_malloc,
@@ -127,7 +125,7 @@ def _dll_path_from_env() -> Path | None:
 class TestMaxPool2DCudaCtypes(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        # Load DLL (skip all tests if missing / unloadable)
+
         dll_path = _dll_path_from_env()
         try:
             cls.lib = (
@@ -144,7 +142,6 @@ class TestMaxPool2DCudaCtypes(unittest.TestCase):
                 f"Failed to load CUDA DLL (deps/arch/CUDA runtime). Details: {e}"
             )
 
-        # Ensure CUDA device is available (skip all tests if not)
         try:
             cuda_set_device(cls.lib, 0)
         except RuntimeError as e:
@@ -282,7 +279,7 @@ class TestMaxPool2DCudaCtypes(unittest.TestCase):
         grad_x_dev = cuda_malloc(self.lib, grad_x_host.nbytes)
 
         try:
-            # must be zero-initialized (kernel uses atomic adds)
+
             cuda_memset(self.lib, grad_x_dev, value=0, nbytes=grad_x_host.nbytes)
 
             maxpool2d_backward_cuda(

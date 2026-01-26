@@ -28,21 +28,18 @@ class TestModelSaveLoadFlattenJSON(unittest.TestCase):
         """
         np.random.seed(0)
 
-        # Model: (N, 2, 3) -> Flatten -> (N, 6) -> Linear -> (N, 4)
         model = Sequential(
             Flatten(),
             Linear(in_features=6, out_features=4, bias=True),
         )
 
-        # Deterministic weights for Linear
-        lin: Linear = model[1]  # type: ignore[assignment]
+        lin: Linear = model[1]
         W = np.arange(4 * 6, dtype=np.float32).reshape(4, 6) / 10.0
         b = np.array([0.1, -0.2, 0.3, -0.4], dtype=np.float32)
         lin.weight.copy_from_numpy(W)
         self.assertIsNotNone(lin.bias)
-        lin.bias.copy_from_numpy(b)  # type: ignore[union-attr]
+        lin.bias.copy_from_numpy(b)
 
-        # Input tensor (on same device as linear)
         x_np = np.arange(2 * 2 * 3, dtype=np.float32).reshape(2, 2, 3) / 5.0
         x = Tensor(shape=x_np.shape, device=lin.device, requires_grad=False)
         x.copy_from_numpy(x_np)
@@ -61,16 +58,15 @@ class TestModelSaveLoadFlattenJSON(unittest.TestCase):
 
             loaded = Sequential.load_json(ckpt_path)
 
-        # Ensure Flatten is present and ordering preserved
         self.assertEqual(len(loaded), 2)
         self.assertIsInstance(loaded[0], Flatten)
         self.assertIsInstance(loaded[1], Linear)
 
-        loaded_lin: Linear = loaded[1]  # type: ignore[assignment]
+        loaded_lin: Linear = loaded[1]
         np.testing.assert_allclose(loaded_lin.weight.to_numpy(), W, rtol=0.0, atol=0.0)
         self.assertIsNotNone(loaded_lin.bias)
         np.testing.assert_allclose(
-            loaded_lin.bias.to_numpy(),  # type: ignore[union-attr]
+            loaded_lin.bias.to_numpy(),
             b,
             rtol=0.0,
             atol=0.0,
@@ -98,7 +94,6 @@ class TestModelSaveLoadFlattenJSON(unittest.TestCase):
             payload = json.loads(ckpt_path.read_text(encoding="utf-8"))
             state = payload["state"]
 
-            # Remove one parameter entry (prefer a Linear key if present)
             lin_keys = [
                 k for k in state.keys() if k.endswith(".weight") or k.endswith(".bias")
             ]

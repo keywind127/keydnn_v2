@@ -31,12 +31,6 @@
 // then if b != null:
 //   y[n, co, :, :] += b[co]
 //
-// Notes:
-// - Assumes `y` is zero-initialized by the caller if you want pure accumulation semantics.
-//   (This mirrors common implementations where the kernel "writes into" y by adding contributions.)
-// - `pad_h/pad_w` correspond to the transpose-conv padding (i.e., output cropping offset).
-// - Output_padding is handled by the caller via H_out/W_out choice; this kernel just bounds-checks.
-//
 // Weight layout for transpose conv is typically (C_in, C_out, K_h, K_w), i.e. IOHW.
 
 KEYDNN_EXPORT void keydnn_conv2d_transpose_forward_f32(

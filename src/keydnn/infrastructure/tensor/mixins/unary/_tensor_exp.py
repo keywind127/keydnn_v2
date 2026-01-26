@@ -68,7 +68,7 @@ def tensor_exp_gpu(self: ITensor) -> "ITensor":
     )
 
     # Preserve autograd participation
-    out.requires_grad = self.requires_grad  # if your Tensor allows attribute set
+    out.requires_grad = self.requires_grad  # if Tensor allows attribute set
 
     if self.requires_grad:
         ctx = Context(

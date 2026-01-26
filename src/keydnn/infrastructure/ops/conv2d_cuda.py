@@ -290,7 +290,7 @@ def conv2d_forward_cuda(*args: Any, **kwargs: Any) -> np.ndarray:
     stride = kwargs.pop("stride", 1)
     padding = kwargs.pop("padding", 0)
 
-    dtype = kwargs.pop("dtype", None)  # optional: infer from x if missing
+    dtype = kwargs.pop("dtype", None)  # infer from x if missing
     sync = kwargs.pop("sync", True)
 
     device_index = kwargs.pop("device_index", None)
@@ -354,7 +354,7 @@ def conv2d_forward_cuda(*args: Any, **kwargs: Any) -> np.ndarray:
     H_pad = H + 2 * p_h
     W_pad = W + 2 * p_w
 
-    # Set device (optional)
+    # Set device
     if device_index is not None:
         cuda_set_device(lib, int(device_index))
 
@@ -590,7 +590,7 @@ def conv2d_backward_cuda(
     H_pad = H + 2 * p_h
     W_pad = W + 2 * p_w
 
-    # Bias grad (CPU path) matches your CPU kernel semantics
+    # Bias grad (CPU path) matches CPU kernel semantics
     grad_b = None
     if b_arr is not None:
         grad_b = grad_out.sum(axis=(0, 2, 3)).astype(dtype, copy=False)
@@ -599,7 +599,7 @@ def conv2d_backward_cuda(
     grad_x = np.empty_like(x)
     grad_w = np.zeros_like(w)
 
-    # Set device (optional)
+    # Set device
     if device_index is not None:
         cuda_set_device(lib, int(device_index))
 
@@ -1061,7 +1061,7 @@ def conv2d_backward_cuda_devptr(*args: Any, **kwargs: Any) -> None:
             sync=False,
         )
 
-        # Optional: compute grad_b on GPU (sum over N, H_out, W_out)
+        # compute grad_b on GPU (sum over N, H_out, W_out)
         # Reduce (N, C_out, H_out, W_out) -> (1, C_out, 1, 1).
         if grad_b_dev is not None:
             sum_to_shape_cuda(
@@ -1113,7 +1113,7 @@ class _Conv2dCudaAliases:
     conv2d_backward_devptr = conv2d_backward_cuda_devptr
 
 
-# Aliases (similar to your matmul wrapper)
+# Aliases
 conv2d_cuda = conv2d_forward_cuda
 conv2d_forward = conv2d_forward_cuda
 conv2d_backward = conv2d_backward_cuda

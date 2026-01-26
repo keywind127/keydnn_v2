@@ -11,14 +11,11 @@ from src.keydnn.domain.device._device import Device
 class _CudaTensorFactoryMixin:
     """
     Test helper mixin for creating CUDA tensors from NumPy arrays.
-
-    This uses Tensor._ensure_cuda_alloc + ops-layer memcpy_htod, so it exercises
-    the same pathways as your CUDA-enabled runtime.
     """
 
     @classmethod
     def _try_get_cuda_lib(cls):
-        # Your Tensor implementation provides a lazy singleton loader.
+
         try:
             lib = Tensor._get_cuda_lib()
             return lib
@@ -37,13 +34,11 @@ class _CudaTensorFactoryMixin:
         dev = Device(device_str)
         t = Tensor(arr.shape, dev, requires_grad=requires_grad, dtype=np.float32)
 
-        # Ensure device buffer exists and is sized correctly
         t._ensure_cuda_alloc(dtype=np.float32)
         self.assertNotEqual(
             int(t.data), 0, "CUDA tensor devptr should be non-zero after alloc"
         )
 
-        # Copy host -> device using ops-layer wrapper
         from src.keydnn.infrastructure.ops.memcpy_cuda import memcpy_htod
 
         lib = Tensor._get_cuda_lib()
@@ -77,9 +72,9 @@ class TestTensorTransposeCudaForwardBackward(TestCase, _CudaTensorFactoryMixin):
         self.assertTrue(np.allclose(y.to_numpy(), expected, rtol=1e-5, atol=1e-6))
 
     def test_transpose_cuda_rejects_non_2d(self):
-        # Shape check happens before CUDA kernel dispatch; should raise ValueError.
+
         x = Tensor((2, 3, 4), Device("cuda:0"), requires_grad=False, dtype=np.float32)
-        # (no need to allocate devptr; should fail on shape first)
+
         with self.assertRaises(ValueError):
             _ = x.T
 
@@ -92,8 +87,8 @@ class TestTensorTransposeCudaForwardBackward(TestCase, _CudaTensorFactoryMixin):
         x = self._cuda_tensor_from_numpy(x_np, requires_grad=True)
 
         y = x.T
-        loss = y.sum()  # CUDA sum(axis=None) path
-        loss.backward()  # CUDA backward path
+        loss = y.sum()
+        loss.backward()
 
         self.assertIsNotNone(x.grad)
         self.assertTrue(x.grad.device.is_cuda(), "x.grad should be CUDA tensor")
@@ -103,11 +98,8 @@ class TestTensorTransposeCudaForwardBackward(TestCase, _CudaTensorFactoryMixin):
         self.assertTrue(np.array_equal(x.grad.to_numpy(), expected))
 
     def test_transpose_cuda_requires_allocated_input_devptr(self):
-        """
-        Your transpose CUDA path explicitly raises if data==0.
-        """
         x = Tensor((2, 3), Device("cuda:0"), requires_grad=False, dtype=np.float32)
-        # x.data is 0 by default for CUDA tensors from __init__ in your code
+
         self.assertEqual(int(x.data), 0)
 
         with self.assertRaises(RuntimeError):

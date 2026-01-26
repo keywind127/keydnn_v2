@@ -21,7 +21,7 @@ MaxPool2D forward/backward via `ctypes`. It is backend-specific and assumes:
 Platform notes
 --------------
 This wrapper currently targets Windows and loads the CUDA DLL from the build
-output path you provided.
+output path provided
 
 Design notes
 ------------

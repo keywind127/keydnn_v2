@@ -13,7 +13,7 @@ RUN_SLOW = os.environ.get("KEYDNN_RUN_SLOW", "0") == "1"
 def _cuda_available() -> bool:
     try:
         from src.keydnn.infrastructure.native_cuda.python.maxpool2d_ctypes import (
-            load_keydnn_cuda_native,  # type: ignore
+            load_keydnn_cuda_native,
         )
 
         _ = load_keydnn_cuda_native()
@@ -58,11 +58,6 @@ def _accuracy_from_pred_np(y_true_np: np.ndarray, pred_np: np.ndarray) -> float:
     return float((y_hat == y_true_np).mean())
 
 
-# ======================================================================================
-# Slow integration tests (opt-in) for string args
-# ======================================================================================
-
-
 class _FitStringArgsMixin:
     DEVICE_STR: str = "cpu"
 
@@ -96,7 +91,6 @@ class _FitStringArgsMixin:
         x = _tensor_from_numpy(x_np, device=device)
         y = _tensor_from_numpy(y_np, device=device)
 
-        # Guardrails against silent CPU fallback
         if hasattr(x, "device"):
             self.assertEqual(str(x.device), self.DEVICE_STR)
         if hasattr(y, "device"):
@@ -114,7 +108,7 @@ class _FitStringArgsMixin:
         try:
             from src.keydnn.infrastructure.models._sequential import (
                 Sequential,
-            )  # noqa: F401
+            )
         except (ModuleNotFoundError, ImportError) as e:
             self.skipTest(f"Missing imports: {e}")
 
@@ -125,12 +119,12 @@ class _FitStringArgsMixin:
 
         def acc_metric(y_true, y_pred):
             yp = np.asarray(y_pred.to_numpy(), dtype=np.float32)
-            # metric should use provided y_true (but XOR fixed anyway)
+
             return float(_accuracy_from_pred_np(y_np, yp))
 
         epochs = 2000
         history = model.fit(
-            [(x, y)],  # iterable-of-batches path
+            [(x, y)],
             None,
             loss="mse",
             optimizer="sgd",
@@ -165,7 +159,7 @@ class _FitStringArgsMixin:
         try:
             from src.keydnn.infrastructure.models._sequential import (
                 Sequential,
-            )  # noqa: F401
+            )
         except (ModuleNotFoundError, ImportError) as e:
             self.skipTest(f"Missing imports: {e}")
 
@@ -188,7 +182,7 @@ class _FitStringArgsMixin:
         try:
             from src.keydnn.infrastructure.models._sequential import (
                 Sequential,
-            )  # noqa: F401
+            )
         except (ModuleNotFoundError, ImportError) as e:
             self.skipTest(f"Missing imports: {e}")
 
@@ -217,11 +211,6 @@ class TestModelFitStringArgsCPU(_FitStringArgsMixin, unittest.TestCase):
 @unittest.skipUnless(_cuda_available(), "CUDA native DLL/wrappers not available")
 class TestModelFitStringArgsCUDA(_FitStringArgsMixin, unittest.TestCase):
     DEVICE_STR = "cuda:0"
-
-
-# ======================================================================================
-# Fast contract tests (always run): ensure fit resolves strings without running real training
-# ======================================================================================
 
 
 class FakeScalar:
@@ -260,8 +249,7 @@ class TestModelFitStringArgsContract(unittest.TestCase):
 
         m = Model()
 
-        # NEW: provide a minimal forward so build() can run
-        m.forward = lambda x: x  # type: ignore[method-assign]
+        m.forward = lambda x: x
 
         dummy_x = _tensor_from_numpy(
             np.array([[0.0]], dtype=np.float32),
@@ -269,11 +257,8 @@ class TestModelFitStringArgsContract(unittest.TestCase):
         )
         m.build(dummy_x[:1])
 
-        # Provide parameters() so optimizer resolver can construct SGD(model.parameters(), ...)
-        # If Model already has parameters(), this override is harmless but not required.
-        m.parameters = lambda: []  # type: ignore[assignment]
+        m.parameters = lambda: []
 
-        # Monkeypatch train_on_batch so training is deterministic.
         train_calls = {"n": 0}
 
         def fake_train_on_batch(*args, **kwargs):
@@ -281,7 +266,7 @@ class TestModelFitStringArgsContract(unittest.TestCase):
             train_calls["n"] += 1
             return {"loss": 1.0, "acc": 0.5}
 
-        m.train_on_batch = fake_train_on_batch  # type: ignore[assignment]
+        m.train_on_batch = fake_train_on_batch
 
         batches = [("xb1", "yb1"), ("xb2", "yb2"), ("xb3", "yb3")]
 

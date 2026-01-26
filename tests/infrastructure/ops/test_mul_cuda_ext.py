@@ -1,4 +1,3 @@
-# tests/infrastructure/ops/test_mul_cuda_ext.py
 """
 Unit tests for CUDA Tensor-boundary mul ops wrapper (mul_cuda_ext.py).
 
@@ -39,20 +38,20 @@ from src.keydnn.infrastructure.ops.mul_cuda_ext import (
 def _get_cuda_device(index: int = 0) -> Device:
     """Best-effort helper to obtain a CUDA Device instance across possible Device APIs."""
     if hasattr(Device, "cuda") and callable(getattr(Device, "cuda")):
-        return Device.cuda(index)  # type: ignore[attr-defined]
+        return Device.cuda(index)
 
     try:
-        return Device("cuda", index)  # type: ignore[call-arg]
+        return Device("cuda", index)
     except Exception:
         pass
 
     try:
-        return Device(f"cuda:{index}")  # type: ignore[call-arg]
+        return Device(f"cuda:{index}")
     except Exception:
         pass
 
     try:
-        return Device(kind="cuda", index=index)  # type: ignore[call-arg]
+        return Device(kind="cuda", index=index)
     except Exception as e:
         raise RuntimeError(
             "Unable to construct a CUDA Device; update _get_cuda_device()."
@@ -143,13 +142,12 @@ class TestMulCudaExt(unittest.TestCase):
         """Allocate device memory, copy host -> device, and wrap as CUDA Tensor."""
         x_c = np.ascontiguousarray(x)
 
-        # NOTE: your cuda_malloc does not allow nbytes=0, so allocate 1 byte as a dummy
         nbytes = int(x_c.nbytes)
         alloc_bytes = max(1, nbytes)
 
         dev_ptr = int(cuda_malloc(self.lib, alloc_bytes))
         try:
-            # Only copy if there is actual payload
+
             if nbytes > 0:
                 _h2d(self.lib, dev_ptr, x_c)
         except Exception:
@@ -253,8 +251,6 @@ class TestMulCudaExt(unittest.TestCase):
     def test_mul_inplace_allows_aliasing_a_equals_b(self) -> None:
         """
         mul_inplace should allow a and b to alias (a *= a).
-
-        NOTE: This assumes your kernel reads then writes per element (safe).
         """
         rng = np.random.default_rng(22)
         a0 = rng.standard_normal((128,), dtype=np.float32)
@@ -329,14 +325,14 @@ class TestMulCudaExt(unittest.TestCase):
         b_np = np.ones((4,), dtype=np.float32)
 
         if hasattr(Tensor, "from_numpy") and callable(getattr(Tensor, "from_numpy")):
-            a_cpu = Tensor.from_numpy(a_np, device=Device("cpu"))  # type: ignore[call-arg]
-            b_cpu = Tensor.from_numpy(b_np, device=Device("cpu"))  # type: ignore[call-arg]
+            a_cpu = Tensor.from_numpy(a_np, device=Device("cpu"))
+            b_cpu = Tensor.from_numpy(b_np, device=Device("cpu"))
         else:
             try:
-                a_cpu = Tensor(a_np.shape, device=Device("cpu"), requires_grad=False)  # type: ignore[call-arg]
-                a_cpu._data = a_np  # type: ignore[attr-defined]
-                b_cpu = Tensor(b_np.shape, device=Device("cpu"), requires_grad=False)  # type: ignore[call-arg]
-                b_cpu._data = b_np  # type: ignore[attr-defined]
+                a_cpu = Tensor(a_np.shape, device=Device("cpu"), requires_grad=False)
+                a_cpu._data = a_np
+                b_cpu = Tensor(b_np.shape, device=Device("cpu"), requires_grad=False)
+                b_cpu._data = b_np
             except Exception as e:
                 raise unittest.SkipTest(
                     f"Unable to construct CPU tensors in this repo; update test_raises_on_cpu_tensor: {e}"
@@ -434,7 +430,7 @@ class TestMulCudaExt(unittest.TestCase):
 
         try:
             a_cpu = Tensor(a_np.shape, device=Device("cpu"), requires_grad=False)
-            a_cpu._data = a_np  # type: ignore[attr-defined]
+            a_cpu._data = a_np
         except Exception as e:
             raise unittest.SkipTest(
                 f"Unable to construct CPU tensor for scalar test: {e}"

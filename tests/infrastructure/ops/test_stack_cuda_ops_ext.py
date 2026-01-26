@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import ctypes
 import unittest
-from typing import Tuple, List
+from typing import Tuple
 
 import numpy as np
 
@@ -40,20 +40,20 @@ from src.keydnn.infrastructure.ops.stack_cuda_ext import (
 def _get_cuda_device(index: int = 0) -> Device:
     """Best-effort helper to obtain a CUDA Device instance across possible Device APIs."""
     if hasattr(Device, "cuda") and callable(getattr(Device, "cuda")):
-        return Device.cuda(index)  # type: ignore[attr-defined]
+        return Device.cuda(index)
 
     try:
-        return Device("cuda", index)  # type: ignore[call-arg]
+        return Device("cuda", index)
     except Exception:
         pass
 
     try:
-        return Device(f"cuda:{index}")  # type: ignore[call-arg]
+        return Device(f"cuda:{index}")
     except Exception:
         pass
 
     try:
-        return Device(kind="cuda", index=index)  # type: ignore[call-arg]
+        return Device(kind="cuda", index=index)
     except Exception as e:
         raise RuntimeError(
             "Unable to construct a CUDA Device; update _get_cuda_device() for this repo."
@@ -164,10 +164,6 @@ class TestStackCudaExt(unittest.TestCase):
         _d2h(self.lib, int(t.data), host)
         return host
 
-    # ------------------------------------------------------------------
-    # Forward tests
-    # ------------------------------------------------------------------
-
     def test_stack_forward_f32_matches_numpy_multiple_axes(self) -> None:
         rng = np.random.default_rng(0)
         in_shape = (2, 3, 4)
@@ -207,7 +203,7 @@ class TestStackCudaExt(unittest.TestCase):
 
     def test_stack_forward_raises_on_empty(self) -> None:
         with self.assertRaises(ValueError):
-            _ = stack_forward([], axis=0, device=self.device_index)  # type: ignore[arg-type]
+            _ = stack_forward([], axis=0, device=self.device_index)
 
     def test_stack_forward_raises_on_shape_mismatch(self) -> None:
         rng = np.random.default_rng(2)
@@ -230,40 +226,34 @@ class TestStackCudaExt(unittest.TestCase):
             _ = stack_forward([a_t, b_t], axis=0, device=self.device_index)
 
     def test_stack_forward_raises_on_cpu_tensor(self) -> None:
-        # Best-effort CPU tensor construction. Adjust if your repo has Tensor.from_numpy().
+
         x_np = np.ones((2, 2), dtype=np.float32)
 
         if hasattr(Tensor, "from_numpy") and callable(getattr(Tensor, "from_numpy")):
-            x_cpu = Tensor.from_numpy(x_np, device=Device("cpu"))  # type: ignore[call-arg]
+            x_cpu = Tensor.from_numpy(x_np, device=Device("cpu"))
         else:
             try:
-                x_cpu = Tensor(x_np.shape, device=Device("cpu"), requires_grad=False)  # type: ignore[call-arg]
-                x_cpu._data = x_np  # type: ignore[attr-defined]
+                x_cpu = Tensor(x_np.shape, device=Device("cpu"), requires_grad=False)
+                x_cpu._data = x_np
             except Exception as e:
                 raise unittest.SkipTest(
                     f"Unable to construct CPU tensor in this repo; update test_stack_forward_raises_on_cpu_tensor: {e}"
                 ) from e
 
-        # Mix CPU + CUDA should fail (and even all-CPU should fail because stack_forward expects CUDA)
         cuda_t = self._make_cuda_tensor_from_host(x_np)
         with self.assertRaises(TypeError):
             _ = stack_forward([cuda_t, x_cpu], axis=0, device=self.device_index)
-
-    # ------------------------------------------------------------------
-    # Backward tests
-    # ------------------------------------------------------------------
 
     def test_stack_backward_f32_matches_numpy_multiple_axes(self) -> None:
         rng = np.random.default_rng(4)
         x_shape = (2, 3, 4)
         K = 4
         dy_shape_base = x_shape
-        # We'll test multiple axes by generating dy each time.
+
         for axis in (0, 1, 2, 3, -1):
             with self.subTest(axis=axis):
                 axis_n = axis
-                # Build expected dy shape: x_shape[:axis] + (K,) + x_shape[axis:]
-                # Need normalized axis for shape math.
+
                 ndim = len(x_shape)
                 if axis_n < 0:
                     axis_n = axis_n + (ndim + 1)
@@ -285,7 +275,6 @@ class TestStackCudaExt(unittest.TestCase):
                     self.assertEqual(tuple(g.shape), x_shape)
                     self.assertEqual(np.dtype(g.dtype), np.float32)
 
-                # Compare each to np.take
                 for i in range(K):
                     got = self._read_cuda_tensor_to_host(grads[i])
                     ref = np.take(dy, i, axis=axis)
@@ -295,7 +284,7 @@ class TestStackCudaExt(unittest.TestCase):
         rng = np.random.default_rng(5)
         x_shape = (2, 3)
         K = 3
-        # wrong: missing the inserted K dimension
+
         dy = rng.standard_normal(x_shape, dtype=np.float32)
         dy_t = self._make_cuda_tensor_from_host(dy)
 

@@ -61,7 +61,6 @@ from keydnn.domain.device._device import Device
 # CUDA ctypes imports
 # -------------------------
 try:
-    # Your project already uses this pattern in bench_pool2d_cpu_vs_cuda.py
     from keydnn.infrastructure.native_cuda.python import avgpool2d_ctypes as cuda_utils
 
     _CUDA_IMPORT_OK = True

@@ -255,7 +255,6 @@ class TensorMixinMemory(ABC):
                 ctx=None,
                 dtype=np.float32,
             )
-            # Uses your already refactored fill(): ensures alloc + CUDA kernel fill
             t.fill(float(fill_value))
             return t
 
@@ -328,10 +327,6 @@ class TensorMixinMemory(ABC):
         """
         Broadcast this tensor to a target shape by explicit expansion.
 
-        This is an explicit broadcasting primitive intended to mirror NumPy's
-        broadcasting rules while keeping most binary ops strict (i.e., they do
-        not implicitly broadcast unless you opt in).
-
         Parameters
         ----------
         shape : tuple[int, ...]
@@ -368,8 +363,6 @@ class TensorMixinMemory(ABC):
         -----
         - `clone()` is intended to copy raw storage and typically returns a tensor
           with `requires_grad=False` and no autograd context (`ctx=None`).
-          If you want to preserve autograd flags/ctx, that should be handled by
-          a higher-level API.
         """
         ...
 
@@ -600,14 +593,13 @@ class TensorMixinMemory(ABC):
         Notes
         -----
         - This method intentionally *does not preserve autograd context* across
-        device transfers. If this tensor participates in autograd, you should
+        device transfers. If this tensor participates in autograd, should
         treat `to_()` as a graph break:
             - `ctx` is cleared.
             - `requires_grad` is left unchanged (you can still accumulate grads
             going forward), but any prior graph history is discarded.
         - If `self.grad` exists and is a Tensor-like object with `.to(...)`,
         this method will attempt to move it to the same device as well.
-        If you do not want this behavior, remove that block below.
         """
         from .....domain.device._device import Device
 
@@ -637,14 +629,13 @@ class TensorMixinMemory(ABC):
         self._swap_storage_from_(out)
 
         # Graph break: match the transfer behavior described in `to()` docstring.
-        # (Your `to()` explicitly creates ctx=None and requires_grad=False on
         # new tensors; for in-place we clear ctx but keep requires_grad as-is.)
         if hasattr(self, "ctx"):
             self.ctx = None  # type: ignore[attr-defined]
         if hasattr(self, "_ctx"):
             self._ctx = None  # type: ignore[attr-defined]
 
-        # Optional: move accumulated grad if present
+        # move accumulated grad if present
         g = getattr(self, "grad", None)
         if g is not None and hasattr(g, "to"):
             try:
@@ -659,7 +650,7 @@ class TensorMixinMemory(ABC):
         """
         Internal helper: replace this tensor's storage/device metadata with `other`'s.
 
-        KeyDNN storage model (from your code):
+        KeyDNN storage model:
         - CPU tensors: `_data` is a NumPy ndarray.
         - CUDA tensors: `_storage` is authoritative; `_data` mirrors dev_ptr as an int.
 
@@ -693,7 +684,7 @@ class TensorMixinMemory(ABC):
             if other.device.is_cpu():
                 # Expect ndarray backing on CPU
                 if other_data is None:
-                    # Allow None for empty/uninitialized CPU tensors if your code permits it
+                    # Allow None for empty/uninitialized CPU tensors
                     object.__setattr__(self, "_data", None)
                 else:
                     # Must be ndarray-like; keep as-is (do NOT cast to int)
@@ -940,7 +931,6 @@ class TensorMixinMemory(ABC):
         def _normalize_shape(shape_like) -> tuple[int, ...]:
             if isinstance(shape_like, tuple):
                 return tuple(int(x) for x in shape_like)
-            # allow list/int etc. if you want to keep old behavior
             return tuple(int(x) for x in tuple(shape_like))
 
         new_shape = _normalize_shape(new_shape)
@@ -963,7 +953,7 @@ class TensorMixinMemory(ABC):
         req = self.requires_grad
 
         # -----------------------
-        # CPU path (preserve intent; now avoids unnecessary copy if you already store ndarray)
+        # CPU path
         # -----------------------
         if self.device.is_cpu():
             src_np = self.to_numpy()
@@ -976,8 +966,6 @@ class TensorMixinMemory(ABC):
                 ctx=None,
                 dtype=getattr(self, "dtype", np.float32),
             )
-            # keep existing semantics (copy_from_numpy). If you have a true view mode,
-            # you can switch to sharing storage, but for backward-compat keep copy.
             out.copy_from_numpy(reshaped_np)
 
             if req:
@@ -1109,7 +1097,7 @@ class TensorMixinMemory(ABC):
             - Shape must match.
             - dtype must match (no implicit casting).
             - Cross-GPU copies (cuda:0 -> cuda:1) are not handled here; they may work
-            only if your memcpy wrapper supports peer copies. By default this
+            only if memcpy wrapper supports peer copies. By default this
             method raises for different CUDA device indices.
 
         Raises
@@ -1137,7 +1125,7 @@ class TensorMixinMemory(ABC):
                 )
             # Same-device copy paths below will handle CPU or CUDA.
         else:
-            # If both are CUDA, be conservative about cross-GPU unless you explicitly support it.
+            # If both are CUDA, be conservative about cross-GPU.
             if self.device.is_cuda() and other.device.is_cuda():
                 if int(self.device.index or 0) != int(other.device.index or 0):
                     raise RuntimeError(
@@ -1244,7 +1232,7 @@ class TensorMixinMemory(ABC):
                 )
 
             # Ensure destination host buffer exists (it should on CPU tensors).
-            # If your Tensor can be CPU with _data None, allocate here:
+            # If Tensor can be CPU with _data None, allocate here:
             if getattr(self, "_data", None) is None:
                 self.data[...] = np.empty(self.shape, dtype=dt_self)
 

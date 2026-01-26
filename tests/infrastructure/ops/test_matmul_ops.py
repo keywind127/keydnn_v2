@@ -46,8 +46,6 @@ class TestMatmulCudaOps(unittest.TestCase):
             k2, m = B_shape
             self.assertEqual(k, k2)
 
-            # expected signature:
-            # matmul_cuda(lib, a_dev=..., b_dev=..., c_dev=..., n=..., k=..., m=..., dtype=..., sync=True)
             self.matmul2d(
                 self.env.lib,
                 a_dev=int(A_dev),
@@ -76,10 +74,10 @@ class TestMatmulCudaOps(unittest.TestCase):
         self._run_matmul(np.float64, A_shape=(6, 11), B_shape=(11, 5))
 
     def test_matmul_rejects_shape_mismatch(self) -> None:
-        # This should be caught by wrapper checks (k mismatch) or by caller logic.
+
         dtype = np.float32
         A_shape = (4, 3)
-        B_shape = (2, 5)  # mismatch
+        B_shape = (2, 5)
         A = np.random.randn(*A_shape).astype(dtype)
         B = np.random.randn(*B_shape).astype(dtype)
 

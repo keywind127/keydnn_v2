@@ -6,7 +6,7 @@ import numpy as np
 
 class TestSequentialXORTraining(unittest.TestCase):
     def test_xor_training_one_hidden_layer(self):
-        # Only skip when components truly cannot be imported.
+
         try:
             from src.keydnn.infrastructure.models._sequential import Sequential
             from src.keydnn.infrastructure.fully_connected._linear import Linear
@@ -17,7 +17,6 @@ class TestSequentialXORTraining(unittest.TestCase):
         except (ModuleNotFoundError, ImportError) as e:
             self.skipTest(f"XOR training test skipped (missing import): {e}")
 
-        # ---------------- Dataset ----------------
         x_np = np.array(
             [[0.0, 0.0], [0.0, 1.0], [1.0, 0.0], [1.0, 1.0]],
             dtype=np.float32,
@@ -32,11 +31,9 @@ class TestSequentialXORTraining(unittest.TestCase):
         y = Tensor(shape=y_np.shape, device=device)
         y.copy_from_numpy(y_np)
 
-        # Make sure our inputs are actually tensors (helps catch silent numpy fallbacks)
         self.assertTrue(hasattr(x, "copy_from_numpy"))
         self.assertTrue(hasattr(y, "copy_from_numpy"))
 
-        # ---------------- Model ----------------
         hidden_dim = 8
         model = Sequential(
             Linear(2, hidden_dim),
@@ -45,12 +42,10 @@ class TestSequentialXORTraining(unittest.TestCase):
             Sigmoid(),
         )
 
-        # ---------------- Loss (MSE) ----------------
         def mse(pred, target):
             diff = pred - target
             sq = diff * diff
 
-            # Critical: ensure loss remains a Tensor-like object, not a python float.
             if hasattr(sq, "mean"):
                 return sq.mean()
             if hasattr(sq, "sum"):
@@ -58,37 +53,26 @@ class TestSequentialXORTraining(unittest.TestCase):
 
             raise AttributeError("Tensor must implement mean() or sum()")
 
-        # ---------------- Optimizer ----------------
         opt = SGD(model.parameters(), lr=1.0)
         self.assertTrue(hasattr(opt, "step"), "SGD must implement step().")
 
-        # ---------------- Training loop ----------------
         epochs = 800
 
-        model.build(x[:1])  # ensure built before training
+        model.build(x[:1])
 
         for _ in range(epochs):
             pred = model(x)
             loss = mse(pred, y)
 
-            # Do NOT skip here; fail with a useful message.
             self.assertTrue(
                 hasattr(loss, "backward"),
                 f"Autograd entry point missing: Tensor.backward() not found on type={type(loss)}. "
                 f"Implement Tensor.backward() (and graph traversal) to enable training.",
             )
 
-            # print("Tensor has backward:", hasattr(type(loss), "backward"))
-            # print("Instance has backward:", hasattr(loss, "backward"))
-            # print(
-            #     "Tensor methods sample:", [m for m in dir(loss) if "back" in m.lower()]
-            # )
-
             loss.backward()
             opt.step()
 
-            # Clear gradients
-            # Clear gradients
             if hasattr(model, "zero_grad"):
                 model.zero_grad()
             else:
@@ -96,7 +80,6 @@ class TestSequentialXORTraining(unittest.TestCase):
                     if hasattr(p, "zero_grad"):
                         p.zero_grad()
 
-        # ---------------- Evaluation ----------------
         pred = model(x)
 
         self.assertTrue(
@@ -107,8 +90,6 @@ class TestSequentialXORTraining(unittest.TestCase):
         pred_np = pred.to_numpy()
         y_hat = (pred_np >= 0.5).astype(np.float32)
         acc = float((y_hat == y_np).mean())
-
-        # print(f"XOR accuracy: {acc:.3f}, predictions={pred_np.reshape(-1).tolist()}")
 
         self.assertGreaterEqual(
             acc,

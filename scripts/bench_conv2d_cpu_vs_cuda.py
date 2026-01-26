@@ -15,9 +15,9 @@ Timing policy
 
 IMPORTANT (current CUDA boundary design)
 ---------------------------------------
-If your `conv2d_cuda_ext` implementation still performs D2H/H2D internally
+If `conv2d_cuda_ext` implementation still performs D2H/H2D internally
 (because the ops wrapper is NumPy-facing), then the CUDA timings include
-those host copies. This script still gives you an apples-to-apples "what your
+those host copies. This script still gives an apples-to-apples "what the
 current API costs" comparison, but it will understate the true kernel-only speedup.
 
 Usage
@@ -144,7 +144,7 @@ def _make_tensor_from_numpy_cuda(
     requires_grad: bool = False,
 ) -> Tensor:
     """
-    Create a CUDA Tensor and copy host -> device using Tensor APIs already present in your repo.
+    Create a CUDA Tensor and copy host
     Prefer Tensor.from_numpy(..., device=cuda). Fallback: allocate + cudaMemcpyHtoD.
     """
     x_c = np.ascontiguousarray(x)
@@ -315,7 +315,7 @@ def bench_case(
             # Heuristic:
             # - absolute tolerance covers small-but-real numeric drift
             # - relative tolerance covers scaling with output magnitude
-            atol = 5e-2  # 0.05 (your observed max abs diff ~0.038)
+            atol = 5e-2  # 0.05 (observed max abs diff ~0.038)
             rtol = 2e-3  # 0.2%
             np.testing.assert_allclose(y_cuda, y_cpu, rtol=rtol, atol=atol)
 

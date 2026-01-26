@@ -1,4 +1,3 @@
-# tests/infrastructure/ops/test_matmul_cuda_ext.py
 """
 Unit tests for CUDA Tensor-boundary matmul wrapper (matmul_cuda_ext.py).
 
@@ -41,24 +40,22 @@ def _get_cuda_device(index: int = 0) -> Device:
     This project may expose Device construction in different ways (e.g. Device("cuda", 0),
     Device.cuda(0), Device.from_str("cuda:0"), etc.). This helper tries common patterns.
     """
-    # Try common APIs in a robust order
+
     if hasattr(Device, "cuda") and callable(getattr(Device, "cuda")):
-        return Device.cuda(index)  # type: ignore[attr-defined]
+        return Device.cuda(index)
 
-    # Some projects use Device("cuda", 0) or Device("cuda:0")
     try:
-        return Device("cuda", index)  # type: ignore[call-arg]
+        return Device("cuda", index)
     except Exception:
         pass
 
     try:
-        return Device(f"cuda:{index}")  # type: ignore[call-arg]
+        return Device(f"cuda:{index}")
     except Exception:
         pass
 
-    # Last resort: many Device objects accept keyword args
     try:
-        return Device(kind="cuda", index=index)  # type: ignore[call-arg]
+        return Device(kind="cuda", index=index)
     except Exception as e:
         raise RuntimeError(
             "Unable to construct a CUDA Device; update _get_cuda_device() for this repo."
@@ -133,7 +130,7 @@ class TestMatmulCudaExt(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        # Try to load CUDA DLL; skip all tests if unavailable.
+
         try:
             cls.lib = _load_cuda_lib()
         except Exception as e:
@@ -145,13 +142,11 @@ class TestMatmulCudaExt(unittest.TestCase):
         except Exception as e:
             raise unittest.SkipTest(f"Failed to set CUDA device: {e}") from e
 
-        # Ensure memcpy symbols exist; if not, skip (cannot validate numerics).
         try:
             _bind_memcpy_symbols(cls.lib)
         except Exception as e:
             raise unittest.SkipTest(f"CUDA memcpy symbols unavailable: {e}") from e
 
-        # Construct a CUDA Device object for Tensor wrapping.
         try:
             cls.cuda_device = _get_cuda_device(cls.device_index)
         except Exception as e:
@@ -247,7 +242,7 @@ class TestMatmulCudaExt(unittest.TestCase):
         """
         rng = np.random.default_rng(3)
         a = rng.standard_normal((4, 3), dtype=np.float32)
-        b = rng.standard_normal((4, 5), dtype=np.float32)  # wrong: 4 != 3
+        b = rng.standard_normal((4, 5), dtype=np.float32)
 
         a_t = self._make_cuda_tensor_from_host(a)
         b_t = self._make_cuda_tensor_from_host(b)
@@ -273,21 +268,20 @@ class TestMatmulCudaExt(unittest.TestCase):
         """
         Passing a CPU tensor should raise TypeError.
         """
-        # CPU tensor creation varies across repos; use a safe baseline: Tensor.from_numpy if available,
-        # otherwise use Tensor(...) constructor if it exists.
+
         a_np = np.ones((2, 3), dtype=np.float32)
         b_np = np.ones((3, 4), dtype=np.float32)
 
         if hasattr(Tensor, "from_numpy") and callable(getattr(Tensor, "from_numpy")):
-            a_cpu = Tensor.from_numpy(a_np, device=Device("cpu"))  # type: ignore[call-arg]
-            b_cpu = Tensor.from_numpy(b_np, device=Device("cpu"))  # type: ignore[call-arg]
+            a_cpu = Tensor.from_numpy(a_np, device=Device("cpu"))
+            b_cpu = Tensor.from_numpy(b_np, device=Device("cpu"))
         else:
-            # Fallback: try common Tensor factory patterns used in KeyDNN
+
             try:
-                a_cpu = Tensor(a_np.shape, device=Device("cpu"), requires_grad=False)  # type: ignore[call-arg]
-                a_cpu._data = a_np  # type: ignore[attr-defined]
-                b_cpu = Tensor(b_np.shape, device=Device("cpu"), requires_grad=False)  # type: ignore[call-arg]
-                b_cpu._data = b_np  # type: ignore[attr-defined]
+                a_cpu = Tensor(a_np.shape, device=Device("cpu"), requires_grad=False)
+                a_cpu._data = a_np
+                b_cpu = Tensor(b_np.shape, device=Device("cpu"), requires_grad=False)
+                b_cpu._data = b_np
             except Exception as e:
                 raise unittest.SkipTest(
                     f"Unable to construct CPU tensors in this repo; update test_raises_on_cpu_tensor: {e}"

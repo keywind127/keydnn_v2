@@ -23,8 +23,6 @@ def _unwrap_param_tensor(p):
     Supports:
       - Parameter is Tensor-like (has to_numpy/copy_from_numpy)
       - Parameter wraps Tensor in `.data` or `.tensor`
-
-    Adjust this helper if your Parameter uses a different attribute name.
     """
     if hasattr(p, "to_numpy") and hasattr(p, "copy_from_numpy"):
         return p
@@ -53,7 +51,6 @@ class TestConv2dModule(unittest.TestCase):
         x = Tensor(shape=(2, 3, 10, 9), device=self.device, requires_grad=False)
         y = conv.forward(x)
 
-        # Compute expected shape the same way the CPU op does (reference)
         x_np = x.to_numpy()
         w_np = _unwrap_param_tensor(conv.weight).to_numpy()
         b_np = (
@@ -85,7 +82,6 @@ class TestConv2dModule(unittest.TestCase):
             device=self.device,
         )
 
-        # Deterministic parameters
         w_np = np.random.randn(3, 2, 3, 2).astype(np.float32)
         b_np = np.random.randn(3).astype(np.float32)
 
@@ -95,25 +91,21 @@ class TestConv2dModule(unittest.TestCase):
         b_t = _unwrap_param_tensor(conv.bias)
         b_t.copy_from_numpy(b_np)
 
-        # Input
         x_np = np.random.randn(1, 2, 5, 4).astype(np.float32)
         x = _tensor_from_numpy(x_np, self.device, requires_grad=True)
 
-        # Forward + backward
         y = conv.forward(x)
         loss = y.sum()
         loss.backward()
 
         self.assertIsNotNone(x.grad, "x.grad should be populated after backward()")
 
-        # Parameter grads: depends on whether Parameter is Tensor-like or wraps a Tensor
         w_grad_holder = _unwrap_param_tensor(conv.weight)
         b_grad_holder = _unwrap_param_tensor(conv.bias)
 
         self.assertIsNotNone(w_grad_holder.grad, "weight.grad should be populated")
         self.assertIsNotNone(b_grad_holder.grad, "bias.grad should be populated")
 
-        # CPU reference under L = sum(y)
         y_ref = conv2d_forward_cpu(x_np, w_np, b_np, stride=(1, 2), padding=(1, 0))
         grad_out_np = np.ones_like(y_ref, dtype=np.float32)
 

@@ -33,7 +33,7 @@ import ctypes
 from ctypes import wintypes
 import numpy as np
 
-from ..avgpool2d_ctypes import load_keydnn_cuda_native  # consistent with your tree
+from ..avgpool2d_ctypes import load_keydnn_cuda_native
 
 _GetProcAddress = ctypes.windll.kernel32.GetProcAddress
 _GetProcAddress.argtypes = [wintypes.HMODULE, wintypes.LPCSTR]
@@ -382,9 +382,6 @@ class _Conv2dCudaExports:
         np.dtype(np.float32),
         np.dtype(np.float64),
     )
-
-
-# Optional convenience helpers (mirrors how you often use load_keydnn_cuda_native)
 
 
 def load_and_conv2d_forward_cuda(**kwargs) -> None:

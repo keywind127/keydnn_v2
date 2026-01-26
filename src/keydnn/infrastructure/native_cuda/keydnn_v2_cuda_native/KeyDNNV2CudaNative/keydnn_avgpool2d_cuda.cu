@@ -349,7 +349,7 @@ int keydnn_cuda_avgpool2d_backward_f64(
 #if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 600)
     // Device-side arch guard doesn't apply here (host compilation),
     // but keeping the style explicit: double backward needs atomicAdd(double).
-    // If you compile for < sm_60 you should reject at runtime; we do it in-kernel.
+    // If compile for < sm_60 should reject at runtime; we do it in-kernel.
 #endif
 
     // We reject sm_<60 at runtime by building for >=60, or by

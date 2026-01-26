@@ -47,8 +47,8 @@ Non-goals
 Assumptions / Streaming warning
 -------------------------------
 This allocator assumes either:
-- you use the default CUDA stream only, OR
-- you synchronize appropriately before blocks are freed/reused.
+- use the default CUDA stream only, OR
+- synchronize appropriately before blocks are freed/reused.
 
 If multi-stream execution is introduced, this allocator should be extended
 to record CUDA events on `free()` and only recycle blocks after event completion.

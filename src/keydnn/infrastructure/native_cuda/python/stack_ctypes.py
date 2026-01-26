@@ -49,7 +49,7 @@ DevPtr = int  # uintptr_t as Python int
 
 
 # ---------------------------------------------------------------------
-# DLL loading (copy your existing path logic; adjust if needed)
+# DLL loading
 # ---------------------------------------------------------------------
 
 
@@ -154,8 +154,6 @@ class CudaLib:
         self._stack_bound = False
         self._debug_bound = False
 
-        # Make debug opt-in via env var, but default OFF.
-        # If you want it always ON during tests, set KEYDNN_CUDA_DEBUG=1
         import os
 
         self._debug_enabled_default = os.environ.get("KEYDNN_CUDA_DEBUG", "0") not in (
@@ -965,7 +963,7 @@ class CudaLib:
 
 
 # ---------------------------------------------------------------------
-# Functional API (cached singleton like your other wrappers)
+# Functional API
 # ---------------------------------------------------------------------
 
 _cuda_singleton: CudaLib | None = None

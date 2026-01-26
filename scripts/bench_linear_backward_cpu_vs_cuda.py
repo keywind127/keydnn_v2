@@ -14,7 +14,7 @@ Notes
 -----
 - Requires CUDA wrappers + DLL to be importable for CUDA path.
 - Synchronizes on CUDA after each backward to ensure kernels complete.
-- If your Linear CUDA backward still falls back to host reduction for db,
+- If Linear CUDA backward still falls back to host reduction for db,
   then bias=True backward will include that overhead.
 """
 
@@ -43,7 +43,6 @@ from keydnn.domain.device._device import Device
 from keydnn.infrastructure.fully_connected._linear import Linear
 from keydnn.infrastructure.tensor._tensor import Tensor
 
-# CUDA utils (try-import; match your other bench scripts style)
 try:
     from keydnn.infrastructure.native_cuda.python import maxpool2d_ctypes as cuda_utils
 
@@ -84,7 +83,7 @@ def _get_linear_tensors(layer: Linear) -> tuple[Tensor, Optional[Tensor]]:
             "Could not locate Linear weight tensor on layer (weight/W/w)."
         )
 
-    # bias (optional)
+    # bias
     bt = None
     for bname in ("bias", "b"):
         if hasattr(layer, bname):
@@ -190,10 +189,7 @@ class _CudaContext:
 def _get_ctx(y: Tensor):
     """
     Retrieve legacy Context object from a Tensor.
-
-    Adjust this helper if your Tensor stores ctx under a different attribute.
     """
-    # Common patterns in your code: y._set_ctx(ctx) => likely y._ctx
     if hasattr(y, "_ctx"):
         return getattr(y, "_ctx")
     if hasattr(y, "ctx"):
@@ -297,7 +293,6 @@ def bench_backward_case(
     go_cuda = Tensor(
         shape=y_cuda.shape, device=cuda_dev, requires_grad=False, dtype=np.dtype(dtype)
     )
-    # Use your device-aware fill (you have fill kernel)
     go_cuda.fill(1.0)
     cuda_ctx.sync()
 

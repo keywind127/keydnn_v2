@@ -1,4 +1,3 @@
-# tests/infrastructure/tensors/test_tensor_copy_from_cuda.py
 from __future__ import annotations
 
 import unittest
@@ -55,7 +54,6 @@ class _CudaTestMixin:
         if dev_ptr == 0:
             raise RuntimeError("cuda_malloc returned nullptr")
 
-        # Copy host -> device using CFUNCTYPE wrapper (no argtypes collision).
         mc.cuda_memcpy_h2d(lib, int(dev_ptr), arr, nbytes)
 
         return Tensor._from_devptr(
@@ -147,7 +145,6 @@ class TestTensorCopyFromCudaSameDevice(TestCase, _CudaTestMixin):
         src_np = np.random.randn(3, 5).astype(np.float32)
         src = self._cuda_tensor_from_numpy(src_np, requires_grad=False)
 
-        # Raw CUDA Tensor(...) should not allocate unless explicitly requested.
         dst = Tensor(
             src_np.shape, Device("cuda:0"), requires_grad=False, dtype=np.float32
         )
@@ -195,7 +192,7 @@ class TestTensorCopyFromCudaCrossDevice(TestCase, _CudaTestMixin):
         dst_cpu.copy_from_numpy(np.zeros_like(src_np))
 
         with self.assertRaises(RuntimeError):
-            dst_cpu.copy_from(src_cuda)  # allow_cross_device defaults to False
+            dst_cpu.copy_from(src_cuda)
 
     def test_copy_from_cross_device_cpu_to_cuda_requires_flag(self):
         src_np = np.random.randn(2, 2).astype(np.float32)
@@ -210,7 +207,7 @@ class TestTensorCopyFromCudaCrossDevice(TestCase, _CudaTestMixin):
         )
 
         with self.assertRaises(RuntimeError):
-            dst_cuda.copy_from(src_cpu)  # allow_cross_device defaults to False
+            dst_cuda.copy_from(src_cpu)
 
     def test_copy_from_cross_device_cuda_to_cpu_when_enabled(self):
         src_np = np.random.randn(4, 3).astype(np.float32)

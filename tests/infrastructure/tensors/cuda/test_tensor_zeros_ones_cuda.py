@@ -23,7 +23,7 @@ class TestTensorZerosOnesCuda(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        # Skip suite if CUDA DLL/device isn't available.
+
         try:
             cls.lib = load_keydnn_cuda_native()
         except Exception as e:
@@ -34,7 +34,6 @@ class TestTensorZerosOnesCuda(unittest.TestCase):
         except Exception as e:
             raise unittest.SkipTest(f"CUDA device unavailable / cannot set device: {e}")
 
-        # Your Device API: Device("cuda:<index>")
         cls.cuda_device = Device("cuda:0")
 
     def _assert_tensor_matches_constant(
@@ -42,7 +41,6 @@ class TestTensorZerosOnesCuda(unittest.TestCase):
     ) -> None:
         self.assertEqual(tuple(t.shape), tuple(shape))
 
-        # Readback to CPU for verification.
         if hasattr(t, "to_numpy"):
             arr = t.to_numpy()
         elif hasattr(t, "numpy"):
@@ -61,7 +59,6 @@ class TestTensorZerosOnesCuda(unittest.TestCase):
         self.assertEqual(arr.dtype, np.float32)
         self.assertEqual(arr.shape, shape)
 
-        # Empty: just ensure shape/dtype correct.
         if arr.size == 0:
             return
 

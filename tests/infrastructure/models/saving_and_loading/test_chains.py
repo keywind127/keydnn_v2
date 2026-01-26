@@ -54,16 +54,15 @@ class TestModelSaveLoadChainedModelsJSON(unittest.TestCase):
                 bias=True,
                 return_sequences=False,
                 return_state=False,
-                keras_compat=True,  # makes forward() return h_T when return_sequences=False
+                keras_compat=True,
             ),
             Linear(in_features=4, out_features=2, bias=True),
             Sigmoid(),
         )
 
-        rnn: RNN = model[0]  # type: ignore[assignment]
-        lin: Linear = model[1]  # type: ignore[assignment]
+        rnn: RNN = model[0]
+        lin: Linear = model[1]
 
-        # Deterministic Linear params
         W = np.array(
             [[1.0, -2.0, 3.0, -4.0], [-1.5, 2.5, -3.5, 4.5]],
             dtype=np.float32,
@@ -71,9 +70,8 @@ class TestModelSaveLoadChainedModelsJSON(unittest.TestCase):
         b = np.array([0.25, -0.75], dtype=np.float32)
         lin.weight.copy_from_numpy(W)
         self.assertIsNotNone(lin.bias)
-        lin.bias.copy_from_numpy(b)  # type: ignore[union-attr]
+        lin.bias.copy_from_numpy(b)
 
-        # Input x: (T, N, D)
         x_np = np.array(
             [
                 [[1.0, 0.0, -1.0], [0.5, 2.0, 1.0]],
@@ -83,7 +81,6 @@ class TestModelSaveLoadChainedModelsJSON(unittest.TestCase):
             dtype=np.float32,
         )
 
-        # Device: pick from a real parameter to avoid Device identity issues
         dev = rnn.cell.W_ih.device
         x = _tensor_from_numpy(x_np, device=dev)
 
@@ -118,11 +115,9 @@ class TestModelSaveLoadChainedModelsJSON(unittest.TestCase):
             Softmax(axis=-1),
         )
 
-        conv: Conv2d = model[0]  # type: ignore[assignment]
-        lin: Linear = model[4]  # type: ignore[assignment]
+        conv: Conv2d = model[0]
+        lin: Linear = model[4]
 
-        # Deterministic Conv2d params
-        # weight shape: (out_channels, in_channels, k_h, k_w) = (2,1,3,3)
         conv_w = np.array(
             [
                 [[[1.0, 0.0, -1.0], [1.0, 0.0, -1.0], [1.0, 0.0, -1.0]]],
@@ -133,16 +128,14 @@ class TestModelSaveLoadChainedModelsJSON(unittest.TestCase):
         conv_b = np.array([0.1, -0.2], dtype=np.float32)
         conv.weight.copy_from_numpy(conv_w)
         self.assertIsNotNone(conv.bias)
-        conv.bias.copy_from_numpy(conv_b)  # type: ignore[union-attr]
+        conv.bias.copy_from_numpy(conv_b)
 
-        # Deterministic Linear params (3 x 8)
         W = np.arange(24, dtype=np.float32).reshape(3, 8) / 10.0
         b = np.array([0.05, -0.05, 0.1], dtype=np.float32)
         lin.weight.copy_from_numpy(W)
         self.assertIsNotNone(lin.bias)
-        lin.bias.copy_from_numpy(b)  # type: ignore[union-attr]
+        lin.bias.copy_from_numpy(b)
 
-        # Input: (N, C, H, W) = (2,1,4,4)
         x_np = np.array(
             [
                 [[[1, 2, 3, 4], [0, 1, 0, 1], [2, 0, 2, 0], [1, 1, 1, 1]]],
@@ -186,11 +179,10 @@ class TestModelSaveLoadChainedModelsJSON(unittest.TestCase):
             Sigmoid(),
         )
 
-        conv1: Conv2d = model[0]  # type: ignore[assignment]
-        conv2: Conv2d = model[2]  # type: ignore[assignment]
-        lin: Linear = model[6]  # type: ignore[assignment]
+        conv1: Conv2d = model[0]
+        conv2: Conv2d = model[2]
+        lin: Linear = model[6]
 
-        # Deterministic weights
         conv1.weight.copy_from_numpy(
             np.ones_like(conv1.weight.to_numpy(), dtype=np.float32) * 0.1
         )
@@ -198,11 +190,11 @@ class TestModelSaveLoadChainedModelsJSON(unittest.TestCase):
         conv2_w = np.ones_like(conv2.weight.to_numpy(), dtype=np.float32) * (-0.05)
         conv2.weight.copy_from_numpy(conv2_w)
         self.assertIsNotNone(conv2.bias)
-        conv2.bias.copy_from_numpy(np.array([0.01, -0.02], dtype=np.float32))  # type: ignore[union-attr]
+        conv2.bias.copy_from_numpy(np.array([0.01, -0.02], dtype=np.float32))
 
         lin.weight.copy_from_numpy(np.ones((2, 8), dtype=np.float32) * 0.2)
         self.assertIsNotNone(lin.bias)
-        lin.bias.copy_from_numpy(np.array([0.0, 0.1], dtype=np.float32))  # type: ignore[union-attr]
+        lin.bias.copy_from_numpy(np.array([0.0, 0.1], dtype=np.float32))
 
         x_np = np.arange(2 * 1 * 4 * 4, dtype=np.float32).reshape(2, 1, 4, 4) / 10.0
         dev = conv1.weight.device
@@ -215,7 +207,6 @@ class TestModelSaveLoadChainedModelsJSON(unittest.TestCase):
             model.save_json(ckpt)
             loaded = Sequential.load_json(ckpt)
 
-        # Quick order sanity
         self.assertEqual(type(loaded[0]).__name__, type(model[0]).__name__)
         self.assertEqual(type(loaded[2]).__name__, type(model[2]).__name__)
         self.assertEqual(type(loaded[6]).__name__, type(model[6]).__name__)

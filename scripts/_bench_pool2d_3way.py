@@ -9,19 +9,18 @@ It benchmarks three implementations:
                -> this is the true "Python loops" baseline and is intentionally slow.
 
 2) "numpy_ref": Python outer loops + NumPy per-patch reductions (np.argmax / np.sum)
-               -> this matches the style of your original reference path.
 
 3) "native"   : C++ kernels via ctypes (float32/float64), matching KeyDNN semantics.
 
 Why this is useful
 ------------------
-Your earlier "native vs numpy fallback" benchmark can show tiny gains because the
+Earlier "native vs numpy fallback" benchmark can show tiny gains because the
 NumPy fallback already uses NumPy C-level reductions inside the loops. That means
 the inner heavy work is already compiled, so switching to C++ may only help a bit.
 
 This script provides the "desirable proof":
 - pure_py vs native should show a big speedup (proving C++ loop matters)
-- numpy_ref vs native may be small (explaining your earlier results)
+- numpy_ref vs native may be small
 
 What is timed
 -------------

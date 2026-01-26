@@ -65,7 +65,7 @@ class TestTensorTanh(unittest.TestCase):
         x.copy_from_numpy(x_np)
 
         y = x.tanh()
-        loss = y.sum()  # simple scalar loss
+        loss = y.sum()
         loss.backward()
 
         grad_np = x.grad.to_numpy()

@@ -1,4 +1,3 @@
-# tests/infrastructure/tensors/test_tensor_fill_cuda.py
 """
 Unit tests for Tensor.fill CUDA support.
 
@@ -33,20 +32,20 @@ from src.keydnn.infrastructure.ops.pool2d_cuda import (
 def _get_cuda_device(index: int = 0) -> Device:
     """Best-effort helper to obtain a CUDA Device instance across possible Device APIs."""
     if hasattr(Device, "cuda") and callable(getattr(Device, "cuda")):
-        return Device.cuda(index)  # type: ignore[attr-defined]
+        return Device.cuda(index)
 
     try:
-        return Device("cuda", index)  # type: ignore[call-arg]
+        return Device("cuda", index)
     except Exception:
         pass
 
     try:
-        return Device(f"cuda:{index}")  # type: ignore[call-arg]
+        return Device(f"cuda:{index}")
     except Exception:
         pass
 
     try:
-        return Device(kind="cuda", index=index)  # type: ignore[call-arg]
+        return Device(kind="cuda", index=index)
     except Exception as e:
         raise RuntimeError(
             "Unable to construct a CUDA Device; update _get_cuda_device() for this repo."
@@ -154,10 +153,6 @@ class TestTensorFillCuda(unittest.TestCase):
         _d2h(self.lib, int(t.data), host)
         return host
 
-    # ----------------------------
-    # CUDA fill tests
-    # ----------------------------
-
     def test_fill_cuda_f32(self) -> None:
         t = self._make_cuda_tensor_uninitialized((64,), np.float32)
         t.fill(2.5)
@@ -181,32 +176,27 @@ class TestTensorFillCuda(unittest.TestCase):
         self.assertEqual(out.size, 0)
 
     def test_fill_cuda_raises_on_non_float_dtype(self) -> None:
-        # Even though we can allocate int32 device memory, the CUDA fill path only supports f32/f64.
+
         t = self._make_cuda_tensor_uninitialized((8,), np.int32)
         with self.assertRaises(TypeError):
             t.fill(1.0)
 
-    # ----------------------------
-    # CPU backward compatibility (best-effort)
-    # ----------------------------
-
     def test_fill_cpu_still_works(self) -> None:
         x = np.zeros((3, 4), dtype=np.float32)
 
-        # Best-effort CPU tensor creation; adjust if your repo has a canonical constructor.
         if hasattr(Tensor, "from_numpy") and callable(getattr(Tensor, "from_numpy")):
-            t = Tensor.from_numpy(x, device=Device("cpu"))  # type: ignore[call-arg]
+            t = Tensor.from_numpy(x, device=Device("cpu"))
         else:
             try:
-                t = Tensor(x.shape, device=Device("cpu"), requires_grad=False)  # type: ignore[call-arg]
-                t._data = x  # type: ignore[attr-defined]
+                t = Tensor(x.shape, device=Device("cpu"), requires_grad=False)
+                t._data = x
             except Exception as e:
                 raise unittest.SkipTest(
                     f"Unable to construct CPU Tensor in this repo; update test_fill_cpu_still_works: {e}"
                 ) from e
 
         t.fill(9.0)
-        # Read from CPU backing array (most implementations store ndarray in _data)
+
         data = getattr(t, "_data", None)
         if data is None:
             raise unittest.SkipTest(

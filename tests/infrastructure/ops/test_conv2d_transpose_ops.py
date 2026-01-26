@@ -20,7 +20,7 @@ def _tol(dtype: np.dtype) -> tuple[float, float]:
         return 1e-5, 1e-6
     if dtype == np.float64:
         return 1e-12, 1e-12
-    # fallback (not used by native fast path)
+
     return 1e-5, 1e-6
 
 
@@ -179,16 +179,10 @@ class TestConv2DTransposeOps(unittest.TestCase):
     def setUp(self) -> None:
         np.random.seed(0)
 
-    # -----------------------------
-    # Deterministic forward tests
-    # -----------------------------
     def test_forward_known_values_stride1_pad0(self) -> None:
-        # Simple hand-checkable case:
-        # x: 1x1x1x1, w: 1x1x2x2, stride=1, padding=0 => y is w * x
+
         x = np.array([[[[2.0]]]], dtype=np.float32)
-        w = np.array(
-            [[[[1.0, 2.0], [3.0, 4.0]]]], dtype=np.float32
-        )  # (C_in=1,C_out=1,2,2)
+        w = np.array([[[[1.0, 2.0], [3.0, 4.0]]]], dtype=np.float32)
         b = np.array([0.5], dtype=np.float32)
 
         y = conv2d_transpose_forward_cpu(x, w, b, stride=1, padding=0, output_padding=0)
@@ -243,9 +237,6 @@ class TestConv2DTransposeOps(unittest.TestCase):
         )
         np.testing.assert_allclose(y, y_ref, rtol=0, atol=0)
 
-    # -----------------------------
-    # Backward tests
-    # -----------------------------
     def test_backward_matches_reference_small(self) -> None:
         rng = np.random.default_rng(9)
 
@@ -289,18 +280,13 @@ class TestConv2DTransposeOps(unittest.TestCase):
         )
         gb_ref = grad_out.sum(axis=(0, 2, 3)).astype(np.float32, copy=False)
 
-        # grad_x is typically stable; keep strict unless you see drift here too.
         np.testing.assert_allclose(grad_x, gx_ref, rtol=0, atol=0)
 
-        # grad_w is a reduction; allow tiny FP drift (native/OpenMP order differs).
         rtol, atol = _tol(grad_w.dtype)
         np.testing.assert_allclose(grad_w, gw_ref, rtol=rtol, atol=atol)
 
         np.testing.assert_allclose(grad_b, gb_ref, rtol=0, atol=0)
 
-    # -----------------------------
-    # Randomized stress tests
-    # -----------------------------
     def test_randomized_shapes_forward_backward_float32_float64(self) -> None:
         rng = np.random.default_rng(2026)
 
@@ -322,7 +308,6 @@ class TestConv2DTransposeOps(unittest.TestCase):
                 p_h = int(rng.integers(0, K_h))
                 p_w = int(rng.integers(0, K_w))
 
-                # output_padding must be < stride per dim
                 op_h = int(rng.integers(0, max(1, s_h)))
                 op_w = int(rng.integers(0, max(1, s_w)))
                 if op_h >= s_h:
@@ -334,9 +319,6 @@ class TestConv2DTransposeOps(unittest.TestCase):
                 padding = (p_h, p_w)
                 output_padding = (op_h, op_w)
 
-                # -----------------------------
-                # Guard: skip invalid output sizes
-                # -----------------------------
                 H_out, W_out = _out_hw_transpose(
                     H_in,
                     W_in,
@@ -360,7 +342,6 @@ class TestConv2DTransposeOps(unittest.TestCase):
                     else None
                 )
 
-                # Forward
                 y = conv2d_transpose_forward_cpu(
                     x,
                     w,
@@ -379,7 +360,6 @@ class TestConv2DTransposeOps(unittest.TestCase):
                 )
                 np.testing.assert_allclose(y, y_ref, rtol=0, atol=0)
 
-                # Backward
                 grad_out = rng.standard_normal((N, C_out, H_out, W_out)).astype(
                     dtype, copy=False
                 )
@@ -415,12 +395,8 @@ class TestConv2DTransposeOps(unittest.TestCase):
 
                 trials += 1
 
-    # -----------------------------
-    # Dtype behavior / fallback
-    # -----------------------------
     def test_forward_float16_falls_back_to_numpy(self) -> None:
-        # float16 is allowed; native path (if present) supports only f32/f64,
-        # so this should still work via reference loops.
+
         rng = np.random.default_rng(0)
 
         x = rng.standard_normal((1, 1, 3, 3)).astype(np.float16)
@@ -469,9 +445,6 @@ class TestConv2DTransposeOps(unittest.TestCase):
             grad_w.astype(np.float32), gw_ref.astype(np.float32), rtol=0, atol=0
         )
 
-    # -----------------------------
-    # Native load failure -> warn + fallback (only for f32/f64, output_padding==0)
-    # -----------------------------
     def test_forward_warns_and_falls_back_when_native_missing(self) -> None:
         rng = np.random.default_rng(2)
 
@@ -546,11 +519,6 @@ class TestConv2DTransposeOps(unittest.TestCase):
                     any("falling back to NumPy" in str(w.message) for w in warn_list)
                 )
 
-    # -----------------------------
-    # output_padding behavior:
-    # - supported by pure NumPy loops
-    # - native fast-path should be skipped (op != 0)
-    # -----------------------------
     def test_forward_output_padding_nonzero(self) -> None:
         rng = np.random.default_rng(4)
 
@@ -560,7 +528,7 @@ class TestConv2DTransposeOps(unittest.TestCase):
 
         stride = (2, 2)
         padding = (1, 1)
-        output_padding = (1, 0)  # nonzero => must use Python path
+        output_padding = (1, 0)
 
         y = conv2d_transpose_forward_cpu(
             x, w, b, stride=stride, padding=padding, output_padding=output_padding
@@ -578,7 +546,7 @@ class TestConv2DTransposeOps(unittest.TestCase):
 
         stride = (3, 2)
         padding = (0, 1)
-        output_padding = (2, 1)  # must be < stride
+        output_padding = (2, 1)
 
         y = conv2d_transpose_forward_cpu(
             x, w, None, stride=stride, padding=padding, output_padding=output_padding

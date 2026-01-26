@@ -75,7 +75,7 @@ def trace_calls_timed(
     stats: Dict[Tuple[str, str, int], FuncStat] = {}
     stack: List[FrameRec] = []
 
-    # crude stdlib filter heuristic (optional)
+    # crude stdlib filter heuristic
     def _is_probably_stdlib(mod_name: str, filename: str) -> bool:
         if mod_name.startswith("ctypes") or mod_name.startswith("typing"):
             return True
@@ -146,7 +146,6 @@ def trace_calls_timed(
         sys.setprofile(old)
         t1 = time.perf_counter_ns()
 
-        # Pretty print summary here (optional). If you prefer printing outside, delete below.
         total_ms = (t1 - t0) / 1_000_000
         items = list(stats.items())
 

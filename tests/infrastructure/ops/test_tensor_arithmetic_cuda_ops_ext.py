@@ -40,11 +40,9 @@ from src.keydnn.infrastructure.ops.tensor_arithmetic_cuda_ext import (
     sub,
     div,
     gt,
-    # scalar ops
     add_scalar,
     sub_scalar,
     div_scalar,
-    # NEW: in-place ops
     add_inplace,
     sub_inplace,
     div_inplace,
@@ -57,20 +55,20 @@ from src.keydnn.infrastructure.ops.tensor_arithmetic_cuda_ext import (
 def _get_cuda_device(index: int = 0) -> Device:
     """Best-effort helper to obtain a CUDA Device instance across possible Device APIs."""
     if hasattr(Device, "cuda") and callable(getattr(Device, "cuda")):
-        return Device.cuda(index)  # type: ignore[attr-defined]
+        return Device.cuda(index)
 
     try:
-        return Device("cuda", index)  # type: ignore[call-arg]
+        return Device("cuda", index)
     except Exception:
         pass
 
     try:
-        return Device(f"cuda:{index}")  # type: ignore[call-arg]
+        return Device(f"cuda:{index}")
     except Exception:
         pass
 
     try:
-        return Device(kind="cuda", index=index)  # type: ignore[call-arg]
+        return Device(kind="cuda", index=index)
     except Exception as e:
         raise RuntimeError(
             "Unable to construct a CUDA Device; update _get_cuda_device() for this repo."
@@ -162,14 +160,11 @@ class TestTensorArithmeticCudaExt(unittest.TestCase):
         Verify we are not accidentally using multiple ctypes.CDLL handles for the same DLL.
         This is a common cause of weird hangs / status=1 memcpy failures on Windows.
         """
-        # Test's lib (loaded via pool2d_cuda._load_cuda_lib)
+
         lib_test = self.lib
 
-        # Tensor singleton lib (loaded via Tensor._get_cuda_lib())
         lib_tensor = Tensor._get_cuda_lib()
 
-        # If these differ, you have multiple CDLL objects floating around
-        # (even if they point to the same DLL path).
         self.assertIs(
             lib_tensor,
             lib_test,
@@ -177,16 +172,12 @@ class TestTensorArithmeticCudaExt(unittest.TestCase):
             "Unify all load paths to a single shared singleton.",
         )
 
-        # Optional: also check the wrapper loader if it exists
         if hasattr(tensor_mod, "_load_cuda_lib") and callable(
             getattr(tensor_mod, "_load_cuda_lib")
         ):
             lib_other = tensor_mod._load_cuda_lib()
             self.assertIs(lib_other, lib_test)
 
-    # ----------------------------
-    # Helpers
-    # ----------------------------
     def _make_cuda_tensor_from_host(self, x: np.ndarray) -> Tensor:
         """Allocate device memory, copy host -> device, and wrap as CUDA Tensor."""
         x_c = np.ascontiguousarray(x)
@@ -226,9 +217,6 @@ class TestTensorArithmeticCudaExt(unittest.TestCase):
             requires_grad=False,
         )
 
-    # ----------------------------
-    # Correctness: unary
-    # ----------------------------
     def test_neg_f32_matches_numpy(self) -> None:
         rng = np.random.default_rng(0)
         x = rng.standard_normal((64,), dtype=np.float32)
@@ -255,9 +243,6 @@ class TestTensorArithmeticCudaExt(unittest.TestCase):
         y = self._read_cuda_tensor_to_host(y_t)
         np.testing.assert_allclose(y, -x, rtol=1e-10, atol=1e-10)
 
-    # ----------------------------
-    # Correctness: binary (tensor-tensor)
-    # ----------------------------
     def test_add_f32_matches_numpy(self) -> None:
         rng = np.random.default_rng(2)
         a = rng.standard_normal((8, 9), dtype=np.float32)
@@ -305,9 +290,6 @@ class TestTensorArithmeticCudaExt(unittest.TestCase):
         y = self._read_cuda_tensor_to_host(y_t)
         np.testing.assert_allclose(y, a / b, rtol=1e-3, atol=1e-3)
 
-    # ----------------------------
-    # Correctness: scalar (tensor-scalar)
-    # ----------------------------
     def test_add_scalar_f32_matches_numpy(self) -> None:
         rng = np.random.default_rng(10)
         a = rng.standard_normal((33,), dtype=np.float32)
@@ -364,9 +346,6 @@ class TestTensorArithmeticCudaExt(unittest.TestCase):
         with self.assertRaises(TypeError):
             _ = div_scalar(a_t, 2.0, device=self.device_index)
 
-    # ----------------------------
-    # Correctness: compare
-    # ----------------------------
     def test_gt_f32_outputs_float32_and_matches_numpy(self) -> None:
         rng = np.random.default_rng(5)
         a = rng.standard_normal((32,), dtype=np.float32)
@@ -401,9 +380,6 @@ class TestTensorArithmeticCudaExt(unittest.TestCase):
         ref = (a > b).astype(np.float32)
         np.testing.assert_allclose(y, ref, rtol=0.0, atol=0.0)
 
-    # ----------------------------
-    # NEW: In-place ops correctness
-    # ----------------------------
     def test_add_inplace_f32_mutates_lhs_and_matches_numpy(self) -> None:
         rng = np.random.default_rng(20)
         a = rng.standard_normal((16,), dtype=np.float32)
@@ -520,14 +496,14 @@ class TestTensorArithmeticCudaExt(unittest.TestCase):
         b_np = np.ones((2, 3), dtype=np.float32)
 
         if hasattr(Tensor, "from_numpy") and callable(getattr(Tensor, "from_numpy")):
-            a_cpu = Tensor.from_numpy(a_np, device=Device("cpu"))  # type: ignore[call-arg]
-            b_cpu = Tensor.from_numpy(b_np, device=Device("cpu"))  # type: ignore[call-arg]
+            a_cpu = Tensor.from_numpy(a_np, device=Device("cpu"))
+            b_cpu = Tensor.from_numpy(b_np, device=Device("cpu"))
         else:
             try:
-                a_cpu = Tensor(a_np.shape, device=Device("cpu"), requires_grad=False)  # type: ignore[call-arg]
-                a_cpu._data = a_np  # type: ignore[attr-defined]
-                b_cpu = Tensor(b_np.shape, device=Device("cpu"), requires_grad=False)  # type: ignore[call-arg]
-                b_cpu._data = b_np  # type: ignore[attr-defined]
+                a_cpu = Tensor(a_np.shape, device=Device("cpu"), requires_grad=False)
+                a_cpu._data = a_np
+                b_cpu = Tensor(b_np.shape, device=Device("cpu"), requires_grad=False)
+                b_cpu._data = b_np
             except Exception as e:
                 raise unittest.SkipTest(
                     f"Unable to construct CPU tensors; update test_inplace_raises_on_cpu_tensor: {e}"
@@ -537,11 +513,10 @@ class TestTensorArithmeticCudaExt(unittest.TestCase):
             add_inplace(a_cpu, b_cpu, device=self.device_index)
 
     def test_inplace_numel_zero_is_ok_tensor_tensor(self) -> None:
-        # Avoid cuda_malloc(0) by using dev_ptr=0; kernels must early-return on n<=0.
+
         a_t = self._make_empty_cuda_tensor((0,), np.float32)
         b_t = self._make_empty_cuda_tensor((0,), np.float32)
 
-        # Should be a no-op and should not raise.
         add_inplace(a_t, b_t, device=self.device_index)
         sub_inplace(a_t, b_t, device=self.device_index)
         div_inplace(a_t, b_t, device=self.device_index)
@@ -557,9 +532,6 @@ class TestTensorArithmeticCudaExt(unittest.TestCase):
 
         self.assertEqual(int(a_t.data), 0)
 
-    # ----------------------------
-    # Error handling (existing)
-    # ----------------------------
     def test_add_raises_on_dtype_mismatch(self) -> None:
         rng = np.random.default_rng(7)
         a = rng.standard_normal((4, 4), dtype=np.float32)
@@ -593,11 +565,11 @@ class TestTensorArithmeticCudaExt(unittest.TestCase):
         a_np = np.ones((2, 3), dtype=np.float32)
 
         if hasattr(Tensor, "from_numpy") and callable(getattr(Tensor, "from_numpy")):
-            a_cpu = Tensor.from_numpy(a_np, device=Device("cpu"))  # type: ignore[call-arg]
+            a_cpu = Tensor.from_numpy(a_np, device=Device("cpu"))
         else:
             try:
-                a_cpu = Tensor(a_np.shape, device=Device("cpu"), requires_grad=False)  # type: ignore[call-arg]
-                a_cpu._data = a_np  # type: ignore[attr-defined]
+                a_cpu = Tensor(a_np.shape, device=Device("cpu"), requires_grad=False)
+                a_cpu._data = a_np
             except Exception as e:
                 raise unittest.SkipTest(
                     f"Unable to construct CPU tensors; update test_scalar_ops_raise_on_cpu_tensor: {e}"
@@ -615,14 +587,14 @@ class TestTensorArithmeticCudaExt(unittest.TestCase):
         b_np = np.ones((2, 3), dtype=np.float32)
 
         if hasattr(Tensor, "from_numpy") and callable(getattr(Tensor, "from_numpy")):
-            a_cpu = Tensor.from_numpy(a_np, device=Device("cpu"))  # type: ignore[call-arg]
-            b_cpu = Tensor.from_numpy(b_np, device=Device("cpu"))  # type: ignore[call-arg]
+            a_cpu = Tensor.from_numpy(a_np, device=Device("cpu"))
+            b_cpu = Tensor.from_numpy(b_np, device=Device("cpu"))
         else:
             try:
-                a_cpu = Tensor(a_np.shape, device=Device("cpu"), requires_grad=False)  # type: ignore[call-arg]
-                a_cpu._data = a_np  # type: ignore[attr-defined]
-                b_cpu = Tensor(b_np.shape, device=Device("cpu"), requires_grad=False)  # type: ignore[call-arg]
-                b_cpu._data = b_np  # type: ignore[attr-defined]
+                a_cpu = Tensor(a_np.shape, device=Device("cpu"), requires_grad=False)
+                a_cpu._data = a_np
+                b_cpu = Tensor(b_np.shape, device=Device("cpu"), requires_grad=False)
+                b_cpu._data = b_np
             except Exception as e:
                 raise unittest.SkipTest(
                     f"Unable to construct CPU tensors; update test_raises_on_cpu_tensor: {e}"

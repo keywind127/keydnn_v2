@@ -9,14 +9,12 @@ static int _ensure_cublas_handle() {
     if (g_handle) return 0;
     cublasStatus_t st = cublasCreate(&g_handle);
     if (st != CUBLAS_STATUS_SUCCESS) return 1;
-    // Optional: use default stream (0). If you later use streams, set it here.
     // cublasSetStream(g_handle, 0);
     return 0;
 }
 
 static int _cublas_to_int(cublasStatus_t st) {
-    // Keep it simple: non-zero error code for your C ABI.
-    // You can map more precisely if you want.
+    // Keep it simple: non-zero error code for C ABI.
     return (st == CUBLAS_STATUS_SUCCESS) ? 0 : 2;
 }
 

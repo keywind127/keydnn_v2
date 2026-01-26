@@ -13,14 +13,6 @@ from src.keydnn.infrastructure.native_cuda.python.avgpool2d_ctypes import (
     avgpool2d_backward_cuda,
 )
 
-# NOTE:
-# This test module intentionally mirrors the coding style used for the
-# maxpool2d CUDA ctypes tests:
-# - setUpClass loads DLL once
-# - skips cleanly if CUDA is unavailable
-# - allocates device buffers explicitly
-# - compares against NumPy reference
-
 
 def _avgpool2d_forward_ref(
     x_pad: np.ndarray,
@@ -102,8 +94,7 @@ class TestAvgPool2DCudaCtypes(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        # Try loading the DLL and selecting device 0.
-        # Skip the entire suite if unavailable.
+
         try:
             cls.lib = load_keydnn_cuda_native()
         except Exception as e:
@@ -117,7 +108,6 @@ class TestAvgPool2DCudaCtypes(unittest.TestCase):
     def _run_forward_case(self, dtype: np.dtype) -> None:
         rng = np.random.default_rng(0)
 
-        # Small, deterministic shapes for correctness tests
         N, C = 2, 3
         H_pad, W_pad = 7, 8
         k_h, k_w = 3, 2
@@ -126,10 +116,8 @@ class TestAvgPool2DCudaCtypes(unittest.TestCase):
         H_out = (H_pad - k_h) // s_h + 1
         W_out = (W_pad - k_w) // s_w + 1
 
-        # Zero-padded input (avgpool assumes zeros are meaningful)
         x_pad = rng.normal(size=(N, C, H_pad, W_pad)).astype(dtype, copy=False)
 
-        # Reference
         y_ref = _avgpool2d_forward_ref(
             x_pad,
             N=N,
@@ -144,7 +132,6 @@ class TestAvgPool2DCudaCtypes(unittest.TestCase):
             s_w=s_w,
         )
 
-        # Device allocations
         x_dev = cuda_malloc(self.lib, x_pad.nbytes)
         y = np.empty((N, C, H_out, W_out), dtype=dtype)
         y_dev = cuda_malloc(self.lib, y.nbytes)
@@ -176,7 +163,6 @@ class TestAvgPool2DCudaCtypes(unittest.TestCase):
             cuda_free(self.lib, x_dev)
             cuda_free(self.lib, y_dev)
 
-        # Compare
         atol = 1e-5 if dtype == np.float32 else 1e-12
         rtol = 1e-5 if dtype == np.float32 else 1e-12
         np.testing.assert_allclose(y, y_ref, rtol=rtol, atol=atol)
@@ -215,7 +201,6 @@ class TestAvgPool2DCudaCtypes(unittest.TestCase):
         try:
             cuda_memcpy_h2d(self.lib, grad_out_dev, grad_out)
 
-            # Important: grad_x_pad must be zero-initialized on device
             cuda_memset(self.lib, grad_x_dev, 0, grad_x.nbytes)
 
             avgpool2d_backward_cuda(
@@ -246,10 +231,6 @@ class TestAvgPool2DCudaCtypes(unittest.TestCase):
         rtol = 1e-5 if dtype == np.float32 else 1e-12
         np.testing.assert_allclose(grad_x, grad_x_ref, rtol=rtol, atol=atol)
 
-    # ----------------------------
-    # Tests
-    # ----------------------------
-
     def test_avgpool2d_forward_f32_matches_numpy(self) -> None:
         self._run_forward_case(np.float32)
 
@@ -263,7 +244,7 @@ class TestAvgPool2DCudaCtypes(unittest.TestCase):
         self._run_backward_case(np.float64)
 
     def test_forward_rejects_unsupported_dtype(self) -> None:
-        # Allocate dummy device pointers for call path validation
+
         N, C = 1, 1
         H_pad, W_pad = 4, 4
         k_h, k_w = 2, 2
@@ -295,7 +276,7 @@ class TestAvgPool2DCudaCtypes(unittest.TestCase):
                     k_w=k_w,
                     s_h=s_h,
                     s_w=s_w,
-                    dtype=np.int32,  # unsupported
+                    dtype=np.int32,
                     sync=True,
                 )
         finally:
@@ -335,7 +316,7 @@ class TestAvgPool2DCudaCtypes(unittest.TestCase):
                     k_w=k_w,
                     s_h=s_h,
                     s_w=s_w,
-                    dtype=np.int32,  # unsupported
+                    dtype=np.int32,
                     sync=True,
                 )
         finally:

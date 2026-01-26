@@ -31,14 +31,14 @@ class TestModelSaveLoadConv2dJSON(unittest.TestCase):
                 bias=True,
             ),
         )
-        conv: Conv2d = model[0]  # type: ignore[assignment]
+        conv: Conv2d = model[0]
 
         W = np.arange(2 * 1 * 3 * 3, dtype=np.float32).reshape(2, 1, 3, 3) / 10.0
         b = np.array([0.25, -0.75], dtype=np.float32)
 
         conv.weight.copy_from_numpy(W)
         self.assertIsNotNone(conv.bias)
-        conv.bias.copy_from_numpy(b)  # type: ignore[union-attr]
+        conv.bias.copy_from_numpy(b)
 
         x_np = np.random.randn(1, 1, 4, 4).astype(np.float32)
         x = self._make_input(conv.weight.device, x_np)
@@ -56,11 +56,11 @@ class TestModelSaveLoadConv2dJSON(unittest.TestCase):
 
             loaded = Sequential.load_json(ckpt_path)
 
-        loaded_conv: Conv2d = loaded[0]  # type: ignore[assignment]
+        loaded_conv: Conv2d = loaded[0]
         np.testing.assert_allclose(loaded_conv.weight.to_numpy(), W, rtol=0.0, atol=0.0)
         self.assertIsNotNone(loaded_conv.bias)
         np.testing.assert_allclose(
-            loaded_conv.bias.to_numpy(),  # type: ignore[union-attr]
+            loaded_conv.bias.to_numpy(),
             b,
             rtol=0.0,
             atol=0.0,
@@ -82,7 +82,7 @@ class TestModelSaveLoadConv2dJSON(unittest.TestCase):
                 bias=False,
             ),
         )
-        conv: Conv2d = model[0]  # type: ignore[assignment]
+        conv: Conv2d = model[0]
 
         W = np.arange(2 * 1 * 3 * 3, dtype=np.float32).reshape(2, 1, 3, 3) / 7.0
         conv.weight.copy_from_numpy(W)
@@ -98,7 +98,7 @@ class TestModelSaveLoadConv2dJSON(unittest.TestCase):
             model.save_json(ckpt_path)
             loaded = Sequential.load_json(ckpt_path)
 
-        loaded_conv: Conv2d = loaded[0]  # type: ignore[assignment]
+        loaded_conv: Conv2d = loaded[0]
         self.assertIsNone(loaded_conv.bias)
         np.testing.assert_allclose(loaded_conv.weight.to_numpy(), W, rtol=0.0, atol=0.0)
 
@@ -126,14 +126,14 @@ class TestModelSaveLoadConv2dJSON(unittest.TestCase):
                 bias=False,
             ),
         )
-        c0: Conv2d = model[0]  # type: ignore[assignment]
-        c1: Conv2d = model[1]  # type: ignore[assignment]
+        c0: Conv2d = model[0]
+        c1: Conv2d = model[1]
 
         W0 = np.arange(2 * 1 * 3 * 3, dtype=np.float32).reshape(2, 1, 3, 3) / 11.0
         b0 = np.array([0.1, -0.2], dtype=np.float32)
         c0.weight.copy_from_numpy(W0)
         self.assertIsNotNone(c0.bias)
-        c0.bias.copy_from_numpy(b0)  # type: ignore[union-attr]
+        c0.bias.copy_from_numpy(b0)
 
         W1 = np.arange(1 * 2 * 1 * 1, dtype=np.float32).reshape(1, 2, 1, 1) / 3.0
         c1.weight.copy_from_numpy(W1)
@@ -153,14 +153,14 @@ class TestModelSaveLoadConv2dJSON(unittest.TestCase):
         self.assertIsInstance(loaded[0], Conv2d)
         self.assertIsInstance(loaded[1], Conv2d)
 
-        lc0: Conv2d = loaded[0]  # type: ignore[assignment]
-        lc1: Conv2d = loaded[1]  # type: ignore[assignment]
+        lc0: Conv2d = loaded[0]
+        lc1: Conv2d = loaded[1]
 
         np.testing.assert_allclose(lc0.weight.to_numpy(), W0, rtol=0.0, atol=0.0)
         np.testing.assert_allclose(lc1.weight.to_numpy(), W1, rtol=0.0, atol=0.0)
 
         self.assertIsNotNone(lc0.bias)
-        np.testing.assert_allclose(lc0.bias.to_numpy(), b0, rtol=0.0, atol=0.0)  # type: ignore[union-attr]
+        np.testing.assert_allclose(lc0.bias.to_numpy(), b0, rtol=0.0, atol=0.0)
         self.assertIsNone(lc1.bias)
 
         y_after = loaded.forward(x).to_numpy()

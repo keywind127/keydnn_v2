@@ -10,9 +10,6 @@ from src.keydnn.infrastructure.recurrent._rnn_module import RNN
 from src.keydnn.infrastructure.recurrent._bidirectional import Bidirectional
 
 
-# -----------------------------
-# Helpers (match your style)
-# -----------------------------
 def _tensor_from_numpy(arr: np.ndarray, device: Device, requires_grad: bool) -> Tensor:
     arr = np.asarray(arr, dtype=np.float32)
     t = Tensor(shape=arr.shape, device=device, requires_grad=requires_grad, ctx=None)
@@ -42,9 +39,6 @@ def _zero_grads(module) -> None:
             pt.zero_grad()
 
 
-# -----------------------------
-# Tests
-# -----------------------------
 class TestBidirectionalRNNForward(TestCase):
     def setUp(self) -> None:
         self.device = Device("cpu")
@@ -103,7 +97,7 @@ class TestBidirectionalRNNForward(TestCase):
         base = RNN(input_size=3, hidden_size=4, bias=True)
         bi = Bidirectional(base)
 
-        x = Tensor(shape=(2, 3), device=self.device, requires_grad=False)  # not (T,N,D)
+        x = Tensor(shape=(2, 3), device=self.device, requires_grad=False)
         with self.assertRaises(ValueError):
             _ = bi.forward(x)
 
@@ -118,7 +112,6 @@ class TestBidirectionalRNNForward(TestCase):
         self.assertEqual(bi2.return_sequences, False)
         self.assertEqual(bi2.return_state, True)
 
-        # Ensure inner RNN hyperparams survive roundtrip
         self.assertEqual(bi2.forward_rnn.cell.input_size, 3)
         self.assertEqual(bi2.forward_rnn.cell.hidden_size, 4)
         self.assertEqual(bi2.forward_rnn.cell.bias, False)
@@ -190,7 +183,6 @@ class TestBidirectionalRNNAutograd(TestCase):
         base = RNN(input_size=D, hidden_size=H, bias=True)
         bi = Bidirectional(base, return_sequences=True, return_state=False)
 
-        # Ensure all params require grad
         for p in bi.parameters():
             _unwrap_param_tensor(p).requires_grad = True
 
@@ -200,7 +192,6 @@ class TestBidirectionalRNNAutograd(TestCase):
         y = bi.forward(x)
         y.sum().backward()
 
-        # Check at least one grad exists for forward and backward RNN params
         f_any = False
         for p in bi.forward_rnn.parameters():
             pt = _unwrap_param_tensor(p)
@@ -232,7 +223,6 @@ class TestBidirectionalRNNAutograd(TestCase):
         )
         y, h_f, h_b = bi.forward(x)
 
-        # touch all outputs
         loss = y.sum() + h_f.sum() + h_b.sum()
         loss.backward()
 
@@ -255,41 +245,33 @@ class TestBidirectionalRNNAutograd(TestCase):
         base = RNN(input_size=D, hidden_size=H, bias=True)
         bi = Bidirectional(base, return_sequences=True, return_state=False)
 
-        # ---- deterministic parameters (different for forward/backward to catch mixups) ----
-        Wih_f = np.array(
-            [[0.1, -0.2], [0.3, 0.4], [-0.5, 0.2]], dtype=np.float32
-        )  # (D,H)
-        Whh_f = np.array([[0.2, 0.1], [-0.3, 0.05]], dtype=np.float32)  # (H,H)
-        bih_f = np.array([0.01, -0.02], dtype=np.float32)  # (H,)
-        bhh_f = np.array([0.03, 0.04], dtype=np.float32)  # (H,)
+        Wih_f = np.array([[0.1, -0.2], [0.3, 0.4], [-0.5, 0.2]], dtype=np.float32)
+        Whh_f = np.array([[0.2, 0.1], [-0.3, 0.05]], dtype=np.float32)
+        bih_f = np.array([0.01, -0.02], dtype=np.float32)
+        bhh_f = np.array([0.03, 0.04], dtype=np.float32)
 
         Wih_b = np.array([[-0.05, 0.15], [0.25, -0.35], [0.45, 0.05]], dtype=np.float32)
         Whh_b = np.array([[0.1, -0.2], [0.3, 0.4]], dtype=np.float32)
         bih_b = np.array([0.02, 0.01], dtype=np.float32)
         bhh_b = np.array([-0.01, 0.05], dtype=np.float32)
 
-        # ---- assign into forward cell ----
         fcell = bi.forward_rnn.cell
         _unwrap_param_tensor(fcell.W_ih).copy_from_numpy(Wih_f)
         _unwrap_param_tensor(fcell.W_hh).copy_from_numpy(Whh_f)
         _unwrap_param_tensor(fcell.b_ih).copy_from_numpy(bih_f)
         _unwrap_param_tensor(fcell.b_hh).copy_from_numpy(bhh_f)
 
-        # ---- assign into backward cell ----
         bcell = bi.backward_rnn.cell
         _unwrap_param_tensor(bcell.W_ih).copy_from_numpy(Wih_b)
         _unwrap_param_tensor(bcell.W_hh).copy_from_numpy(Whh_b)
         _unwrap_param_tensor(bcell.b_ih).copy_from_numpy(bih_b)
         _unwrap_param_tensor(bcell.b_hh).copy_from_numpy(bhh_b)
 
-        # ---- input ----
         x_np = (np.arange(T * N * D, dtype=np.float32).reshape(T, N, D) / 10.0) - 0.2
         x = _tensor_from_numpy(x_np, self.device, requires_grad=False)
 
-        # ---- KeyDNN output ----
-        y = bi.forward(x).to_numpy()  # (T,N,2H)
+        y = bi.forward(x).to_numpy()
 
-        # ---- NumPy reference ----
         def rnn_seq_numpy(
             x_seq: np.ndarray,
             Wih: np.ndarray,
@@ -310,19 +292,15 @@ class TestBidirectionalRNNAutograd(TestCase):
                 )
                 h_prev = np.tanh(a).astype(np.float32)
                 hs.append(h_prev)
-            return np.stack(hs, axis=0)  # (T,N,H)
+            return np.stack(hs, axis=0)
 
-        # forward direction: time 0..T-1
         h_f = rnn_seq_numpy(x_np, Wih_f, Whh_f, bih_f, bhh_f)
 
-        # backward direction: process reversed time, then align back to original order
-        x_rev = x_np[::-1].copy()  # (T,N,D)
-        h_b_rev = rnn_seq_numpy(
-            x_rev, Wih_b, Whh_b, bih_b, bhh_b
-        )  # corresponds to times T-1..0
-        h_b = h_b_rev[::-1].copy()  # align to original time order
+        x_rev = x_np[::-1].copy()
+        h_b_rev = rnn_seq_numpy(x_rev, Wih_b, Whh_b, bih_b, bhh_b)
+        h_b = h_b_rev[::-1].copy()
 
-        ref = np.concatenate([h_f, h_b], axis=2)  # (T,N,2H)
+        ref = np.concatenate([h_f, h_b], axis=2)
 
         self.assertEqual(y.shape, ref.shape)
         np.testing.assert_allclose(y, ref, rtol=1e-6, atol=1e-6)

@@ -35,20 +35,20 @@ def _get_cuda_device(index: int = 0) -> Device:
     Best-effort helper to obtain a CUDA Device instance across possible Device APIs.
     """
     if hasattr(Device, "cuda") and callable(getattr(Device, "cuda")):
-        return Device.cuda(index)  # type: ignore[attr-defined]
+        return Device.cuda(index)
 
     try:
-        return Device("cuda", index)  # type: ignore[call-arg]
+        return Device("cuda", index)
     except Exception:
         pass
 
     try:
-        return Device(f"cuda:{index}")  # type: ignore[call-arg]
+        return Device(f"cuda:{index}")
     except Exception:
         pass
 
     try:
-        return Device(kind="cuda", index=index)  # type: ignore[call-arg]
+        return Device(kind="cuda", index=index)
     except Exception as e:
         raise RuntimeError(
             "Unable to construct a CUDA Device; update _get_cuda_device() for this repo."
@@ -116,13 +116,16 @@ def _make_cpu_tensor_from_numpy(x: np.ndarray) -> Tensor:
     x_c = np.ascontiguousarray(x)
     try:
         if hasattr(Tensor, "from_numpy") and callable(getattr(Tensor, "from_numpy")):
-            return Tensor.from_numpy(x_c, device=Device("cpu"))  # type: ignore[call-arg]
+            return Tensor.from_numpy(x_c, device=Device("cpu"))
     except Exception:
         pass
 
-    # Fallback used in other tests in this repo
-    t = Tensor(shape=tuple(int(d) for d in x_c.shape), device=Device("cpu"), requires_grad=False)  # type: ignore[call-arg]
-    # Many KeyDNN builds use _data for CPU ndarray storage
+    t = Tensor(
+        shape=tuple(int(d) for d in x_c.shape),
+        device=Device("cpu"),
+        requires_grad=False,
+    )
+
     setattr(t, "_data", x_c)
     return t
 
@@ -173,9 +176,6 @@ class TestTensorAddSubCuda(unittest.TestCase):
         _d2h(self.lib, int(t.data), host)
         return host
 
-    # ----------------------------
-    # ADD
-    # ----------------------------
     def test_add_tensor_tensor_cuda_f32_matches_numpy(self) -> None:
         rng = np.random.default_rng(0)
         a = rng.standard_normal((32,), dtype=np.float32)
@@ -236,9 +236,6 @@ class TestTensorAddSubCuda(unittest.TestCase):
         y = self._read_cuda_tensor_to_host(y_t)
         np.testing.assert_allclose(y, a + 2.5, rtol=1e-4, atol=1e-4)
 
-    # ----------------------------
-    # SUB
-    # ----------------------------
     def test_sub_tensor_tensor_cuda_f32_matches_numpy(self) -> None:
         rng = np.random.default_rng(4)
         a = rng.standard_normal((25,), dtype=np.float32)
@@ -275,7 +272,7 @@ class TestTensorAddSubCuda(unittest.TestCase):
 
         a_t = self._make_cuda_tensor_from_host(a)
 
-        y_t = a_t - 1.25  # scalar lifts to float32 in this repo
+        y_t = a_t - 1.25
         self.assertTrue(y_t.device.is_cuda())
         self.assertEqual(tuple(y_t.shape), (13,))
         self.assertEqual(np.dtype(y_t.dtype), np.float32)
@@ -283,9 +280,6 @@ class TestTensorAddSubCuda(unittest.TestCase):
         y = self._read_cuda_tensor_to_host(y_t)
         np.testing.assert_allclose(y, a - np.float32(1.25), rtol=1e-4, atol=1e-4)
 
-    # ----------------------------
-    # Error cases
-    # ----------------------------
     def test_add_raises_on_shape_mismatch_cuda(self) -> None:
         rng = np.random.default_rng(7)
         a = rng.standard_normal((8,), dtype=np.float32)
@@ -337,7 +331,6 @@ class TestTensorAddSubCuda(unittest.TestCase):
         a_cpu = _make_cpu_tensor_from_numpy(a)
         b_cpu = _make_cpu_tensor_from_numpy(b)
 
-        # This should hit CPU path and succeed (backward compatibility sanity)
         y = a_cpu + b_cpu
         self.assertTrue(y.device.is_cpu())
         np.testing.assert_allclose(y.to_numpy(), a + b)

@@ -44,8 +44,6 @@ class TestTransposeCudaOps(unittest.TestCase):
         try:
             self.env.cudaMemcpyHtoD(self.env.lib, int(x_dev), x, int(x.nbytes))
 
-            # transpose op signature candidates:
-            # transpose2d(lib, x_dev=..., y_dev=..., rows=..., cols=..., dtype=..., sync=True)
             self.transpose2d(
                 self.env.lib,
                 x_dev=int(x_dev),
@@ -71,7 +69,7 @@ class TestTransposeCudaOps(unittest.TestCase):
         self._run_case(np.float64, shape=(3, 11))
 
     def test_transpose_rejects_non_2d(self) -> None:
-        # ops module should reject invalid rows/cols or shape semantics
+
         x = np.random.randn(2, 3, 4).astype(np.float32)
         x_dev = self._malloc(int(x.nbytes))
         y_dev = self._malloc(int(x.nbytes))
@@ -83,7 +81,7 @@ class TestTransposeCudaOps(unittest.TestCase):
                     x_dev=int(x_dev),
                     y_dev=int(y_dev),
                     rows=2,
-                    cols=3,  # caller pretending it's 2D; wrapper may validate more strictly
+                    cols=3,
                     dtype=np.float32,
                     sync=True,
                 )

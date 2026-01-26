@@ -29,6 +29,9 @@ import numpy as np
 
 from ..dto.train_mnist_config import TrainMnistConfig
 
+from ...infrastructure.random import _seed as random_seed
+from ...infrastructure.random import _determinism as determinism
+
 
 def _cuda_available() -> bool:
     """
@@ -324,6 +327,9 @@ def run_train_mnist_mlp(cfg: TrainMnistConfig) -> int:
         raise RuntimeError(
             f"Requested device={cfg.device}, but CUDA wrappers are not available."
         )
+
+    random_seed.seed(int(cfg.seed))
+    determinism.set_deterministic(True, cpu_threads=4)
 
     device = _device_from_string(cfg.device)
 

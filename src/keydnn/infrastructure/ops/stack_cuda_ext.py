@@ -28,7 +28,7 @@ Notes
 -----
 - This module assumes input tensors are contiguous CUDA tensors.
 - The underlying backward kernel writes into `dx` buffers without accumulation
-  (overwrite semantics). If you need accumulation, do it outside this module.
+  (overwrite semantics).
 - Temporary device allocations made by the ctypes wrappers (pointer arrays) are
   explicitly freed here.
 
@@ -39,7 +39,7 @@ This module is written to avoid implicit global synchronizations.
 - Both forward and backward calls accept `sync` (default False). When False, the
   CUDA work is enqueued on the current stream and may complete asynchronously.
 - For benchmarking correctness or latency-sensitive boundaries, pass `sync=True`
-  (or synchronize in your benchmark harness around timing windows).
+  (or synchronize in the benchmark harness around timing windows).
 """
 
 from __future__ import annotations
@@ -396,7 +396,7 @@ def stack_backward(
 
     Notes
     -----
-    The underlying kernel overwrites each `dx` buffer (no accumulation). If your
+    The underlying kernel overwrites each `dx` buffer (no accumulation). If
     autograd requires accumulation, accumulate at a higher level.
     """
     device_index: int = grad_out.device.index

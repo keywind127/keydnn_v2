@@ -64,7 +64,6 @@ class TestDropout(TestCase):
 
         y = d(x)
 
-        # by design, dropout returns x directly in eval mode
         self.assertIs(y, x)
         np.testing.assert_allclose(y.to_numpy(), x_np, rtol=0.0, atol=0.0)
 
@@ -129,7 +128,6 @@ class TestDropout(TestCase):
                 ok, msg=f"Unexpected grad value {val}; expected 0 or {scale}"
             )
 
-        # likely both dropped and kept are present
         self.assertTrue(np.any(np.isclose(g, 0.0)))
         self.assertTrue(np.any(np.isclose(g, scale)))
 
@@ -158,7 +156,6 @@ class TestDropout(TestCase):
         self.assertIsInstance(d2, Dropout)
         self.assertAlmostEqual(d2.p, 0.3)
 
-        # runtime state not serialized
         self.assertTrue(d2.training)
 
 

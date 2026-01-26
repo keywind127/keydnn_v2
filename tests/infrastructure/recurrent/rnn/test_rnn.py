@@ -16,10 +16,6 @@ def _tensor_from_numpy(arr: np.ndarray, device: Device, requires_grad: bool) -> 
 
 
 def _unwrap_param_tensor(p):
-    """
-    Same pattern as your Conv2d tests: treat Parameter as Tensor-like
-    or unwrap .data/.tensor if you later change design.
-    """
     if hasattr(p, "to_numpy") and hasattr(p, "copy_from_numpy"):
         return p
     if hasattr(p, "data"):
@@ -27,11 +23,6 @@ def _unwrap_param_tensor(p):
     if hasattr(p, "tensor"):
         return p.tensor
     raise TypeError(f"Unsupported Parameter structure: {type(p)!r}")
-
-
-# NOTE: Removed _ensure_parameter_from_numpy and all Parameter.from_numpy usage.
-# After updating RNNCell.__post_init__ to use explicit Parameter(...) + copy_from_numpy,
-# tests should not patch or depend on from_numpy at all.
 
 
 class TestRNNCellForward(TestCase):
@@ -58,7 +49,6 @@ class TestRNNCellForward(TestCase):
         N, D, H = 2, 3, 4
         cell = RNNCell(input_size=D, hidden_size=H, bias=True)
 
-        # Deterministic params
         Wih = np.arange(D * H, dtype=np.float32).reshape(D, H) / 10.0
         Whh = (np.arange(H * H, dtype=np.float32).reshape(H, H) / 20.0) - 0.1
         bih = np.linspace(-0.2, 0.2, H, dtype=np.float32)
@@ -77,7 +67,6 @@ class TestRNNCellForward(TestCase):
 
         out = cell.forward(x, h_prev).to_numpy()
 
-        # Reference (matches your bias-expansion rule)
         a = x_np @ Wih + h_np @ Whh
         a = (
             a
@@ -98,7 +87,6 @@ class TestRNNCellBackward(TestCase):
         N, D, H = 3, 4, 5
         cell = RNNCell(input_size=D, hidden_size=H, bias=True)
 
-        # Ensure params require grad (Parameter defaults True, but be explicit)
         for p in cell.parameters():
             _unwrap_param_tensor(p).requires_grad = True
 

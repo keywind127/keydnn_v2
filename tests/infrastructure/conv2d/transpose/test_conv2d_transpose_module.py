@@ -25,8 +25,6 @@ def _unwrap_param_tensor(p):
     Supports:
       - Parameter is Tensor-like (has to_numpy/copy_from_numpy)
       - Parameter wraps Tensor in `.data` or `.tensor`
-
-    Adjust this helper if your Parameter uses a different attribute name.
     """
     if hasattr(p, "to_numpy") and hasattr(p, "copy_from_numpy"):
         return p
@@ -56,9 +54,8 @@ class TestConv2dTransposeModule(unittest.TestCase):
         x = Tensor(shape=(2, 3, 10, 9), device=self.device, requires_grad=False)
         y = deconv.forward(x)
 
-        # Reference shape from CPU op
         x_np = x.to_numpy()
-        w_np = _unwrap_param_tensor(deconv.weight).to_numpy()  # (C_in, C_out, K_h, K_w)
+        w_np = _unwrap_param_tensor(deconv.weight).to_numpy()
         b_np = (
             _unwrap_param_tensor(deconv.bias).to_numpy()
             if deconv.bias is not None
@@ -97,8 +94,6 @@ class TestConv2dTransposeModule(unittest.TestCase):
             device=self.device,
         )
 
-        # Deterministic parameters
-        # NOTE: transpose-conv weight is IOHW: (C_in, C_out, K_h, K_w)
         w_np = np.random.randn(2, 3, 3, 2).astype(np.float32)
         b_np = np.random.randn(3).astype(np.float32)
 
@@ -108,11 +103,9 @@ class TestConv2dTransposeModule(unittest.TestCase):
         b_t = _unwrap_param_tensor(deconv.bias)
         b_t.copy_from_numpy(b_np)
 
-        # Input
         x_np = np.random.randn(1, 2, 5, 4).astype(np.float32)
         x = _tensor_from_numpy(x_np, self.device, requires_grad=True)
 
-        # Forward + backward
         y = deconv.forward(x)
         loss = y.sum()
         loss.backward()
@@ -125,7 +118,6 @@ class TestConv2dTransposeModule(unittest.TestCase):
         self.assertIsNotNone(w_grad_holder.grad, "weight.grad should be populated")
         self.assertIsNotNone(b_grad_holder.grad, "bias.grad should be populated")
 
-        # CPU reference under L = sum(y)
         y_ref = conv2d_transpose_forward_cpu(
             x_np, w_np, b_np, stride=(1, 2), padding=(1, 0), output_padding=(0, 0)
         )
@@ -167,7 +159,6 @@ class TestConv2dTransposeModule(unittest.TestCase):
         x_np = np.random.randn(1, 2, 4, 3).astype(np.float32)
         x = _tensor_from_numpy(x_np, self.device, requires_grad=True)
 
-        # Set deterministic weight
         w_np = np.random.randn(2, 2, 3, 3).astype(np.float32)
         _unwrap_param_tensor(deconv.weight).copy_from_numpy(w_np)
 
@@ -179,7 +170,6 @@ class TestConv2dTransposeModule(unittest.TestCase):
         w_grad_holder = _unwrap_param_tensor(deconv.weight)
         self.assertIsNotNone(w_grad_holder.grad)
 
-        # CPU reference (bias None)
         y_ref = conv2d_transpose_forward_cpu(
             x_np, w_np, None, stride=(1, 2), padding=(1, 1), output_padding=(0, 0)
         )
@@ -235,7 +225,7 @@ class TestConv2dTransposeModule(unittest.TestCase):
             output_padding=(1, 0),
         )
         self.assertEqual(y.shape, y_ref.shape)
-        # Numerical equality (module->Fn->ops) should match CPU kernel closely
+
         np.testing.assert_allclose(y.to_numpy(), y_ref, rtol=1e-4, atol=1e-4)
 
 

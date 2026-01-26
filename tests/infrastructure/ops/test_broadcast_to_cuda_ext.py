@@ -1,4 +1,3 @@
-# tests/infrastructure/ops/test_broadcast_to_cuda_ext.py
 """
 Unit tests for CUDA Tensor-boundary broadcast_to ops wrapper (broadcast_to_cuda_ext.py).
 
@@ -38,20 +37,20 @@ from src.keydnn.infrastructure.ops.broadcast_to_cuda_ext import (
 def _get_cuda_device(index: int = 0) -> Device:
     """Best-effort helper to obtain a CUDA Device instance across possible Device APIs."""
     if hasattr(Device, "cuda") and callable(getattr(Device, "cuda")):
-        return Device.cuda(index)  # type: ignore[attr-defined]
+        return Device.cuda(index)
 
     try:
-        return Device("cuda", index)  # type: ignore[call-arg]
+        return Device("cuda", index)
     except Exception:
         pass
 
     try:
-        return Device(f"cuda:{index}")  # type: ignore[call-arg]
+        return Device(f"cuda:{index}")
     except Exception:
         pass
 
     try:
-        return Device(kind="cuda", index=index)  # type: ignore[call-arg]
+        return Device(kind="cuda", index=index)
     except Exception as e:
         raise RuntimeError(
             "Unable to construct a CUDA Device; update _get_cuda_device()."
@@ -143,7 +142,6 @@ class TestBroadcastToCudaExt(unittest.TestCase):
         x_arr = np.asarray(x)
         x_c = np.ascontiguousarray(x_arr)
 
-        # allocate at least 1 byte (cuda_malloc(0) may fail)
         nbytes = int(x_c.nbytes)
         alloc_bytes = max(1, nbytes)
 
@@ -181,7 +179,6 @@ class TestBroadcastToCudaExt(unittest.TestCase):
         dtype = np.dtype(dtype)
         rng = np.random.default_rng(seed)
 
-        # Ensure x is an ndarray even for scalar (0-d) shapes.
         if len(in_shape) == 0:
             x = (np.array(rng.random(), dtype=np.float64) - 0.5).astype(
                 dtype, copy=False
@@ -209,37 +206,29 @@ class TestBroadcastToCudaExt(unittest.TestCase):
         else:
             np.testing.assert_allclose(y, y_ref, rtol=1e-12, atol=1e-12)
 
-    # -------------------------
-    # Correctness tests
-    # -------------------------
-
     def test_broadcast_to_forward_f32_basic_expand(self) -> None:
-        # (3,1) -> (3,5)
+
         self._run_case(np.float32, (3, 1), (3, 5), seed=1)
 
     def test_broadcast_to_forward_f32_rank_increase(self) -> None:
-        # (4,) -> (2,4)
+
         self._run_case(np.float32, (4,), (2, 4), seed=2)
 
     def test_broadcast_to_forward_f32_multi_axis(self) -> None:
-        # (1,3,1) -> (2,3,4)
+
         self._run_case(np.float32, (1, 3, 1), (2, 3, 4), seed=3)
 
     def test_broadcast_to_forward_f64_basic_expand(self) -> None:
-        # (2,1,3) -> (2,7,3)
+
         self._run_case(np.float64, (2, 1, 3), (2, 7, 3), seed=4)
 
     def test_broadcast_to_forward_f64_scalar_to_tensor(self) -> None:
-        # () -> (2,3,4)
+
         self._run_case(np.float64, tuple(), (2, 3, 4), seed=5)
 
     def test_broadcast_to_forward_preserves_multi_dim_shape(self) -> None:
-        # (2,1,4,1) -> (2,3,4,5)
-        self._run_case(np.float32, (2, 1, 4, 1), (2, 3, 4, 5), seed=6)
 
-    # -------------------------
-    # Edge cases
-    # -------------------------
+        self._run_case(np.float32, (2, 1, 4, 1), (2, 3, 4, 5), seed=6)
 
     def test_broadcast_to_forward_zero_numel_is_ok(self) -> None:
         """
@@ -260,12 +249,8 @@ class TestBroadcastToCudaExt(unittest.TestCase):
         y = self._read_cuda_tensor_to_host(y_t)
         self.assertEqual(y.size, 0)
 
-    # -------------------------
-    # Error behavior
-    # -------------------------
-
     def test_raises_on_incompatible_shapes(self) -> None:
-        # (2,3) cannot broadcast to (2,4)
+
         rng = np.random.default_rng(10)
         x = (rng.standard_normal((2, 3), dtype=np.float32) - 0.5).astype(
             np.float32, copy=False
@@ -276,7 +261,7 @@ class TestBroadcastToCudaExt(unittest.TestCase):
             _ = broadcast_to_forward(x_t, (2, 4), device=self.device_index, sync=True)
 
     def test_raises_on_unsupported_dtype(self) -> None:
-        # int32 should be rejected
+
         x = np.arange(6, dtype=np.int32).reshape(2, 3)
         x_t = self._make_cuda_tensor_from_host(x)
 
@@ -284,16 +269,15 @@ class TestBroadcastToCudaExt(unittest.TestCase):
             _ = broadcast_to_forward(x_t, (2, 3), device=self.device_index, sync=True)
 
     def test_raises_on_cpu_tensor(self) -> None:
-        # CPU tensor input should raise TypeError
+
         x_np = np.ones((4,), dtype=np.float32)
 
-        # Best-effort CPU tensor construction (mirrors your mul tests)
         if hasattr(Tensor, "from_numpy") and callable(getattr(Tensor, "from_numpy")):
-            x_cpu = Tensor.from_numpy(x_np, device=Device("cpu"))  # type: ignore[call-arg]
+            x_cpu = Tensor.from_numpy(x_np, device=Device("cpu"))
         else:
             try:
-                x_cpu = Tensor(x_np.shape, device=Device("cpu"), requires_grad=False)  # type: ignore[call-arg]
-                x_cpu._data = x_np  # type: ignore[attr-defined]
+                x_cpu = Tensor(x_np.shape, device=Device("cpu"), requires_grad=False)
+                x_cpu._data = x_np
             except Exception as e:
                 raise unittest.SkipTest(
                     f"Unable to construct CPU tensor in this repo; update test_raises_on_cpu_tensor: {e}"

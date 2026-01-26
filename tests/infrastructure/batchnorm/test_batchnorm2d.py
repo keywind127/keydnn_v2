@@ -9,13 +9,13 @@ from src.keydnn.infrastructure.layers._batchnorm import BatchNorm2d
 
 try:
     from src.keydnn.infrastructure.convolution._conv2d_module import Conv2d
-except Exception:  # pragma: no cover
-    Conv2d = None  # type: ignore
+except Exception:
+    Conv2d = None
 
 try:
     from src.keydnn.infrastructure.layers._dropout import Dropout
-except Exception:  # pragma: no cover
-    Dropout = None  # type: ignore
+except Exception:
+    Dropout = None
 
 
 def _tensor_from_numpy(arr: np.ndarray, device: Device, requires_grad: bool) -> Tensor:
@@ -73,7 +73,7 @@ def _make_conv2d(
             device=device,
         )
     except TypeError:
-        # fallback (no device kw)
+
         return Conv2d(
             in_channels,
             out_channels,
@@ -113,7 +113,7 @@ class TestBatchNorm2dInfrastructure(TestCase):
 
     def test_parameters_exist_only_when_affine_true(self):
         bn_aff = BatchNorm2d(num_features=4, device=self.device, affine=True)
-        self.assertEqual(len(list(bn_aff.parameters())), 2)  # gamma + beta
+        self.assertEqual(len(list(bn_aff.parameters())), 2)
 
         bn_no = BatchNorm2d(num_features=4, device=self.device, affine=False)
         self.assertEqual(len(list(bn_no.parameters())), 0)
@@ -137,7 +137,7 @@ class TestBatchNorm2dForward(TestCase):
 
     def test_forward_rejects_feature_mismatch(self):
         bn = BatchNorm2d(num_features=3, device=self.device)
-        x = Tensor((2, 5, 4, 4), self.device)  # C=5 mismatch
+        x = Tensor((2, 5, 4, 4), self.device)
         with self.assertRaises(ValueError):
             bn.forward(x)
 
@@ -158,7 +158,6 @@ class TestBatchNorm2dForward(TestCase):
 
         y = bn.forward(x).to_numpy()
 
-        # mean/var per channel over (N,H,W)
         mean = y.mean(axis=(0, 2, 3))
         var = y.var(axis=(0, 2, 3))
 
@@ -272,9 +271,6 @@ class TestBatchNorm2dBackward(TestCase):
         self.assertEqual(x.grad.shape, x.shape)
 
 
-# ---------------------------------------------------------------------
-# Chained tests
-# ---------------------------------------------------------------------
 class TestBatchNorm2dChaining(TestCase):
     def setUp(self) -> None:
         self.device = Device("cpu")
@@ -305,15 +301,12 @@ class TestBatchNorm2dChaining(TestCase):
 
         y.sum().backward()
 
-        # x grad
         self.assertIsNotNone(x.grad)
         self.assertEqual(x.grad.shape, x.shape)
 
-        # BN affine grads
         self.assertIsNotNone(bn.gamma.grad)
         self.assertIsNotNone(bn.beta.grad)
 
-        # Conv params grads (at least one)
         any_conv_grad = False
         for p in conv.parameters():
             pt = _unwrap_param_tensor(p)
@@ -360,7 +353,6 @@ class TestBatchNorm2dChaining(TestCase):
         self.assertIsNotNone(x.grad)
         self.assertEqual(x.grad.shape, x.shape)
 
-        # Conv param grads should exist
         for p in conv.parameters():
             pt = _unwrap_param_tensor(p)
             self.assertIsNotNone(pt.grad)
@@ -429,7 +421,6 @@ class TestBatchNorm2dChaining(TestCase):
         bn = BatchNorm2d(num_features=Cout, device=self.device, affine=False)
         d = Dropout(p=0.5)
 
-        # Train forward updates running stats
         bn.training = True
         d.training = True
         x_train = _tensor_from_numpy(
@@ -437,7 +428,6 @@ class TestBatchNorm2dChaining(TestCase):
         )
         _ = d(bn(conv(x_train)))
 
-        # Eval: deterministic (dropout identity + BN running stats)
         bn.training = False
         d.training = False
         x_eval = _tensor_from_numpy(

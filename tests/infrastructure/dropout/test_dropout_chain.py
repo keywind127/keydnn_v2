@@ -76,7 +76,7 @@ class TestDropoutChaining(TestCase):
         d.training = True
 
         lin = Linear(3, 5, bias=True, device=self.device)
-        # Make linear deterministic and easy: W=1, b=0
+
         lin.weight.fill(1.0)
         lin.bias.fill(0.0)
 
@@ -128,7 +128,6 @@ class TestDropoutChaining(TestCase):
 
         np.random.seed(3)
 
-        # Typical Conv2d input: (N, C, H, W)
         x_np = np.random.randn(2, 3, 8, 8).astype(np.float32)
         x = _make_tensor_from_numpy(x_np, self.device)
         x.requires_grad = True
@@ -136,7 +135,6 @@ class TestDropoutChaining(TestCase):
         d = Dropout(p=0.25)
         d.training = True
 
-        # Adjust args to match your Conv2d signature
         conv = Conv2d(
             in_channels=3,
             out_channels=4,
@@ -147,9 +145,9 @@ class TestDropoutChaining(TestCase):
         )
 
         y = conv(d(x))
-        self.assertEqual(y.shape[0], 2)  # batch
-        self.assertEqual(y.shape[1], 4)  # out_channels
-        self.assertEqual(y.shape[2:], (8, 8))  # padding=1 keeps H,W
+        self.assertEqual(y.shape[0], 2)
+        self.assertEqual(y.shape[1], 4)
+        self.assertEqual(y.shape[2:], (8, 8))
 
         loss = y.sum()
         loss.backward()

@@ -32,8 +32,7 @@ def _tol(dtype: np.dtype) -> tuple[float, float]:
     if dtype == np.float32:
         return 1e-5, 1e-6
     if dtype == np.float64:
-        # ops-ext boundary may not preserve pure-f64 arithmetic end-to-end
-        # return 1e-7, 1e-6
+
         return 1e-5, 1e-6
     return 1e-5, 1e-6
 
@@ -76,7 +75,6 @@ def _safe_rand_case(rng: np.random.Generator) -> dict:
     if op_w >= s_w:
         op_w = 0
 
-    # conservative padding upper bound to keep output > 0
     max_p_h = ((H_in - 1) * s_h + K_h + op_h - 1) // 2
     max_p_w = ((W_in - 1) * s_w + K_w + op_w - 1) // 2
     max_p_h = int(max(0, max_p_h))
@@ -205,7 +203,6 @@ class TestConv2DTransposeOpsExtCPU(unittest.TestCase):
             out_requires_grad=False,
         )
 
-        # float64 should be extremely tight, but still use dtype-aware tol for consistency
         rtol, atol = _tol(y_ref.dtype)
         np.testing.assert_allclose(y.to_numpy(), y_ref, rtol=rtol, atol=atol)
 

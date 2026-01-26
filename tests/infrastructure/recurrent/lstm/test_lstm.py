@@ -8,9 +8,6 @@ from src.keydnn.infrastructure.tensor._tensor import Tensor
 from src.keydnn.infrastructure.recurrent._lstm_module import LSTMCell
 
 
-# -----------------------------
-# Helpers (match Conv2d/RNN style)
-# -----------------------------
 def _tensor_from_numpy(arr: np.ndarray, device: Device, requires_grad: bool) -> Tensor:
     arr = np.asarray(arr, dtype=np.float32)
     t = Tensor(shape=arr.shape, device=device, requires_grad=requires_grad, ctx=None)
@@ -34,7 +31,7 @@ def _unwrap_param_tensor(p):
 
 
 def _sigmoid_np(x: np.ndarray) -> np.ndarray:
-    # Stable sigmoid, float32
+
     x = x.astype(np.float32, copy=False)
     pos = x >= 0
     neg = ~pos
@@ -88,9 +85,6 @@ def _lstmcell_numpy_reference(
     return h_t, c_t
 
 
-# -----------------------------
-# Tests
-# -----------------------------
 class TestLSTMCellForward(unittest.TestCase):
     def setUp(self) -> None:
         self.device = Device("cpu")
@@ -120,7 +114,6 @@ class TestLSTMCellForward(unittest.TestCase):
         N, D, H = 2, 3, 4
         cell = LSTMCell(input_size=D, hidden_size=H, bias=True)
 
-        # Deterministic params
         Wih = (np.arange(D * 4 * H, dtype=np.float32).reshape(D, 4 * H) / 50.0) - 0.2
         Whh = (np.arange(H * 4 * H, dtype=np.float32).reshape(H, 4 * H) / 70.0) + 0.1
         bih = np.linspace(-0.3, 0.3, 4 * H, dtype=np.float32)
@@ -160,7 +153,6 @@ class TestLSTMCellBackward(unittest.TestCase):
         N, D, H = 3, 4, 5
         cell = LSTMCell(input_size=D, hidden_size=H, bias=True)
 
-        # Ensure params require grad
         for p in cell.parameters():
             _unwrap_param_tensor(p).requires_grad = True
 
@@ -174,7 +166,6 @@ class TestLSTMCellBackward(unittest.TestCase):
 
         h_t, c_t = cell.forward(x, h_prev, c_prev)
 
-        # scalar loss using BOTH outputs to ensure both ctx paths contribute
         loss = h_t.sum() + c_t.sum()
         loss.backward()
 
@@ -196,12 +187,11 @@ class TestLSTMCellBackward(unittest.TestCase):
         self.assertIsNotNone(bih.grad)
         self.assertIsNotNone(bhh.grad)
 
-        self.assertEqual(Wih.grad.shape, Wih.shape)  # (D,4H)
-        self.assertEqual(Whh.grad.shape, Whh.shape)  # (H,4H)
-        self.assertEqual(bih.grad.shape, bih.shape)  # (4H,)
-        self.assertEqual(bhh.grad.shape, bhh.shape)  # (4H,)
+        self.assertEqual(Wih.grad.shape, Wih.shape)
+        self.assertEqual(Whh.grad.shape, Whh.shape)
+        self.assertEqual(bih.grad.shape, bih.shape)
+        self.assertEqual(bhh.grad.shape, bhh.shape)
 
-        # sanity: grads finite
         self.assertTrue(np.isfinite(x.grad.to_numpy()).all())
         self.assertTrue(np.isfinite(h_prev.grad.to_numpy()).all())
         self.assertTrue(np.isfinite(c_prev.grad.to_numpy()).all())

@@ -24,14 +24,13 @@ def _tensor_supports_numpy_load() -> bool:
     Return True if we can create a Tensor with known numeric contents
     using ONLY public APIs.
     """
-    # Option 1: data ctor
+
     try:
         _ = Tensor(data=np.zeros((1, 1), dtype=np.float32), device=Device("cpu"))
         return True
     except TypeError:
         pass
 
-    # Option 2: shape ctor + public load method
     t = Tensor((1, 1), Device("cpu"))
     if hasattr(t, "from_numpy") and callable(getattr(t, "from_numpy")):
         return True
@@ -75,7 +74,6 @@ def _set_tensor_data_public(t: Tensor, arr: np.ndarray) -> None:
         t.copy_from_numpy(arr)
         return
 
-    # If you can't load arbitrary arrays, correctness tests can't be deterministic.
     raise AssertionError(
         "Cannot set parameter tensor values via public API. "
         "Implement Tensor.from_numpy()/copy_from_numpy() (recommended) or allow Parameter(data=...)."
@@ -87,7 +85,6 @@ class TestModuleInfrastructure(TestCase):
         m = Module()
         p = Parameter((2, 2), Device("cpu"), requires_grad=True)
 
-        # Register and enumerate via public API
         m.register_parameter("p", p)
 
         params = list(m.parameters())
@@ -131,23 +128,23 @@ class TestLinearInfrastructure(TestCase):
     def test_linear_exposes_parameters(self):
         lin1 = Linear(3, 4, bias=True, device=Device("cpu"))
         params1 = list(lin1.parameters())
-        self.assertEqual(len(params1), 2)  # weight + bias
+        self.assertEqual(len(params1), 2)
 
         lin2 = Linear(3, 4, bias=False, device=Device("cpu"))
         params2 = list(lin2.parameters())
-        self.assertEqual(len(params2), 1)  # weight only
+        self.assertEqual(len(params2), 1)
 
     def test_linear_forward_rejects_non_2d_input(self):
         lin = Linear(3, 4, device=Device("cpu"))
 
-        x = Tensor((3,), Device("cpu"))  # 1D
+        x = Tensor((3,), Device("cpu"))
         with self.assertRaises(ValueError):
             lin.forward(x)
 
     def test_linear_forward_rejects_feature_mismatch(self):
         lin = Linear(3, 4, device=Device("cpu"))
 
-        x = Tensor((2, 5), Device("cpu"))  # in_features mismatch
+        x = Tensor((2, 5), Device("cpu"))
         with self.assertRaises(ValueError):
             lin.forward(x)
 
@@ -183,13 +180,13 @@ class TestLinearInfrastructure(TestCase):
         lin = Linear(3, 4, device=Device("cpu"))
 
         with self.assertRaises(ValueError):
-            lin.forward(Tensor((3,), Device("cpu")))  # not 2D
+            lin.forward(Tensor((3,), Device("cpu")))
 
         with self.assertRaises(ValueError):
-            lin.forward(Tensor((2, 5), Device("cpu")))  # feature mismatch
+            lin.forward(Tensor((2, 5), Device("cpu")))
 
     def test_linear_forward_cpu_matches_numpy_reference(self):
-        # Fail loudly if framework can't do numeric tests yet
+
         self.assertTrue(
             _tensor_supports_numpy_load(),
             "Cannot run numeric Linear tests because Tensor cannot be loaded from NumPy "
@@ -219,36 +216,30 @@ class TestLinearInfrastructure(TestCase):
         device = Device("cpu")
         lin = Linear(3, 4, bias=True, device=device)
 
-        # Ensure params require grad (Linear init already sets requires_grad=True, but be explicit)
         lin.weight.requires_grad = True
         lin.bias.requires_grad = True
 
         x_np = np.ones((2, 3), dtype=np.float32)
         x = _make_tensor_from_numpy(x_np, device)
-        x.requires_grad = True  # trigger ctx attach
+        x.requires_grad = True
 
         out = lin.forward(x)
 
-        # 1) requires_grad should propagate to output
         self.assertTrue(out.requires_grad)
 
-        # 2) ctx should be attached and retrievable via internal hook
         ctx = out._get_ctx()
         self.assertIsNotNone(ctx, "Expected Context to be attached to output Tensor.")
         self.assertTrue(callable(ctx.backward_fn))
 
-        # 3) parents should be [x, weight, bias] in that exact order
         self.assertEqual(len(ctx.parents), 3)
         self.assertIs(ctx.parents[0], x)
         self.assertIs(ctx.parents[1], lin.weight)
         self.assertIs(ctx.parents[2], lin.bias)
 
-        # 4) saved_tensors should be exactly (x, weight) in that exact order
         self.assertEqual(len(ctx.saved_tensors), 2)
         self.assertIs(ctx.saved_tensors[0], x)
         self.assertIs(ctx.saved_tensors[1], lin.weight)
 
-        # 5) (Optional) backward_fn returns grads aligned with parents & correct shapes
         grad_out = _make_tensor_from_numpy(np.ones(out.shape, dtype=np.float32), device)
         grads = ctx.backward_fn(grad_out)
 
@@ -259,15 +250,14 @@ class TestLinearInfrastructure(TestCase):
         self.assertIsNotNone(grad_w)
         self.assertIsNotNone(grad_b)
 
-        self.assertEqual(grad_x.shape, x.shape)  # (batch, in_features)
-        self.assertEqual(grad_w.shape, lin.weight.shape)  # (out_features, in_features)
-        self.assertEqual(grad_b.shape, lin.bias.shape)  # (out_features,)
+        self.assertEqual(grad_x.shape, x.shape)
+        self.assertEqual(grad_w.shape, lin.weight.shape)
+        self.assertEqual(grad_b.shape, lin.bias.shape)
 
     def test_linear_forward_no_context_when_no_requires_grad(self):
         device = Device("cpu")
         lin = Linear(3, 4, bias=True, device=device)
 
-        # Turn off grad tracking
         lin.weight.requires_grad = False
         lin.bias.requires_grad = False
 

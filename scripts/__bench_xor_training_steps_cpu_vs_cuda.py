@@ -61,7 +61,6 @@ SRC_DIR = os.path.join(ROOT_DIR, "src")
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
-# tracer utils (your local helper module)
 from _funct_call_debug_utils import trace_calls, timed_trace
 
 
@@ -701,7 +700,7 @@ def main() -> None:
                     "Expected profile.sections[name].cpu_ms/count (and optionally gpu_ms)."
                 )
 
-            # Per-op (optional)
+            # Per-op
             per_op_totals_cpu: dict[str, float] = {}
             per_op_totals_gpu: dict[str, float] = {}
             per_op_counts: dict[str, int] = {}

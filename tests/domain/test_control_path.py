@@ -1,11 +1,6 @@
 import unittest
 
 
-# ====== import the code under test ======
-# If your code lives in some module, replace the below with:
-# from your_module import create_path_builder
-#
-# For convenience, I assume create_path_builder is available in scope.
 from typing import (
     runtime_checkable,
     Callable,
@@ -114,12 +109,9 @@ def create_path_builder() -> Callable[
     return templator
 
 
-# ====== unit tests ======
-
-
 class TestCreatePathBuilder(unittest.TestCase):
     def setUp(self) -> None:
-        # Fresh builder per test to avoid map-sharing across tests.
+
         self.decorator = create_path_builder()
 
     def test_state_must_be_hashable(self) -> None:
@@ -132,7 +124,7 @@ class TestCreatePathBuilder(unittest.TestCase):
                 return x
 
         with self.assertRaises(TypeError) as ctx:
-            # list is unhashable
+
             self.decorator(C, C.foo, state=["not-hashable"])(lambda x: x)
 
         self.assertIn("must be hashable", str(ctx.exception))
@@ -147,7 +139,7 @@ class TestCreatePathBuilder(unittest.TestCase):
                 return self.__st
 
             def foo(self, x: int) -> int:
-                # base implementation never used once wrapper installed
+
                 return -999
 
         @self.decorator(C, C.foo, state="A")
@@ -184,11 +176,10 @@ class TestCreatePathBuilder(unittest.TestCase):
 
     def test_missing_state_property_raises_not_implemented(self) -> None:
         class C:
-            # No _state property on purpose
+
             def foo(self, x: int) -> int:
                 return x
 
-        # Registering a control path will install the wrapper on C.foo
         @self.decorator(C, C.foo, state="A")
         def foo_A(x: int) -> int:
             return x + 1
@@ -197,7 +188,6 @@ class TestCreatePathBuilder(unittest.TestCase):
         with self.assertRaises(NotImplementedError) as ctx:
             obj.foo(1)
 
-        # Should mention missing attribute and the property name ('_state')
         self.assertIn("missing attribute", str(ctx.exception))
         self.assertIn("'_state'", str(ctx.exception))
 
@@ -219,7 +209,7 @@ class TestCreatePathBuilder(unittest.TestCase):
         def foo_A(x: int) -> int:
             return x + 1
 
-        obj = C("B")  # no registered path
+        obj = C("B")
         with self.assertRaises(NotImplementedError) as ctx:
             obj.foo(1)
 
@@ -269,14 +259,14 @@ class TestCreatePathBuilder(unittest.TestCase):
 
             def __call__(self, *args):
                 if len(args) == 2:
-                    # side-effect call: (method, state)
+
                     calls["count"] += 1
                     calls["method_name"] = getattr(args[0], "__name__", None)
                     calls["state"] = args[1]
                     self._last_method = args[0]
                     self._last_state = args[1]
                     return None
-                # no-arg call: must return exception instance
+
                 return MyRaisedError("boom")
 
         trap = TrapFactory()
@@ -318,12 +308,10 @@ class TestCreatePathBuilder(unittest.TestCase):
                 """Original foo docstring."""
                 return x
 
-        # Install wrapper
         @self.decorator(C, C.foo, state="A")
         def foo_A(x: int) -> int:
             return x + 1
 
-        # wraps(method) should preserve __name__ and __doc__
         self.assertEqual(C.foo.__name__, "foo")
         self.assertEqual(C.foo.__doc__, "Original foo docstring.")
 
@@ -346,7 +334,6 @@ class TestCreatePathBuilder(unittest.TestCase):
         def foo_A_1(x: int) -> int:
             return 111
 
-        # Now overwrite wrapper with deco2 installation
         @deco2(C, C.foo, state="B")
         def foo_B_2(x: int) -> int:
             return 222
@@ -354,8 +341,6 @@ class TestCreatePathBuilder(unittest.TestCase):
         a = C("A")
         b = C("B")
 
-        # After deco2 installation, class method wrapper consults deco2's map.
-        # So state A path from deco1 should NOT be found.
         with self.assertRaises(NotImplementedError):
             a.foo(0)
 

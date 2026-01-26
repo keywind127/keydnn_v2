@@ -41,7 +41,7 @@ class TestRNNHiddenGradients(TestCase):
 
         h_seq, h_T = rnn.forward(x, h0=h0)
 
-        # Use only final hidden state to drive gradients.
+                                                         
         loss = h_T.sum()
         loss.backward()
 
@@ -50,7 +50,7 @@ class TestRNNHiddenGradients(TestCase):
         )
         self.assertEqual(h0.grad.shape, h0.shape)
 
-        # Sanity: gradients should be finite.
+                                             
         g = h0.grad.to_numpy()
         self.assertTrue(np.all(np.isfinite(g)))
 
@@ -87,18 +87,18 @@ class TestRNNHiddenGradients(TestCase):
 
         h_seq, h_T = rnn.forward(x, h0=None)
 
-        # Drive gradient from the full sequence output (more demanding than h_T only).
+                                                                                      
         loss = h_seq.sum()
         loss.backward()
 
         self.assertIsNotNone(x.grad, "x.grad should be populated from h_seq path")
         self.assertEqual(x.grad.shape, x.shape)
 
-        # Parameters should also receive grads (via cell backward across timesteps).
+                                                                                    
         params = list(rnn.parameters())
         self.assertGreater(len(params), 0)
         for p in params:
-            # Parameter inherits Tensor-like interface in your design
+                                                                     
             self.assertIsNotNone(
                 p.grad, "Each parameter should have grad after backward from h_seq"
             )
@@ -119,10 +119,10 @@ class TestRNNHiddenGradients(TestCase):
 
         h_seq, h_T = rnn.forward(x, h0=None)
 
-        # Pick a single timestep slice. This relies on your Tensor.__getitem__ implementation.
-        # The gradient should affect only the relevant timestep contribution *through time*.
+                                                                                              
+                                                                                            
         t_pick = 4
-        h_pick = h_seq[t_pick]  # shape (N, H)
+        h_pick = h_seq[t_pick]                
 
         loss = h_pick.sum()
         loss.backward()
@@ -132,7 +132,7 @@ class TestRNNHiddenGradients(TestCase):
         )
         self.assertEqual(x.grad.shape, x.shape)
 
-        # Should still produce finite grads
+                                           
         gx = x.grad.to_numpy()
         self.assertTrue(np.all(np.isfinite(gx)))
 
@@ -151,7 +151,7 @@ class TestRNNHiddenGradients(TestCase):
 
         h_seq, h_T = rnn.forward(x, h0=None)
 
-        # Mild loss: sum of last hidden state
+                                             
         loss = h_T.sum()
         loss.backward()
 
@@ -171,7 +171,7 @@ class TestRNNHiddenGradients(TestCase):
         h0 = _tensor_from_numpy(np.random.randn(N, H), self.device, requires_grad=True)
 
         h_seq, h_T = rnn.forward(x, h0=h0)
-        # Use both outputs to drive gradients
+                                             
         (h_seq.sum() + h_T.sum()).backward()
 
         self.assertIsNotNone(x.grad)

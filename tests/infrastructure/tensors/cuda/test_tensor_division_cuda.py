@@ -1,4 +1,3 @@
-# tests/infrastructure/tensors/test_tensor_division_cuda.py
 """
 Unit tests for Tensor division methods (CPU + CUDA).
 
@@ -37,20 +36,20 @@ from src.keydnn.infrastructure.native_cuda.python.maxpool2d_ctypes import (
 def _get_cuda_device(index: int = 0) -> Device:
     """Best-effort helper to obtain a CUDA Device instance across possible Device APIs."""
     if hasattr(Device, "cuda") and callable(getattr(Device, "cuda")):
-        return Device.cuda(index)  # type: ignore[attr-defined]
+        return Device.cuda(index)
 
     try:
-        return Device("cuda", index)  # type: ignore[call-arg]
+        return Device("cuda", index)
     except Exception:
         pass
 
     try:
-        return Device(f"cuda:{index}")  # type: ignore[call-arg]
+        return Device(f"cuda:{index}")
     except Exception:
         pass
 
     try:
-        return Device(kind="cuda", index=index)  # type: ignore[call-arg]
+        return Device(kind="cuda", index=index)
     except Exception as e:
         raise RuntimeError(
             "Unable to construct a CUDA Device; update _get_cuda_device() for this repo."
@@ -114,7 +113,7 @@ def _d2h(lib: ctypes.CDLL, src_dev: int, dst: np.ndarray) -> None:
 class TestTensorDivisionCuda(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        # Use the shared CUDA DLL handle (single runtime instance).
+
         try:
             cls.lib = Tensor._get_cuda_lib()
         except Exception as e:
@@ -162,16 +161,11 @@ class TestTensorDivisionCuda(unittest.TestCase):
         _d2h(self.lib, int(t.data), host)
         return host
 
-    # ----------------------------
-    # CUDA correctness
-    # ----------------------------
-
     def test_truediv_tensor_tensor_f32_matches_numpy(self) -> None:
         rng = np.random.default_rng(0)
         a = rng.standard_normal((64,), dtype=np.float32)
         b = rng.standard_normal((64,), dtype=np.float32)
 
-        # avoid divide-by-zero instability (match your likely kernel behavior)
         b = np.where(np.abs(b) < 1e-3, np.float32(1.0), b)
 
         a_t = self._make_cuda_tensor_from_host(a)
@@ -234,7 +228,6 @@ class TestTensorDivisionCuda(unittest.TestCase):
         a_t = self._make_cuda_tensor_from_host(a)
         b_t = self._make_cuda_tensor_from_host(b)
 
-        # Explicit call to legacy alias
         y_t = a_t.__div__(b_t)
         y = self._read_cuda_tensor_to_host(y_t)
         ref = a / b
@@ -246,14 +239,10 @@ class TestTensorDivisionCuda(unittest.TestCase):
         a = np.where(np.abs(a) < 1e-3, np.float32(1.0), a)
 
         a_t = self._make_cuda_tensor_from_host(a)
-        y_t = a_t.__rdiv__(2.0)  # explicit legacy alias
+        y_t = a_t.__rdiv__(2.0)
         y = self._read_cuda_tensor_to_host(y_t)
         ref = np.float32(2.0) / a
         np.testing.assert_allclose(y, ref, rtol=1e-5, atol=1e-5)
-
-    # ----------------------------
-    # CUDA error cases
-    # ----------------------------
 
     def test_cuda_raises_on_shape_mismatch(self) -> None:
         a = np.ones((4,), dtype=np.float32)
@@ -281,25 +270,6 @@ class TestTensorDivisionCuda(unittest.TestCase):
 
         with self.assertRaises(TypeError):
             _ = a_t / b_t
-
-    # ----------------------------
-    # CPU backward-compat sanity (best-effort)
-    # ----------------------------
-
-    # def test_cpu_truediv_still_works(self) -> None:
-    #     a_np = np.array([1.0, 2.0, 3.0], dtype=np.float32)
-    #     b_np = np.array([2.0, 4.0, 6.0], dtype=np.float32)
-
-    #     if hasattr(Tensor, "from_numpy") and callable(getattr(Tensor, "from_numpy")):
-    #         a = Tensor.from_numpy(a_np, device=Device("cpu"))  # type: ignore[call-arg]
-    #         b = Tensor.from_numpy(b_np, device=Device("cpu"))  # type: ignore[call-arg]
-    #         y = a / b
-    #         np.testing.assert_allclose(y.to_numpy(), a_np / b_np, rtol=0.0, atol=0.0)
-    #     else:
-    #         # Fallback: if this repo doesn't expose a clean CPU factory, skip.
-    #         raise unittest.SkipTest(
-    #             "Tensor.from_numpy not available; CPU division sanity skipped."
-    #         )
 
 
 if __name__ == "__main__":

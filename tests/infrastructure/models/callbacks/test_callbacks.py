@@ -47,7 +47,7 @@ class _SequenceLoss:
 
     def __call__(self, y_pred: Any, y_true: Any) -> _DummyScalar:
         if self._i >= len(self._values):
-            # If tests accidentally consume more steps than expected, fail loudly.
+
             raise RuntimeError(
                 "Loss sequence exhausted; increase test sequence length."
             )
@@ -87,7 +87,7 @@ class _RestorableWeightModel(_PassthroughModel):
         self.w: float = 0.0
 
     def to_json_payload(self) -> Dict[str, Any]:
-        # Mimic your checkpoint payload shape, but keep it minimal for the test.
+
         return {
             "format": "keydnn.json.ckpt.v1",
             "arch": {"dummy": True},
@@ -109,7 +109,7 @@ class _MutateWeightEachEpoch(Callback):
         self._values = list(map(float, values))
 
     def on_epoch_end(self, epoch: int, logs: Optional[Dict[str, float]] = None) -> None:
-        # Set weight to a known per-epoch value.
+
         self.model.w = float(self._values[epoch])
 
 
@@ -119,7 +119,7 @@ class TestCallbackList(unittest.TestCase):
             def on_epoch_end(
                 self, epoch: int, logs: Optional[Dict[str, float]] = None
             ) -> None:
-                self.stop_training = True  # type: ignore[attr-defined]
+                self.stop_training = True
 
         cb = CallbackList([_Stopper()])
         cb.set_model(object())
@@ -133,7 +133,7 @@ class TestModelCheckpoint(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as td:
             td_path = Path(td)
-            # We'll patch model.save_json to write a tiny JSON marker file.
+
             saved_paths: list[Path] = []
 
             def _save_json(p: str | Path) -> None:
@@ -142,7 +142,7 @@ class TestModelCheckpoint(unittest.TestCase):
                 p.write_text(json.dumps({"ok": True}), encoding="utf-8")
                 saved_paths.append(p)
 
-            model.save_json = _save_json  # type: ignore[method-assign]
+            model.save_json = _save_json
 
             cb = ModelCheckpoint(
                 td_path / "ckpt_epoch{epoch:03d}_valloss{val_loss:.6f}.json",
@@ -155,7 +155,6 @@ class TestModelCheckpoint(unittest.TestCase):
 
             cb.on_train_begin()
 
-            # val_loss improves at epoch 0 -> 1, then worsens.
             logs_by_epoch = [
                 {"val_loss": 1.0},
                 {"val_loss": 0.9},
@@ -166,15 +165,11 @@ class TestModelCheckpoint(unittest.TestCase):
             for e, logs in enumerate(logs_by_epoch):
                 cb.on_epoch_end(e, logs=logs)
 
-            # Expect saves on epoch 0 and epoch 1 only.
             self.assertEqual(len(saved_paths), 2)
             for p in saved_paths:
                 self.assertTrue(p.exists())
                 self.assertGreater(p.stat().st_size, 0)
 
-            # Ensure formatting happened (epoch is 1-based in the callback implementation
-            # in my earlier patch; if yours is 0-based, adjust this assertion).
-            # We'll just sanity-check the filenames contain "epoch" and "valloss".
             names = [p.name for p in saved_paths]
             self.assertTrue(any("epoch" in n and "valloss" in n for n in names))
 
@@ -189,16 +184,13 @@ class TestEarlyStopping(unittest.TestCase):
             restore_best_weights=False,
         )
 
-        # Simulate training:
         es.on_train_begin()
 
         logs_by_epoch = [
-            {"val_loss": 1.0},  # best
-            {"val_loss": 0.9},  # best
-            {"val_loss": 0.91},  # no improve (wait=1)
-            {
-                "val_loss": 0.92
-            },  # no improve (wait=2) => stop if condition is wait > patience
+            {"val_loss": 1.0},
+            {"val_loss": 0.9},
+            {"val_loss": 0.91},
+            {"val_loss": 0.92},
         ]
         for e, logs in enumerate(logs_by_epoch):
             es.on_epoch_end(e, logs=logs)
@@ -211,7 +203,7 @@ class TestEarlyStopping(unittest.TestCase):
 
     def test_early_stopping_restores_best_weights_in_memory(self) -> None:
         model = _RestorableWeightModel()
-        # Each epoch, we mutate w to a known value. Best epoch should restore that.
+
         mutator = _MutateWeightEachEpoch([10.0, 20.0, 30.0, 40.0])
 
         es = EarlyStopping(
@@ -222,18 +214,16 @@ class TestEarlyStopping(unittest.TestCase):
             restore_best_weights=True,
         )
 
-        # Wire callbacks like fit() does.
         cb_list = CallbackList([mutator, es])
         cb_list.set_model(model)
 
         cb_list.on_train_begin(logs={})
 
-        # val_loss best at epoch 1 (0.9), then degrades twice -> stop.
         logs_by_epoch = [
             {"val_loss": 1.0},
-            {"val_loss": 0.9},  # best epoch (w=20)
+            {"val_loss": 0.9},
             {"val_loss": 0.91},
-            {"val_loss": 0.92},  # triggers stop
+            {"val_loss": 0.92},
         ]
 
         for e, logs in enumerate(logs_by_epoch):
@@ -242,8 +232,6 @@ class TestEarlyStopping(unittest.TestCase):
             if cb_list.stop_training:
                 break
 
-        # Mutator would have set w to 40.0 at epoch 3,
-        # but EarlyStopping should restore best weights (epoch 1 => w=20.0).
         self.assertTrue(cb_list.stop_training)
         self.assertAlmostEqual(model.w, 20.0, places=7)
 
@@ -253,7 +241,6 @@ class TestFitWithCallbacks(unittest.TestCase):
         model = _PassthroughModel()
         opt = _NoOpOptimizer()
 
-        # One batch per epoch (batch_size == len(x)), and one validation batch per epoch.
         x = np.zeros((8, 3), dtype=np.float32)
         y = np.zeros((8, 3), dtype=np.float32)
         xv = np.zeros((8, 3), dtype=np.float32)
@@ -266,20 +253,17 @@ class TestFitWithCallbacks(unittest.TestCase):
         xv = numpy_to_tensor(xv, device=device)
         yv = numpy_to_tensor(yv, device=device)
 
-        # Loss called twice per epoch (train + val) due to validation_data.
-        # val_loss improves epoch 0->1 then worsens twice => stop with patience=1.
-        # We'll keep train loss arbitrary.
         loss_values = [
             2.0,
-            1.0,  # epoch0: train, val
+            1.0,
             2.0,
-            0.9,  # epoch1: train, val (best)
+            0.9,
             2.0,
-            0.91,  # epoch2: train, val (no improve)
+            0.91,
             2.0,
-            0.92,  # epoch3: train, val (no improve => stop)
+            0.92,
             2.0,
-            0.93,  # extra (should not be consumed)
+            0.93,
         ]
         loss = _SequenceLoss(loss_values)
 
@@ -302,7 +286,6 @@ class TestFitWithCallbacks(unittest.TestCase):
             callbacks=[es],
         )
 
-        # Expect stop at epoch index 3 (4 epochs recorded) given the "wait > patience" rule.
         self.assertLess(len(hist.epoch), 10)
         self.assertEqual(len(hist.epoch), 4)
 
@@ -326,16 +309,15 @@ class TestFitWithCallbacks(unittest.TestCase):
         xv = numpy_to_tensor(xv, device=device)
         yv = numpy_to_tensor(yv, device=device)
 
-        # Train+val per epoch.
         loss_values = [
             2.0,
-            1.0,  # epoch0 val=1.0 (save)
+            1.0,
             2.0,
-            0.9,  # epoch1 val=0.9 (save)
+            0.9,
             2.0,
-            0.91,  # epoch2 val=0.91 (skip)
+            0.91,
             2.0,
-            0.92,  # epoch3 val=0.92 (skip)
+            0.92,
         ]
         loss = _SequenceLoss(loss_values)
 
@@ -350,7 +332,7 @@ class TestFitWithCallbacks(unittest.TestCase):
                 p.write_text('{"ok": true}', encoding="utf-8")
                 saved.append(p)
 
-            model.save_json = _save_json  # type: ignore[method-assign]
+            model.save_json = _save_json
 
             ckpt = ModelCheckpoint(
                 td_path / "ckpt_epoch{epoch:03d}_valloss{val_loss:.6f}.json",
@@ -375,7 +357,6 @@ class TestFitWithCallbacks(unittest.TestCase):
                 callbacks=[ckpt],
             )
 
-            # Expect 2 checkpoint saves (epoch0 and epoch1).
             self.assertEqual(len(saved), 2)
             self.assertTrue(all(p.exists() for p in saved))
             self.assertTrue(

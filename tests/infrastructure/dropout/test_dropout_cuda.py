@@ -11,7 +11,7 @@ from src.keydnn.infrastructure.tensor._tensor import Tensor
 def _cuda_available() -> bool:
     try:
         from src.keydnn.infrastructure.native_cuda.python.maxpool2d_ctypes import (
-            load_keydnn_cuda_native,  # type: ignore
+            load_keydnn_cuda_native,
         )
 
         _ = load_keydnn_cuda_native()
@@ -26,17 +26,12 @@ class TestDropoutCUDA(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.device = Device("cuda:0")
 
-        # Ensure device is set once
         lib = Tensor._get_cuda_lib()
         from src.keydnn.infrastructure.native_cuda.python.maxpool2d_ctypes import (
-            cuda_set_device,  # type: ignore
+            cuda_set_device,
         )
 
         cuda_set_device(lib, 0)
-
-    # ------------------------------------------------------------------
-    # helpers
-    # ------------------------------------------------------------------
 
     def _cuda_tensor_from_numpy(
         self, arr: np.ndarray, *, requires_grad: bool
@@ -53,7 +48,7 @@ class TestDropoutCUDA(unittest.TestCase):
         self.assertNotEqual(int(t.data), 0)
 
         from src.keydnn.infrastructure.native_cuda.python.ops import (
-            memcpy_ctypes as mc,  # type: ignore
+            memcpy_ctypes as mc,
         )
 
         mc.memcpy_htod(
@@ -70,7 +65,7 @@ class TestDropoutCUDA(unittest.TestCase):
         out = np.ascontiguousarray(out)
 
         from src.keydnn.infrastructure.native_cuda.python.ops import (
-            memcpy_ctypes as mc,  # type: ignore
+            memcpy_ctypes as mc,
         )
 
         mc.memcpy_dtoh(
@@ -82,10 +77,6 @@ class TestDropoutCUDA(unittest.TestCase):
         )
         return out
 
-    # ------------------------------------------------------------------
-    # tests
-    # ------------------------------------------------------------------
-
     def test_eval_mode_is_identity_cuda(self) -> None:
         x_np = np.random.randn(4, 5).astype(np.float32)
         x = self._cuda_tensor_from_numpy(x_np, requires_grad=True)
@@ -95,7 +86,6 @@ class TestDropoutCUDA(unittest.TestCase):
 
         y = d(x)
 
-        # eval mode returns input tensor directly
         self.assertIs(y, x)
 
         y_np = self._cuda_to_numpy(y)
@@ -137,7 +127,6 @@ class TestDropoutCUDA(unittest.TestCase):
             ok = np.isclose(val, 0.0) or np.isclose(val, scale)
             self.assertTrue(ok, msg=f"Unexpected value {val}")
 
-        # statistically both should appear
         self.assertTrue(np.any(np.isclose(y_np, 0.0)))
         self.assertTrue(np.any(np.isclose(y_np, scale)))
 

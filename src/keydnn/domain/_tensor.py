@@ -1462,18 +1462,6 @@ class ITensor(Protocol):
         -------
         ITensor
             This tensor (`self`) after in-place migration.
-
-        Notes
-        -----
-        - This method intentionally *does not preserve autograd context* across
-        device transfers. If this tensor participates in autograd, you should
-        treat `to_()` as a graph break:
-            - `ctx` is cleared.
-            - `requires_grad` is left unchanged (you can still accumulate grads
-            going forward), but any prior graph history is discarded.
-        - If `self.grad` exists and is a Tensor-like object with `.to(...)`,
-        this method will attempt to move it to the same device as well.
-        If you do not want this behavior, remove that block below.
         """
         ...
 

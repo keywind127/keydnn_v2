@@ -15,7 +15,7 @@ def _try_get_tensor_to_numpy() -> Optional[Callable[[Tensor], np.ndarray]]:
 
     This keeps tests resilient as the Tensor API evolves.
     """
-    # Common conventions
+
     if hasattr(Tensor, "to_numpy") and callable(getattr(Tensor, "to_numpy")):
         return lambda t: t.to_numpy()
     if hasattr(Tensor, "numpy") and callable(getattr(Tensor, "numpy")):
@@ -23,7 +23,6 @@ def _try_get_tensor_to_numpy() -> Optional[Callable[[Tensor], np.ndarray]]:
     if hasattr(Tensor, "as_numpy") and callable(getattr(Tensor, "as_numpy")):
         return lambda t: t.as_numpy()
 
-    # Copy-out convention: t.copy_to_numpy(out)
     if hasattr(Tensor, "copy_to_numpy") and callable(getattr(Tensor, "copy_to_numpy")):
 
         def _copy_to_numpy(t: Tensor) -> np.ndarray:
@@ -59,7 +58,7 @@ class TestPreprocessingOneHot(unittest.TestCase):
         np.testing.assert_allclose(y, expected, rtol=0.0, atol=0.0)
 
     def test_one_hot_flattens_input(self) -> None:
-        labels = np.array([[1], [0], [2]], dtype=np.int64)  # (N, 1)
+        labels = np.array([[1], [0], [2]], dtype=np.int64)
         y = one_hot(labels, num_classes=3)
 
         self.assertEqual(y.shape, (3, 3))
@@ -74,7 +73,7 @@ class TestPreprocessingOneHot(unittest.TestCase):
         np.testing.assert_allclose(y, expected, rtol=0.0, atol=0.0)
 
     def test_one_hot_raises_on_out_of_range(self) -> None:
-        labels = np.array([0, 3], dtype=np.int64)  # num_classes=3 => valid: 0..2
+        labels = np.array([0, 3], dtype=np.int64)
         with self.assertRaises(IndexError):
             _ = one_hot(labels, num_classes=3)
 
@@ -121,7 +120,6 @@ class TestPreprocessingNumpyToTensor(unittest.TestCase):
         arr = np.array([1.0, 2.0, 3.0], dtype=np.float32)
         t = numpy_to_tensor(arr, device=self.cpu, requires_grad=False)
 
-        # Mutate original after conversion; tensor should not change.
         arr[:] = 999.0
 
         out = _TENSOR_TO_NUMPY(t)

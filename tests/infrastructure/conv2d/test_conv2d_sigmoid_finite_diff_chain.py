@@ -18,7 +18,7 @@ def forward_loss_np(
 ) -> float:
     """
     Compute L = sum(sigmoid(conv2d(x,w,b))) using the KeyDNN modules (but with numpy inputs).
-    This keeps the numeric comparison apples-to-apples with your actual implementation.
+    This keeps the numeric comparison apples-to-apples with actual implementation.
     """
     device = Device("cpu")
     x = tensor_from_numpy(x_np.astype(np.float32), device, requires_grad=False)
@@ -53,12 +53,11 @@ class TestConv2dSigmoidFiniteDiffChain(unittest.TestCase):
             L = sum(sigmoid(conv2d(x, w, b)))
         using a tiny input/kernel for speed.
         """
-        # Tiny shapes for stable finite-diff
+
         x_np = np.random.randn(1, 1, 4, 4).astype(np.float32)
         w_np = np.random.randn(1, 1, 3, 3).astype(np.float32)
         b_np = np.random.randn(1).astype(np.float32)
 
-        # Build graph with autograd
         x = tensor_from_numpy(x_np, self.device, requires_grad=True)
 
         conv = Conv2d(
@@ -79,17 +78,14 @@ class TestConv2dSigmoidFiniteDiffChain(unittest.TestCase):
         loss = y.sum()
         loss.backward()
 
-        # Autograd grads
         gx = x.grad.to_numpy().copy()
         gw = conv.weight.grad.to_numpy().copy()
         gb = conv.bias.grad.to_numpy().copy()
 
-        # Finite differences (sample a few entries to keep test fast)
         eps = 1e-3
         atol = 2e-2
         rtol = 2e-2
 
-        # --- check a few x entries ---
         x_indices = [(0, 0, 0, 0), (0, 0, 1, 2), (0, 0, 3, 3)]
         for idx in x_indices:
             x_pos = x_np.copy()
@@ -104,7 +100,6 @@ class TestConv2dSigmoidFiniteDiffChain(unittest.TestCase):
                 msg=f"x grad mismatch at {idx}: autograd={gx[idx]} fd={fd}",
             )
 
-        # --- check a few weight entries ---
         w_indices = [(0, 0, 0, 0), (0, 0, 1, 1), (0, 0, 2, 2)]
         for idx in w_indices:
             w_pos = w_np.copy()
@@ -119,7 +114,6 @@ class TestConv2dSigmoidFiniteDiffChain(unittest.TestCase):
                 msg=f"w grad mismatch at {idx}: autograd={gw[idx]} fd={fd}",
             )
 
-        # --- check bias entry ---
         b_pos = b_np.copy()
         b_neg = b_np.copy()
         b_pos[0] += eps

@@ -1,4 +1,3 @@
-# tests/infrastructure/tensors/test_tensor_imul_cuda.py
 """
 Unit tests for CUDA-enabled Tensor.__imul__ (in-place multiply).
 
@@ -15,9 +14,6 @@ Notes
 -----
 These tests skip on CPU-only environments where the KeyDNN CUDA native DLL
 cannot be loaded.
-
-Also, CUDA malloc(0) is not supported in your runtime (it raises), so for
-"numel==0 is no-op" we construct an empty CUDA Tensor with data=0 (no alloc).
 """
 
 from __future__ import annotations
@@ -42,20 +38,20 @@ from src.keydnn.infrastructure.ops.pool2d_cuda import (
 def _get_cuda_device(index: int = 0) -> Device:
     """Best-effort helper to obtain a CUDA Device instance across possible Device APIs."""
     if hasattr(Device, "cuda") and callable(getattr(Device, "cuda")):
-        return Device.cuda(index)  # type: ignore[attr-defined]
+        return Device.cuda(index)
 
     try:
-        return Device("cuda", index)  # type: ignore[call-arg]
+        return Device("cuda", index)
     except Exception:
         pass
 
     try:
-        return Device(f"cuda:{index}")  # type: ignore[call-arg]
+        return Device(f"cuda:{index}")
     except Exception:
         pass
 
     try:
-        return Device(kind="cuda", index=index)  # type: ignore[call-arg]
+        return Device(kind="cuda", index=index)
     except Exception as e:
         raise RuntimeError(
             "Unable to construct a CUDA Device; update _get_cuda_device()."
@@ -132,7 +128,6 @@ class TestTensorIMulCuda(unittest.TestCase):
         except Exception as e:
             raise unittest.SkipTest(f"Failed to set CUDA device: {e}") from e
 
-        # Need memcpy to validate numerics
         try:
             _bind_memcpy_symbols(cls.lib)
         except Exception as e:
@@ -167,10 +162,6 @@ class TestTensorIMulCuda(unittest.TestCase):
         _d2h(self.lib, int(t.data), host)
         return host
 
-    # -----------------------
-    # Happy paths (CUDA in-place)
-    # -----------------------
-
     def test_imul_tensor_tensor_cuda_mutates_self_f32(self) -> None:
         rng = np.random.default_rng(0)
         a = rng.standard_normal((4, 5), dtype=np.float32)
@@ -182,7 +173,7 @@ class TestTensorIMulCuda(unittest.TestCase):
         old_ptr = int(a_t.data)
         old_id = id(a_t)
 
-        ret = a_t.__imul__(b_t)  # a_t *= b_t
+        ret = a_t.__imul__(b_t)
 
         self.assertIs(ret, a_t)
         self.assertEqual(id(a_t), old_id)
@@ -226,10 +217,6 @@ class TestTensorIMulCuda(unittest.TestCase):
         out = self._read_cuda_tensor_to_host(a_t)
         np.testing.assert_allclose(out, a * s, rtol=1e-5, atol=1e-6)
 
-    # -----------------------
-    # Error behavior
-    # -----------------------
-
     def test_imul_raises_on_shape_mismatch_cuda(self) -> None:
         rng = np.random.default_rng(3)
         a = rng.standard_normal((4, 5), dtype=np.float32)
@@ -252,15 +239,10 @@ class TestTensorIMulCuda(unittest.TestCase):
         with self.assertRaises(TypeError):
             a_t *= b_t
 
-    # -----------------------
-    # numel == 0 behavior
-    # -----------------------
-
     def test_imul_numel_zero_is_noop_without_alloc(self) -> None:
         """
         numel==0 should be a no-op.
 
-        Your cuda_malloc(0) raises, so we must not allocate.
         We construct an empty CUDA tensor with data=0 and verify __imul__ returns self.
         """
         a0 = np.empty((0,), dtype=np.float32)
@@ -300,18 +282,7 @@ class TestTensorIMulCuda(unittest.TestCase):
         self.assertIs(ret, a_t)
         self.assertEqual(int(a_t.data), 0)
 
-    # -----------------------
-    # Best-effort: fallback path correctness when in-place should be disabled
-    # -----------------------
-
     def test_imul_fallback_path_when_requires_grad_true(self) -> None:
-        """
-        If requires_grad=True, your __imul__ should avoid true in-place mutation
-        (graph safety) and fall back to out-of-place + copy_from.
-
-        We can't reliably assert devptr changes (copy_from may or may not reallocate
-        depending on your implementation), but we *can* assert numerical correctness.
-        """
         rng = np.random.default_rng(6)
         a = rng.standard_normal((8,), dtype=np.float32)
         b = rng.standard_normal((8,), dtype=np.float32)
@@ -319,7 +290,7 @@ class TestTensorIMulCuda(unittest.TestCase):
         a_t = self._make_cuda_tensor_from_host(a)
         b_t = self._make_cuda_tensor_from_host(b)
 
-        a_t.requires_grad = True  # disable in-place fast path
+        a_t.requires_grad = True
 
         a_t *= b_t
         out = self._read_cuda_tensor_to_host(a_t)

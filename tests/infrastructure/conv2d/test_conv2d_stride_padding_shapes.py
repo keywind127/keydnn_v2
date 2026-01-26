@@ -50,11 +50,8 @@ class TestConv2dStridePaddingShapes(unittest.TestCase):
 
     def test_stride_padding_variants_shapes(self):
         cases = [
-            # stride=(2,2), padding=(0,0)
             ((2, 3, 9, 9), 4, (3, 3), (2, 2), (0, 0)),
-            # stride=(1,2), padding=(1,0)
             ((1, 2, 8, 7), 3, (3, 2), (1, 2), (1, 0)),
-            # stride=(2,1), padding=(0,1)
             ((1, 1, 10, 6), 2, (3, 3), (2, 1), (0, 1)),
         ]
 

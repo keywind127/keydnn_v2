@@ -27,7 +27,6 @@ class TestTensorCopyFrom(TestCase, _TensorFactoryMixin):
         self.assertEqual(dst.shape, src.shape)
         self.assertTrue(np.array_equal(dst.to_numpy(), src_np))
 
-        # Ensure it's a copy (mutating src should not change dst)
         src2_np = np.random.randn(2, 3).astype(np.float32)
         src.copy_from_numpy(src2_np)
         self.assertTrue(np.array_equal(dst.to_numpy(), src_np))
@@ -50,7 +49,7 @@ class TestTensorCopyFrom(TestCase, _TensorFactoryMixin):
     def test_copy_from_rejects_non_tensor(self):
         dst = Tensor((2, 3), Device("cpu"), requires_grad=False)
         with self.assertRaises(TypeError):
-            dst.copy_from("not a tensor")  # type: ignore[arg-type]
+            dst.copy_from("not a tensor")
 
 
 if __name__ == "__main__":
