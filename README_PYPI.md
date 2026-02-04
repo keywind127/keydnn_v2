@@ -11,9 +11,9 @@ It is designed to be both:
 - a **learning-friendly** implementation of modern DL abstractions (Tensor, autograd, modules), and
 - a **performance-oriented sandbox** for building real backends (native CPU kernels, CUDA kernels, vendor libraries).
 
-> ✅ **Status:** **v2.0.0 stable**. The public API is intended to be stable; changes will follow semantic versioning.
-
-> **Documentation:** Module-level API reference is planned; current docs focus on examples, architecture, and tested usage patterns.
+> ✅ **Status:** **v2.0.0 stable**. The public API is intended to be stable; changes will follow semantic versioning.  
+> 📚 **Documentation:** https://keywind127.github.io/keydnn_v2/  
+> 💻 **Source:** https://github.com/keywind127/keydnn_v2
 
 ---
 
@@ -55,13 +55,11 @@ If CUDA is unavailable, CPU execution remains supported.
 
 ## Installation
 
-### From PyPI
-
 ```bash
 pip install keydnn
 ```
 
-### From source (development)
+Development install:
 
 ```bash
 git clone https://github.com/keywind127/keydnn_v2.git
@@ -73,8 +71,6 @@ pip install -e .
 
 ## Quickstart
 
-### Minimal Tensor + autograd (CPU)
-
 ```python
 from keydnn.tensors import Tensor, Device
 
@@ -85,7 +81,7 @@ y.backward()
 print(x.grad.to_numpy())
 ```
 
-### CUDA example (device-resident ops)
+CUDA example:
 
 ```python
 from keydnn.tensors import Tensor, Device
@@ -105,41 +101,10 @@ print("y:", y.item())
 
 ## CUDA setup (Windows)
 
-KeyDNN’s Windows CUDA backend loads a native DLL and relies on the CUDA runtime
-(and optionally cuDNN) being discoverable by the current process.
+CUDA requires additional setup on Windows (CUDA runtime discovery and optional cuDNN).
+See the documentation for details:
 
-### Environment variables
-
-- `CUDA_PATH` (recommended): points to your CUDA install root, e.g.
-  `C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.2`
-- `CUDNN_PATH` (optional): points to your cuDNN root that contains `bin/`, `lib/`, `include/`,
-  e.g. `C:\cudnn`
-
-If you copied cuDNN DLLs into the CUDA install (common manual setup), you typically do **not**
-need `CUDNN_PATH` as long as `cudnn*.dll` exists in `<CUDA_PATH>\bin`.
-
-### PowerShell examples
-
-```powershell
-# For the current terminal session only:
-$env:CUDA_PATH  = "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.2"
-$env:CUDNN_PATH = "C:\cudnn"   # optional
-```
-
-> Note: If you change environment variables, restart the Python process (and sometimes the terminal)
-> before retrying.
-
----
-
-## CLI smoke test (MNIST / CIFAR-10)
-
-```bash
-# CPU
-python -m keydnn test --train_mnist_example --device cpu --epochs 4 --limit-test 1000
-
-# CUDA (if available)
-python -m keydnn test --train_mnist_example --device cuda:0 --epochs 4 --limit-test 1000
-```
+- [https://keywind127.github.io/keydnn_v2/getting-started/cuda/](https://keywind127.github.io/keydnn_v2/getting-started/cuda/)
 
 ---
 
