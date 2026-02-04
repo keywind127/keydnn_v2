@@ -39,6 +39,11 @@ plugins:
             # More predictable ordering
             members_order: source
 
+            # src/ layout support (so mkdocstrings can import `keydnn`)
+            setup_commands:
+              - import sys
+              - sys.path.insert(0, "src")
+
 nav:
   - Home: index.md
   - Getting Started:
