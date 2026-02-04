@@ -1,0 +1,62 @@
+site_name: KeyDNN
+theme:
+  name: material
+  features:
+    - navigation.instant
+    - navigation.instant.progress
+    - navigation.tracking
+    - navigation.top
+    - navigation.sections
+    - navigation.indexes
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+    - search.suggest
+    - search.highlight
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            docstring_style: numpy
+            show_source: false
+
+            # Make subclassed presentation APIs (e.g., Tensor) show the full surface
+            inherited_members: true
+
+            # Keep pages readable by hiding dunder spam in API reference
+            filters:
+              - '!^__.*__$'
+              - '!^_.*'
+
+            # Signature rendering
+            show_signature_annotations: true
+            separate_signature: true
+
+            # More predictable ordering
+            members_order: source
+
+nav:
+  - Home: index.md
+  - Getting Started:
+      - Installation: getting-started/installation.md
+      - Quickstart: getting-started/quickstart.md
+      - CUDA: getting-started/cuda.md
+  - Guides:
+      - Tensors & Devices: guides/tensors-and-devices.md
+      - Training Loop: guides/training-loop.md
+      - Determinism: guides/determinism.md
+  - API Reference:
+      - Overview: api/index.md
+      - Tensors: api/tensors.md
+      - Layers: api/layers.md
+      - Activations: api/activations.md
+      - Losses: api/losses.md
+      - Optimizers: api/optimizers.md
+      - Models: api/models.md
+      - Callbacks: api/callbacks.md
+      - Datasets: api/datasets.md
+      - Backend: api/backend.md
+      - Utils: api/utils.md
