@@ -1,4 +1,5 @@
 site_name: KeyDNN
+site_url: https://keywind127.github.io/keydnn_v2/
 theme:
   name: material
   features:

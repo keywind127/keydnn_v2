@@ -18,6 +18,8 @@ It is designed to be both:
 - Keras-style training loop (`Model.fit`) with callbacks (EarlyStopping, ModelCheckpoint) and JSON checkpointing
 
 > **Status: v2.0.0** (stable). Public APIs are intended to be stable within the v2 series.
+> **Docs:** https://keywind127.github.io/keydnn_v2/  
+> **Source:** https://github.com/keywind127/keydnn_v2
 
 > **Documentation:** Module-level API reference will be expanded incrementally.
 > Current docs emphasize examples, architecture, and tested usage patterns.
