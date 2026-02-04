@@ -1,0 +1,5365 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+        <link rel="canonical" href="https://keywind127.github.io/keydnn_v2/api/tensors/">
+      
+      
+        <link rel="prev" href="../">
+      
+      
+        <link rel="next" href="../layers/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.1">
+    
+    
+      
+        <title>Tensors - KeyDNN</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    <body dir="ltr">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#tensors" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="KeyDNN" class="md-header__button md-logo" aria-label="KeyDNN" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            KeyDNN
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Tensors
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="KeyDNN" class="md-nav__button md-logo" aria-label="KeyDNN" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    KeyDNN
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/cuda/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CUDA
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/tensors-and-devices/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tensors & Devices
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/training-loop/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Training Loop
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/determinism/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Determinism
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_4" id="__nav_4_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    API Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tensors
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tensors
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#keydnn.Tensor" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tensor
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Tensor">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.dtype" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        dtype
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.shape" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        shape
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.device" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        device
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.requires_grad" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        requires_grad
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.grad" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        grad
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.T" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        T
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        data
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.nbytes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        nbytes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.device_type" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        device_type
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.zero_grad" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        zero_grad
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.to_numpy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        to_numpy
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.copy_from_numpy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        copy_from_numpy
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.copy_from" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        copy_from
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="copy_from">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.copy_from--notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Notes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.fill" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        fill
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.debug_storage_repr" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        debug_storage_repr
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.numel" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        numel
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.reshape" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        reshape
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.stack" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        stack
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.concat" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        concat
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.broadcast_to" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        broadcast_to
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.sum" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        sum
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.mean" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        mean
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.log" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        log
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.exp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        exp
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.max" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        max
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.matmul" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        matmul
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.transpose" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        transpose
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.backward" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        backward
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.item" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        item
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.sqrt" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        sqrt
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.rand" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        rand
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.full" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        full
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.tanh" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        tanh
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.sigmoid" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        sigmoid
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.zeros" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        zeros
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.ones" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ones
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.to" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        to
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.clone" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        clone
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.sum_to_shape" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        sum_to_shape
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.free_" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        free_
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.clamp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        clamp
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.to_" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        to_
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#keydnn.Device" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Device
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Device">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Device.is_cpu" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        is_cpu
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Device.is_cuda" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        is_cuda
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../layers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Layers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../activations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Activations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../losses/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Losses
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../optimizers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Optimizers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../models/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Models
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../callbacks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Callbacks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../datasets/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Datasets
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../backend/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Backend
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../utils/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Utils
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#keydnn.Tensor" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tensor
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Tensor">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.dtype" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        dtype
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.shape" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        shape
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.device" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        device
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.requires_grad" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        requires_grad
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.grad" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        grad
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.T" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        T
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        data
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.nbytes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        nbytes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.device_type" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        device_type
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.zero_grad" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        zero_grad
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.to_numpy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        to_numpy
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.copy_from_numpy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        copy_from_numpy
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.copy_from" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        copy_from
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="copy_from">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.copy_from--notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Notes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.fill" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        fill
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.debug_storage_repr" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        debug_storage_repr
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.numel" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        numel
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.reshape" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        reshape
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.stack" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        stack
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.concat" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        concat
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.broadcast_to" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        broadcast_to
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.sum" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        sum
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.mean" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        mean
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.log" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        log
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.exp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        exp
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.max" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        max
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.matmul" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        matmul
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.transpose" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        transpose
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.backward" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        backward
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.item" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        item
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.sqrt" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        sqrt
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.rand" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        rand
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.full" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        full
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.tanh" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        tanh
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.sigmoid" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        sigmoid
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.zeros" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        zeros
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.ones" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ones
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.to" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        to
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.clone" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        clone
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.sum_to_shape" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        sum_to_shape
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.free_" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        free_
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.clamp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        clamp
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Tensor.to_" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        to_
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#keydnn.Device" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Device
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Device">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Device.is_cpu" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        is_cpu
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keydnn.Device.is_cuda" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        is_cuda
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="tensors">Tensors</h1>
+
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="keydnn.Tensor" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">keydnn.Tensor</span>
+
+
+</h2>
+
+
+    <div class="doc doc-contents first">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="keydnn.infrastructure.tensor.Tensor">Tensor</span></code></p>
+
+
+
+        <p>Presentation-layer Tensor.</p>
+<p>This subclass preserves the full infrastructure Tensor API (including
+classmethods/staticmethods like <code>zeros</code>, <code>ones</code>, <code>rand</code>, etc.) while
+applying presentation-friendly defaults for direct construction.</p>
+
+
+<details class="note" open>
+  <summary>Notes</summary>
+  <ul>
+<li>Direct construction defaults to CPU if <code>device</code> is omitted.</li>
+<li>Direct construction defaults to zero-initialized storage because that is
+  what most users expect from a high-level DL API.</li>
+</ul>
+</details>
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h3 id="keydnn.Tensor.dtype" class="doc doc-heading">
+            <span class="doc doc-object-name doc-attribute-name">dtype</span>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+</h3>
+<div class="doc-signature highlight"><pre><span></span><code><span class="n">dtype</span><span class="p">:</span> <span class="n">dtype</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Return the element dtype of this tensor.</p>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="numpy.dtype">dtype</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>NumPy dtype representing the tensor element type.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<details class="note" open>
+  <summary>Notes</summary>
+  <ul>
+<li>For CPU tensors, this matches the underlying ndarray dtype.</li>
+<li>For CUDA tensors, this is metadata used for kernel dispatch and tests.</li>
+</ul>
+</details>
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h3 id="keydnn.Tensor.shape" class="doc doc-heading">
+            <span class="doc doc-object-name doc-attribute-name">shape</span>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+</h3>
+<div class="doc-signature highlight"><pre><span></span><code><span class="n">shape</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Return the tensor shape.</p>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="tuple">tuple</span>[<span title="int">int</span>, ...]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The tensor's shape.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h3 id="keydnn.Tensor.device" class="doc doc-heading">
+            <span class="doc doc-object-name doc-attribute-name">device</span>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+</h3>
+<div class="doc-signature highlight"><pre><span></span><code><span class="n">device</span><span class="p">:</span> <span class="n">Device</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Return the device on which this tensor resides.</p>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><a class="autorefs autorefs-internal" title="keydnn.Device (keydnn.domain.device._device.Device)" href="#keydnn.Device">Device</a></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The tensor's device placement descriptor.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h3 id="keydnn.Tensor.requires_grad" class="doc doc-heading">
+            <span class="doc doc-object-name doc-attribute-name">requires_grad</span>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+      <small class="doc doc-label doc-label-writable"><code>writable</code></small>
+  </span>
+
+</h3>
+<div class="doc-signature highlight"><pre><span></span><code><span class="n">requires_grad</span><span class="p">:</span> <span class="nb">bool</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Indicate whether this tensor should accumulate gradients.</p>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="bool">bool</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>True if gradients should be tracked/accumulated, False otherwise.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h3 id="keydnn.Tensor.grad" class="doc doc-heading">
+            <span class="doc doc-object-name doc-attribute-name">grad</span>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+</h3>
+<div class="doc-signature highlight"><pre><span></span><code><span class="n">grad</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="s1">&#39;Tensor&#39;</span><span class="p">]</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Return the gradient tensor associated with this tensor (if any).</p>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="typing.Optional">Optional</span>[<span title="keydnn.infrastructure.tensor._tensor.Tensor">Tensor</span>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The stored gradient tensor, or None if not computed or cleared.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h3 id="keydnn.Tensor.T" class="doc doc-heading">
+            <span class="doc doc-object-name doc-attribute-name">T</span>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+</h3>
+<div class="doc-signature highlight"><pre><span></span><code><span class="n">T</span><span class="p">:</span> <span class="n">ITensor</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Convenience property for 2D transpose.</p>
+<p>Equivalent to calling <code>self.transpose()</code>.</p>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h3 id="keydnn.Tensor.data" class="doc doc-heading">
+            <span class="doc doc-object-name doc-attribute-name">data</span>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+</h3>
+<div class="doc-signature highlight"><pre><span></span><code><span class="n">data</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="n">ndarray</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Return the underlying data handle for this tensor.</p>
+
+
+<details class="semantics" open>
+  <summary>Semantics</summary>
+  <ul>
+<li><strong>CPU tensors</strong>:
+    Returns the underlying NumPy ndarray storing the tensor data.</li>
+<li>
+<p><strong>CUDA tensors</strong>:
+    Returns the raw device pointer (<code>dev_ptr</code>) as an integer.</p>
+<p>The pointer is resolved as follows:
+1) If the tensor is backed by a <code>_CudaStorage</code> object, return
+<code>storage.dev_ptr</code>.
+2) Otherwise, fall back to the legacy <code>_data</code> field, which may
+contain a raw device pointer set by older code paths or tests.</p>
+</li>
+</ul>
+</details>
+
+<details class="note" open>
+  <summary>Notes</summary>
+  <ul>
+<li>For CUDA tensors, the returned value is <strong>not</strong> a NumPy array and
+should be treated as an opaque device pointer handle.</li>
+<li>A return value of <code>0</code> indicates that no device memory is currently
+allocated (e.g., uninitialized tensor, freed tensor, or zero-sized
+tensor).</li>
+<li>New code should prefer storage-backed tensors; the <code>_data</code> fallback
+exists only for backward compatibility during migration.</li>
+</ul>
+</details>
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="int">int</span> | <span title="numpy.ndarray">ndarray</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <ul>
+<li>NumPy ndarray for CPU tensors.</li>
+<li>Integer device pointer (<code>uintptr_t</code>) for CUDA tensors.</li>
+</ul>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="ValueError">ValueError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>If the tensor is on an unsupported or unknown device.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h3 id="keydnn.Tensor.nbytes" class="doc doc-heading">
+            <span class="doc doc-object-name doc-attribute-name">nbytes</span>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+</h3>
+<div class="doc-signature highlight"><pre><span></span><code><span class="n">nbytes</span><span class="p">:</span> <span class="nb">int</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Total bytes required to store this tensor's elements.</p>
+<p>Computed as:
+    numel() * itemsize(dtype)</p>
+
+
+<details class="note" open>
+  <summary>Notes</summary>
+  <ul>
+<li>This is metadata-only and does not require the underlying storage to
+  be allocated.</li>
+<li>For empty tensors (numel == 0), this returns 0.</li>
+</ul>
+</details>
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h3 id="keydnn.Tensor.device_type" class="doc doc-heading">
+            <span class="doc doc-object-name doc-attribute-name">device_type</span>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+</h3>
+<div class="doc-signature highlight"><pre><span></span><code><span class="n">device_type</span><span class="p">:</span> <span class="nb">str</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Returns a string of the current device type. It may be either <code>cpu</code> or <code>cuda</code>.</p>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="str">str</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The device type. Either <code>cpu</code> or <code>cuda</code>.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+    </div>
+
+</div>
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="keydnn.Tensor.zero_grad" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">zero_grad</span>
+
+
+</h3>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">zero_grad</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Clear the stored gradient.</p>
+
+
+<details class="note" open>
+  <summary>Notes</summary>
+  <p>Training loops typically call <code>zero_grad()</code> before backprop to avoid
+unintentional accumulation across iterations.</p>
+</details>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="keydnn.Tensor.to_numpy" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">to_numpy</span>
+
+
+</h3>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">to_numpy</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Convert the tensor to a NumPy ndarray on the host.</p>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="numpy.ndarray">ndarray</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>A NumPy array containing the tensor data.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="RuntimeError">RuntimeError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>If device-to-host transfer is unavailable or the tensor's dtype is unknown.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<details class="note" open>
+  <summary>Notes</summary>
+  <ul>
+<li>CPU tensors return a view/copy of the underlying CPU storage (preserving
+  existing behavior of the concrete tensor type).</li>
+<li>CUDA tensors are copied from device to host via a device-to-host memcpy.</li>
+</ul>
+</details>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="keydnn.Tensor.copy_from_numpy" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">copy_from_numpy</span>
+
+
+</h3>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">copy_from_numpy</span><span class="p">(</span><span class="n">arr</span><span class="p">:</span> <span class="n">ndarray</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Copy data from a NumPy array (or array-like / scalar) into this tensor.</p>
+
+
+<details class="backward-compatibility-(cpu)" open>
+  <summary>Backward compatibility (CPU)</summary>
+  <p>The original implementation accepted any array-like input (including NumPy
+scalars like <code>np.float32</code>) by calling <code>np.asarray(arr, dtype=np.float32)</code>.
+This method preserves that behavior for the CPU path.</p>
+</details>
+
+<details class="cuda" open>
+  <summary>CUDA</summary>
+  <ul>
+<li>Accepts any array-like / scalar.</li>
+<li>Casts to <code>self.dtype</code>, makes it C-contiguous, then performs a host-to-device
+  memcpy into the tensor's existing (or newly allocated) device buffer.</li>
+</ul>
+</details>
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>arr</code>
+            </td>
+            <td>
+                  <code><span title="typing.Any">Any</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Array-like object accepted by <code>np.asarray</code>, including NumPy scalars.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="ValueError">ValueError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>If the input shape does not match this tensor's shape.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="RuntimeError">RuntimeError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>If the tensor's device is unsupported or a CUDA copy fails.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="keydnn.Tensor.copy_from" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">copy_from</span>
+
+
+</h3>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">copy_from</span><span class="p">(</span>
+    <span class="n">other</span><span class="p">:</span> <span class="n">ITensor</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">allow_cross_device</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Copy data from another tensor into this tensor (in-place).</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>other</code>
+            </td>
+            <td>
+                  <code><span title="keydnn.infrastructure.tensor._tensor.Tensor">Tensor</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Source tensor.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>allow_cross_device</code>
+            </td>
+            <td>
+                  <code><span title="bool">bool</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>If False (backward-compatible), require <code>self.device</code> and <code>other.device</code>
+to match exactly (string compare) and perform same-device copies only.</p>
+<p>If True, allow:
+- CPU -&gt; CPU (same as before)
+- CUDA -&gt; CUDA (D2D memcpy; same device index is recommended)
+- CPU -&gt; CUDA (HtoD memcpy)
+- CUDA -&gt; CPU (DtoH memcpy)</p>
+<h5 id="keydnn.Tensor.copy_from--notes">Notes</h5>
+<ul>
+<li>Shape must match.</li>
+<li>dtype must match (no implicit casting).</li>
+<li>Cross-GPU copies (cuda:0 -&gt; cuda:1) are not handled here; they may work
+only if memcpy wrapper supports peer copies. By default this
+method raises for different CUDA device indices.</li>
+</ul>
+              </div>
+            </td>
+            <td>
+                  <code>False</code>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code>(<span title="TypeError">TypeError</span>, <span title="ValueError">ValueError</span>, <span title="RuntimeError">RuntimeError</span>)</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="keydnn.Tensor.fill" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">fill</span>
+
+
+</h3>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">fill</span><span class="p">(</span><span class="n">value</span><span class="p">:</span> <span class="nb">float</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Fill the tensor with a scalar value.</p>
+<p>This method overwrites every element of the tensor with <code>value</code>.
+The concrete implementation may dispatch differently depending on
+device placement (e.g., NumPy fill on CPU vs. a CUDA fill kernel).</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>value</code>
+            </td>
+            <td>
+                  <code><span title="float">float</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Scalar value to write into the tensor.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="RuntimeError">RuntimeError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>If the tensor's device is unsupported by this implementation.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="keydnn.Tensor.debug_storage_repr" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">debug_storage_repr</span>
+
+
+</h3>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">debug_storage_repr</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">str</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Return a stable, human-readable description of underlying storage.</p>
+
+
+<details class="contract" open>
+  <summary>Contract</summary>
+  <ul>
+<li>CPU tensors: describe the NumPy ndarray storage.</li>
+<li>CUDA tensors: return a stable placeholder string that includes:<ul>
+<li>device index</li>
+<li>tensor shape</li>
+<li>(if available) the device pointer value</li>
+</ul>
+</li>
+</ul>
+</details>
+
+<details class="note" open>
+  <summary>Notes</summary>
+  <p>This is a debugging aid and intentionally does not expose full contents.</p>
+</details>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="keydnn.Tensor.numel" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">numel</span>
+
+
+</h3>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">numel</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">int</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Return the total number of elements in the tensor.</p>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="int">int</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Product of all dimensions in the tensor shape.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="keydnn.Tensor.reshape" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">reshape</span>
+
+
+</h3>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">reshape</span><span class="p">(</span><span class="n">new_shape</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="o">...</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="n">ITensor</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Return a reshaped view of this tensor.</p>
+<p>This operation changes the logical shape while preserving the total
+number of elements.</p>
+
+
+<details class="behavior" open>
+  <summary>Behavior</summary>
+  <ul>
+<li>CPU: reshapes via NumPy and then materializes via <code>copy_from_numpy</code>
+  (preserving current copy-based semantics).</li>
+<li>CUDA: returns a metadata-only alias that shares the same device pointer
+  (no kernel launch, no device-to-device copy).</li>
+</ul>
+</details>
+
+<details class="backward" open>
+  <summary>Backward</summary>
+  <p>If autograd is enabled, backward reshapes <code>grad_out</code> back to the original
+shape of the parent tensor.</p>
+</details>
+
+<details class="note" open>
+  <summary>Notes</summary>
+  <ul>
+<li>Reshape validity is checked using NumPy semantics, including support
+  for <code>-1</code> inference.</li>
+<li>For CUDA tensors, an allocation must exist if <code>numel != 0</code> (i.e.,
+  <code>data</code> cannot be 0 for non-empty tensors).</li>
+</ul>
+</details>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="keydnn.Tensor.stack" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">stack</span>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-staticmethod"><code>staticmethod</code></small>
+  </span>
+
+</h3>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">stack</span><span class="p">(</span>
+    <span class="n">tensors</span><span class="p">:</span> <span class="n">Sequence</span><span class="p">[</span><span class="s2">&quot;Tensor&quot;</span><span class="p">],</span> <span class="n">axis</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="s2">&quot;Tensor&quot;</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Stack a sequence of tensors along a new axis.</p>
+<p>This is the differentiable counterpart of <code>np.stack</code>.</p>
+
+
+<details class="requirements" open>
+  <summary>Requirements</summary>
+  <ul>
+<li><code>tensors</code> must be non-empty</li>
+<li>all tensors must share the same shape</li>
+<li>all tensors must share the same device</li>
+<li>CPU: forward/backward uses NumPy (backward compatible)</li>
+<li>CUDA: forward/backward uses <code>stack_cuda_ext</code> kernels (device-pointer based)
+and does NOT call <code>to_numpy()</code> on CUDA tensors.</li>
+</ul>
+</details>
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>tensors</code>
+            </td>
+            <td>
+                  <code><span title="typing.Sequence">Sequence</span>[<span title="keydnn.infrastructure.tensor._tensor.Tensor">Tensor</span>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Input tensors to stack. Must be non-empty and same-shape.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>axis</code>
+            </td>
+            <td>
+                  <code><span title="int">int</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Axis at which the new dimension is inserted. Supports negative axes.
+Defaults to 0.</p>
+              </div>
+            </td>
+            <td>
+                  <code>0</code>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="keydnn.infrastructure.tensor._tensor.Tensor">Tensor</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>A new tensor whose shape is:
+    out.shape = in.shape[:axis] + (len(tensors),) + in.shape[axis:]</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<details class="note" open>
+  <summary>Notes</summary>
+  <ul>
+<li>Forward returns a <em>copy</em> (not a view).</li>
+<li>Backward splits <code>grad_out</code> along <code>axis</code> and routes each slice back to
+the corresponding parent tensor.</li>
+<li>CUDA backward overwrites dx buffers (no accumulation inside kernel).</li>
+</ul>
+</details>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="keydnn.Tensor.concat" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">concat</span>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-staticmethod"><code>staticmethod</code></small>
+  </span>
+
+</h3>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">concat</span><span class="p">(</span>
+    <span class="n">tensors</span><span class="p">:</span> <span class="n">Sequence</span><span class="p">[</span><span class="s2">&quot;Tensor&quot;</span><span class="p">],</span> <span class="n">axis</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="s2">&quot;Tensor&quot;</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Concatenate a sequence of tensors along an existing axis.</p>
+
+
+<details class="cpu-behavior" open>
+  <summary>CPU behavior</summary>
+  <ul>
+<li>Fully supports all axes via NumPy.</li>
+</ul>
+</details>
+
+<details class="cuda-behavior-(current)" open>
+  <summary>CUDA behavior (current)</summary>
+  <ul>
+<li>Supports only axis == 0 for CUDA tensors using device-to-device memcpy.</li>
+<li>General axis concatenation on CUDA requires a kernel (pending).</li>
+</ul>
+</details>
+
+<details class="requirements" open>
+  <summary>Requirements</summary>
+  <ul>
+<li><code>tensors</code> must be non-empty</li>
+<li>all tensors must share the same device</li>
+<li>shapes must match on all dimensions except <code>axis</code></li>
+<li>dtypes must match (CUDA path enforces this; CPU path preserves current float32-cast behavior)</li>
+</ul>
+</details>
+
+<details class="backward-rule" open>
+  <summary>Backward rule</summary>
+  <ul>
+<li>Split <code>grad_out</code> along <code>axis</code> into slices matching each input's size
+along that axis, and route each slice back to the corresponding parent.</li>
+</ul>
+</details>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="keydnn.Tensor.broadcast_to" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">broadcast_to</span>
+
+
+</h3>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">broadcast_to</span><span class="p">(</span><span class="n">shape</span><span class="p">:</span> <span class="n">Tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="o">...</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="n">ITensor</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Broadcast this tensor to a target shape by explicit expansion.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>shape</code>
+            </td>
+            <td>
+                  <code><span title="tuple">tuple</span>[<span title="int">int</span>, ...]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Target shape to broadcast to.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="keydnn.domain._tensor.ITensor">ITensor</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Broadcasted tensor (materialized copy).</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<details class="note" open>
+  <summary>Notes</summary>
+  <ul>
+<li>The operation is conceptually a "repeat/expand" that materializes a
+  new tensor of the requested shape.</li>
+<li>Backward typically reduces gradients by summing over the broadcasted
+  dimensions (i.e., the inverse of expansion).</li>
+</ul>
+</details>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="keydnn.Tensor.sum" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">sum</span>
+
+
+</h3>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">sum</span><span class="p">(</span>
+    <span class="n">axis</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">keepdims</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">ITensor</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Compute the sum of tensor elements.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>axis</code>
+            </td>
+            <td>
+                  <code><span title="typing.Optional">Optional</span>[<span title="int">int</span>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Axis along which to compute the sum. If None, all elements are
+reduced into a scalar.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>keepdims</code>
+            </td>
+            <td>
+                  <code><span title="bool">bool</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>If True, retains reduced dimensions with size 1. Defaults to False.</p>
+              </div>
+            </td>
+            <td>
+                  <code>False</code>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="keydnn.domain._tensor.ITensor">ITensor</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Tensor containing the summed values. The shape depends on the
+<code>axis</code> and <code>keepdims</code> arguments.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<details class="note" open>
+  <summary>Notes</summary>
+  <p>Backward rule:
+    The upstream gradient is broadcast back to the input tensor's
+    shape, i.e., each input element receives the gradient of the
+    corresponding reduced output.</p>
+<p>Backend-specific implementations may impose additional constraints
+(e.g., limited axis support on CUDA).</p>
+</details>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="keydnn.Tensor.mean" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">mean</span>
+
+
+</h3>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">mean</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">ITensor</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Compute the arithmetic mean of all elements in the tensor.</p>
+<p>This operation always reduces the tensor to a scalar value.</p>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="keydnn.domain._tensor.ITensor">ITensor</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>A scalar tensor (shape=()) containing the mean value.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<details class="note" open>
+  <summary>Notes</summary>
+  <p>Backward rule:
+    The gradient is distributed uniformly to all input elements:</p>
+<pre><code>    ``d(mean(x)) / dx = 1 / numel(x)``
+</code></pre>
+<p>No axis argument is currently supported; the reduction is always
+performed over all elements.</p>
+</details>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="keydnn.Tensor.log" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">log</span>
+
+
+</h3>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">log</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">ITensor</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Compute the elementwise natural logarithm of the tensor.</p>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="keydnn.domain._tensor.ITensor">ITensor</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>A tensor of the same shape as <code>self</code>, where each element is
+replaced by its natural logarithm.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<details class="note" open>
+  <summary>Notes</summary>
+  
+</details>
+
+<details class="cpu-behavior" open>
+  <summary>CPU behavior</summary>
+  <ul>
+<li>Uses NumPy to compute the forward pass for CPU tensors.</li>
+</ul>
+</details>
+
+<details class="cuda-behavior-(workaround)" open>
+  <summary>CUDA behavior (workaround)</summary>
+  <ul>
+<li>For CUDA tensors, this method currently performs a CPU round-trip:
+  device → host (<code>to_numpy</code>) → NumPy <code>log</code> → device
+  (<code>copy_from_numpy</code>).</li>
+<li>This preserves correctness and autograd semantics but is not
+  performance-optimal.</li>
+</ul>
+</details>
+
+<details class="autograd" open>
+  <summary>Autograd</summary>
+  <p>If <code>self.requires_grad</code> is True, the backward rule is:</p>
+<pre><code>``d(log(x)) / dx = 1 / x``
+</code></pre>
+<p>The behavior for non-positive input values follows NumPy semantics
+(e.g., <code>-inf</code> or <code>nan</code>).</p>
+</details>
+
+<details class="todo" open>
+  <summary>TODO</summary>
+  <p>Implement a native CUDA kernel for <code>log</code> (and a fused backward) to
+avoid device↔host transfers.</p>
+</details>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="keydnn.Tensor.exp" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">exp</span>
+
+
+</h3>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">exp</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">ITensor</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Compute the elementwise exponential of the tensor.</p>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="keydnn.domain._tensor.ITensor">ITensor</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>A tensor of the same shape as <code>self</code> with <code>exp</code> applied
+elementwise.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<details class="note" open>
+  <summary>Notes</summary>
+  <p>Backward rule:
+    <code>d(exp(x)) / dx = exp(x)</code></p>
+</details>
+
+<details class="cuda-behavior" open>
+  <summary>CUDA behavior</summary>
+  <ul>
+<li>Uses the native CUDA unary exponential kernel via
+  <code>unary_cuda_ext.exp_forward</code>.</li>
+<li>Operates directly on device pointers without a NumPy round-trip.</li>
+</ul>
+</details>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="keydnn.Tensor.max" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">max</span>
+
+
+</h3>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">max</span><span class="p">(</span><span class="n">axis</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="n">keepdims</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">ITensor</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Compute the maximum values along a given axis.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>axis</code>
+            </td>
+            <td>
+                  <code><span title="int">int</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Axis along which to compute the maximum. Defaults to -1.</p>
+              </div>
+            </td>
+            <td>
+                  <code>-1</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>keepdims</code>
+            </td>
+            <td>
+                  <code><span title="bool">bool</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Whether to retain reduced dimensions with size 1. Defaults to False.</p>
+              </div>
+            </td>
+            <td>
+                  <code>False</code>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="keydnn.domain._tensor.ITensor">ITensor</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Tensor containing the maximum values along the specified axis.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<details class="cuda-support" open>
+  <summary>CUDA support</summary>
+  <ul>
+<li>Only supports 2D input tensors.</li>
+<li><code>axis</code> must reduce exactly one dimension:
+  <code>axis in {0, 1, -1, -2}</code>.</li>
+<li>Backward propagation routes the gradient to a single argmax index per
+  slice (ties are not split).</li>
+</ul>
+</details>
+
+<details class="cpu-notes" open>
+  <summary>CPU notes</summary>
+  <p>Backward rule:
+    Gradients are routed to all positions equal to the maximum value
+    using a mask, i.e.:</p>
+<pre><code>    ``dx = grad_out * 1[x == max(x)]``
+</code></pre>
+</details>
+
+<details class="note" open>
+  <summary>Notes</summary>
+  <p>The exact behavior (including tie handling and shape semantics) is
+backend-dependent but must conform to the rules documented here.</p>
+</details>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="keydnn.Tensor.matmul" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">matmul</span>
+
+
+</h3>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">matmul</span><span class="p">(</span><span class="n">other</span><span class="p">:</span> <span class="s1">&#39;Tensor&#39;</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="s1">&#39;Tensor&#39;</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Matrix multiplication (2D): out = self @ other.</p>
+
+
+<details class="requirements" open>
+  <summary>Requirements</summary>
+  <ul>
+<li>CPU: unchanged behavior (backward compatible)</li>
+<li>CUDA: both operands must be CUDA, 2D, inner dims match</li>
+<li>CUDA inputs MUST already have allocated device buffers (data != 0).
+    (No implicit allocation for inputs.)</li>
+</ul>
+</details>
+
+<details class="backward" open>
+  <summary>Backward</summary>
+  <p>If out = A @ B, then:
+- dL/dA = dL/dout @ B^T
+- dL/dB = A^T @ dL/dout</p>
+</details>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="keydnn.Tensor.transpose" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">transpose</span>
+
+
+</h3>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">transpose</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">ITensor</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Return the 2D transpose of this tensor.</p>
+<p>For a 2D tensor A with shape (M, N), transpose returns Aᵀ with shape
+(N, M) such that:</p>
+<pre><code>out[i, j] = self[j, i]
+</code></pre>
+
+
+<details class="requirements" open>
+  <summary>Requirements</summary>
+  <ul>
+<li>Input must be 2D.</li>
+<li>CPU and CUDA are supported by the concrete implementation.</li>
+</ul>
+</details>
+
+<details class="backward" open>
+  <summary>Backward</summary>
+  <p>If out = Aᵀ, then dL/dA = (dL/dout)ᵀ.</p>
+</details>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="keydnn.Tensor.backward" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">backward</span>
+
+
+</h3>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">backward</span><span class="p">(</span>
+    <span class="n">grad_out</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="s2">&quot;Tensor&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="o">*</span><span class="p">,</span>
+    <span class="n">profile</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+    <span class="n">profile_topk</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">20</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Backpropagate gradients from this tensor through the autograd graph.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>grad_out</code>
+            </td>
+            <td>
+                  <code><span title="typing.Optional">Optional</span>[<span title="keydnn.infrastructure.tensor._tensor.Tensor">Tensor</span>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Gradient w.r.t. this tensor. If omitted, this tensor must be a scalar
+(shape == ()) and the gradient is assumed to be 1.0.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<details class="note" open>
+  <summary>Notes</summary>
+  <ul>
+<li>Gradients are accumulated into <code>.grad</code> of leaf tensors that have
+<code>requires_grad=True</code>.</li>
+<li>This implementation performs a reverse topological traversal.</li>
+<li>CPU behavior is unchanged (same logic; only extra timing when profile=True).</li>
+</ul>
+</details>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="keydnn.Tensor.item" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">item</span>
+
+
+</h3>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">item</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">float</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Return the value of a scalar (or single-element) tensor as a Python float.</p>
+
+
+<details class="note" open>
+  <summary>Notes</summary>
+  <ul>
+<li>CPU: reads from <code>_data</code>.</li>
+<li>CUDA: uses <code>to_numpy()</code> (D2H) to fetch the scalar.</li>
+</ul>
+</details>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="keydnn.Tensor.sqrt" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">sqrt</span>
+
+
+</h3>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">sqrt</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">ITensor</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Compute the elementwise square root of the tensor.</p>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="keydnn.domain._tensor.ITensor">ITensor</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>A tensor with the same shape as <code>self</code>, containing
+<code>sqrt(self)</code> applied elementwise.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<details class="note" open>
+  <summary>Notes</summary>
+  
+</details>
+
+<details class="cpu-behavior" open>
+  <summary>CPU behavior</summary>
+  <ul>
+<li>Uses NumPy to compute the forward pass for CPU tensors.</li>
+</ul>
+</details>
+
+<details class="cuda-behavior-(workaround)" open>
+  <summary>CUDA behavior (workaround)</summary>
+  <ul>
+<li>For CUDA tensors, this method currently performs a CPU round-trip:
+  device → host (<code>to_numpy</code>) → NumPy <code>sqrt</code> → device
+  (<code>copy_from_numpy</code>).</li>
+<li>This preserves correctness and autograd semantics but is not
+  performance-optimal.</li>
+</ul>
+</details>
+
+<details class="autograd" open>
+  <summary>Autograd</summary>
+  <p>If <code>self.requires_grad</code> is True, the returned tensor participates in
+autograd with parent <code>self</code>.</p>
+</details>
+
+<details class="todo" open>
+  <summary>TODO</summary>
+  <p>Implement a native CUDA kernel for <code>sqrt</code> (and optionally a fused
+backward) to avoid device↔host transfers.</p>
+</details>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="keydnn.Tensor.rand" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">rand</span>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-staticmethod"><code>staticmethod</code></small>
+  </span>
+
+</h3>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">rand</span><span class="p">(</span>
+    <span class="n">shape</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">device</span><span class="p">,</span> <span class="n">requires_grad</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="s2">&quot;Tensor&quot;</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Create a tensor filled with uniform random values in [0, 1) on the given device.</p>
+
+
+<details class="note" open>
+  <summary>Notes</summary>
+  <ul>
+<li>CPU: random values are generated using NumPy.</li>
+<li>CUDA: random values are generated on CPU and transferred to device memory.
+No CUDA RNG kernel is used.</li>
+<li>This mirrors the initialization strategy used by many frameworks and keeps
+behavior deterministic and easy to test.</li>
+<li>The returned tensor has dtype float32 and ctx=None.</li>
+</ul>
+</details>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="keydnn.Tensor.full" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">full</span>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-classmethod"><code>classmethod</code></small>
+  </span>
+
+</h3>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">full</span><span class="p">(</span>
+    <span class="n">shape</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">,</span>
+    <span class="n">fill_value</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span>
+    <span class="o">*</span><span class="p">,</span>
+    <span class="n">device</span><span class="p">:</span> <span class="n">Device</span><span class="p">,</span>
+    <span class="n">requires_grad</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">ITensor</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Create a tensor filled with a constant value.</p>
+
+
+<details class="backward-compatibility" open>
+  <summary>Backward compatibility</summary>
+  <ul>
+<li>CPU path preserves the original logic exactly:
+  uses NumPy to create a filled array and calls copy_from_numpy().</li>
+<li>Default dtype remains float32, matching the original implementation.</li>
+<li>The returned tensor has ctx=None.</li>
+</ul>
+</details>
+
+<details class="cuda" open>
+  <summary>CUDA</summary>
+  <ul>
+<li>Allocates a CUDA tensor (no host staging) and fills via Tensor.fill(),
+  which dispatches to the CUDA fill kernel after ensuring allocation.</li>
+</ul>
+</details>
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>shape</code>
+            </td>
+            <td>
+                  <code><span title="tuple">tuple</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Desired tensor shape. May be any shape accepted by NumPy (including
+<code>()</code> for a scalar tensor).</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>fill_value</code>
+            </td>
+            <td>
+                  <code><span title="float">float</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Constant value to write into every element.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>device</code>
+            </td>
+            <td>
+                  <code><a class="autorefs autorefs-internal" title="keydnn.Device (keydnn.domain.device._device.Device)" href="#keydnn.Device">Device</a></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Target device placement (CPU or CUDA).</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>requires_grad</code>
+            </td>
+            <td>
+                  <code><span title="bool">bool</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Whether the returned tensor should participate in autograd.
+Defaults to False.</p>
+              </div>
+            </td>
+            <td>
+                  <code>False</code>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="keydnn.domain._tensor.ITensor">ITensor</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>A newly allocated tensor with the given shape, filled with <code>fill_value</code>.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="RuntimeError">RuntimeError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>If <code>device</code> is not a supported device type.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="keydnn.Tensor.tanh" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">tanh</span>
+
+
+</h3>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">tanh</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">ITensor</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Compute the elementwise hyperbolic tangent of the tensor.</p>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="keydnn.domain._tensor.ITensor">ITensor</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>A tensor with the same shape as <code>self</code>, with <code>tanh</code> applied
+elementwise.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<details class="note" open>
+  <summary>Notes</summary>
+  <ul>
+<li>This method delegates to the autograd <code>TanhFn</code> Function.</li>
+<li>NumPy is not used directly here; numerical kernels remain encapsulated
+  inside Tensor operations or autograd Functions.</li>
+</ul>
+</details>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="keydnn.Tensor.sigmoid" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">sigmoid</span>
+
+
+</h3>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">sigmoid</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">ITensor</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Compute the elementwise logistic sigmoid of the tensor.</p>
+<p>The sigmoid function is defined as:</p>
+<pre><code>``sigmoid(x) = 1 / (1 + exp(-x))``
+</code></pre>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="keydnn.domain._tensor.ITensor">ITensor</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>A tensor with the same shape as <code>self</code>, with <code>sigmoid</code> applied
+elementwise.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<details class="note" open>
+  <summary>Notes</summary>
+  <p>This method is a thin convenience wrapper around <code>SigmoidFn</code> defined
+in <code>._function</code> and integrates with the autograd system.</p>
+</details>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="keydnn.Tensor.zeros" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">zeros</span>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-classmethod"><code>classmethod</code></small>
+  </span>
+
+</h3>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">zeros</span><span class="p">(</span>
+    <span class="o">*</span><span class="p">,</span>
+    <span class="n">shape</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="o">...</span><span class="p">],</span>
+    <span class="n">device</span><span class="p">:</span> <span class="n">Device</span><span class="p">,</span>
+    <span class="n">requires_grad</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+    <span class="n">dtype</span><span class="p">:</span> <span class="n">Any</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">ITensor</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Create a tensor filled with zeros on the specified device.</p>
+<p>This factory method constructs a tensor with the given shape and device.
+For CPU tensors, a NumPy array is allocated and zero-initialized.
+For CUDA tensors, device memory is allocated and zeroed via a CUDA fill
+routine.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>shape</code>
+            </td>
+            <td>
+                  <code><span title="tuple">tuple</span>[<span title="int">int</span>, ...]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Shape of the output tensor.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>device</code>
+            </td>
+            <td>
+                  <code><a class="autorefs autorefs-internal" title="keydnn.Device (keydnn.domain.device._device.Device)" href="#keydnn.Device">Device</a></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Target device placement (CPU or CUDA).</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>requires_grad</code>
+            </td>
+            <td>
+                  <code><span title="bool">bool</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Whether the tensor should track gradients for autograd.</p>
+              </div>
+            </td>
+            <td>
+                  <code>False</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>dtype</code>
+            </td>
+            <td>
+                  <code><span title="typing.Any">Any</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The data type of the target tensor.</p>
+              </div>
+            </td>
+            <td>
+                  <code><span title="numpy.float32">float32</span></code>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="keydnn.domain._tensor.ITensor">ITensor</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Newly created tensor filled with zeros.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<details class="note" open>
+  <summary>Notes</summary>
+  <ul>
+<li>The dtype is currently fixed to <code>float32</code>.</li>
+<li>Zero-sized tensors are valid and return immediately without invoking
+  CUDA kernels.</li>
+</ul>
+</details>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="keydnn.Tensor.ones" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">ones</span>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-classmethod"><code>classmethod</code></small>
+  </span>
+
+</h3>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">ones</span><span class="p">(</span>
+    <span class="o">*</span><span class="p">,</span>
+    <span class="n">shape</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="o">...</span><span class="p">],</span>
+    <span class="n">device</span><span class="p">:</span> <span class="n">Device</span><span class="p">,</span>
+    <span class="n">requires_grad</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+    <span class="n">dtype</span><span class="p">:</span> <span class="n">Any</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">ITensor</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Create a tensor filled with ones on the specified device.</p>
+<p>This factory method constructs a tensor with the given shape and device.
+For CPU tensors, a NumPy array is allocated and initialized with ones.
+For CUDA tensors, device memory is allocated and filled using a native
+CUDA fill routine.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>shape</code>
+            </td>
+            <td>
+                  <code><span title="tuple">tuple</span>[<span title="int">int</span>, ...]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Shape of the output tensor.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>device</code>
+            </td>
+            <td>
+                  <code><a class="autorefs autorefs-internal" title="keydnn.Device (keydnn.domain.device._device.Device)" href="#keydnn.Device">Device</a></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Target device placement (CPU or CUDA).</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>requires_grad</code>
+            </td>
+            <td>
+                  <code><span title="bool">bool</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Whether the tensor should track gradients for autograd.</p>
+              </div>
+            </td>
+            <td>
+                  <code>False</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>dtype</code>
+            </td>
+            <td>
+                  <code><span title="typing.Any">Any</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The data type of the target tensor.</p>
+              </div>
+            </td>
+            <td>
+                  <code><span title="numpy.float32">float32</span></code>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="keydnn.domain._tensor.ITensor">ITensor</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Newly created tensor filled with ones.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<details class="note" open>
+  <summary>Notes</summary>
+  <ul>
+<li>The dtype is currently fixed to <code>float32</code>.</li>
+<li>Zero-sized tensors are valid and return immediately without invoking
+  CUDA kernels.</li>
+<li>The CUDA path prioritizes correctness and may fall back to a slower
+  initialization strategy if the native fill kernel fails.</li>
+</ul>
+</details>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="keydnn.Tensor.to" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">to</span>
+
+
+</h3>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">to</span><span class="p">(</span><span class="n">device</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">copy</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">ITensor</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Move or copy this tensor to another device.</p>
+<p>This method implements explicit device placement transitions and returns
+a tensor on <code>device</code>. If the target device matches the current device,
+it returns <code>self</code> by default (or a cloned copy if <code>copy=True</code>).</p>
+
+
+<details class="supported-transfers" open>
+  <summary>Supported transfers</summary>
+  <ul>
+<li>CPU -&gt; CUDA: allocates device memory and performs host-to-device memcpy.</li>
+<li>CUDA -&gt; CPU: allocates host buffer and performs device-to-host memcpy.</li>
+<li>CUDA -&gt; CUDA (different device indices): currently implemented via an
+  intermediate CPU round-trip for simplicity.</li>
+</ul>
+</details>
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>device</code>
+            </td>
+            <td>
+                  <code><a class="autorefs autorefs-internal" title="keydnn.Device (keydnn.domain.device._device.Device)" href="#keydnn.Device">Device</a> | <span title="str">str</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Target device. If a string is provided, it is parsed as a <code>Device</code>
+(e.g., "cpu", "cuda:0").</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>copy</code>
+            </td>
+            <td>
+                  <code><span title="bool">bool</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>If True, forces a copy even when the device is unchanged.
+Defaults to False.</p>
+              </div>
+            </td>
+            <td>
+                  <code>False</code>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="keydnn.domain._tensor.ITensor">ITensor</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>A tensor placed on the requested device.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<details class="note" open>
+  <summary>Notes</summary>
+  <ul>
+<li>For CPU -&gt; CUDA copies, the host buffer is made C-contiguous before
+  raw memcpy to ensure correct layout.</li>
+<li>This method does not propagate autograd context; returned tensors are
+  created with <code>requires_grad=False</code> and <code>ctx=None</code> in the transfer paths.</li>
+</ul>
+</details>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="keydnn.Tensor.clone" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">clone</span>
+
+
+</h3>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">clone</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">ITensor</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Create a deep copy of the tensor's storage.</p>
+<ul>
+<li>CPU: copies the underlying NumPy array into a new tensor.</li>
+<li>CUDA: allocates a new device buffer and performs a device-to-device
+  memcpy.</li>
+</ul>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="keydnn.domain._tensor.ITensor">ITensor</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>A new tensor with identical contents.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<details class="note" open>
+  <summary>Notes</summary>
+  <ul>
+<li><code>clone()</code> is intended to copy raw storage and typically returns a tensor
+  with <code>requires_grad=False</code> and no autograd context (<code>ctx=None</code>).</li>
+</ul>
+</details>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="keydnn.Tensor.sum_to_shape" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">sum_to_shape</span>
+
+
+</h3>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">sum_to_shape</span><span class="p">(</span><span class="n">target_shape</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="o">...</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="n">ITensor</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Sum-reduce this tensor to <code>target_shape</code> (inverse of broadcasting).</p>
+<p>This primitive is commonly used in autograd to reduce broadcasted gradients
+back to the original source shape.</p>
+<p>Dispatches via tensor_control_path_manager.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="keydnn.Tensor.free_" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">free_</span>
+
+
+</h3>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">free_</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Explicitly release CUDA backing memory (if owned).</p>
+
+
+<details class="semantics" open>
+  <summary>Semantics</summary>
+  <ul>
+<li>If <code>_storage</code> is present: decrement refcount; free happens when it hits 0.</li>
+<li>If <code>_storage</code> is absent:<ul>
+<li>If this tensor is marked as borrowed, we do NOT free the devptr.</li>
+<li>If marked as "owning borrowed devptr" (transitional), we cuda_free it.</li>
+</ul>
+</li>
+<li>Idempotent: safe to call multiple times.</li>
+</ul>
+</details>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="keydnn.Tensor.clamp" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">clamp</span>
+
+
+</h3>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">clamp</span><span class="p">(</span>
+    <span class="o">*</span><span class="p">,</span> <span class="nb">min</span><span class="p">:</span> <span class="nb">float</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="nb">max</span><span class="p">:</span> <span class="nb">float</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="s2">&quot;Tensor&quot;</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Clamp tensor values elementwise between <code>min</code> and <code>max</code>.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>min</code>
+            </td>
+            <td>
+                  <code><span title="float">float</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Minimum value. If None, no lower bound is applied.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>max</code>
+            </td>
+            <td>
+                  <code><span title="float">float</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Maximum value. If None, no upper bound is applied.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="keydnn.infrastructure.tensor._tensor.Tensor">Tensor</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>A new Tensor with values clamped to the specified range.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<details class="note" open>
+  <summary>Notes</summary>
+  <ul>
+<li>Gradients pass through unchanged for values within the range.</li>
+<li>Gradients are zeroed for values clipped by <code>min</code> or <code>max</code>.</li>
+</ul>
+</details>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="keydnn.Tensor.to_" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">to_</span>
+
+
+</h3>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">to_</span><span class="p">(</span><span class="n">device</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">copy</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">ITensor</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Move this tensor to another device <em>in-place</em>.</p>
+<p>This method performs an in-place device placement transition. Unlike
+<code>to()</code>, which may return a newly allocated tensor on the target device,
+<code>to_()</code> preserves the identity of <code>self</code> (i.e., <code>id(self)</code> is unchanged)
+by migrating the underlying storage and updating device placement fields
+on the same object.</p>
+
+
+<details class="semantics" open>
+  <summary>Semantics</summary>
+  <ul>
+<li>If the target device matches the current device:<ul>
+<li>returns <code>self</code> (no-op), unless <code>copy=True</code>, in which case the tensor's
+storage is replaced with a cloned copy on the same device.</li>
+</ul>
+</li>
+<li>If the target device differs:<ul>
+<li>performs the transfer using <code>to(device, copy=True)</code> internally,
+then swaps this tensor's backing storage to the transferred result.</li>
+</ul>
+</li>
+</ul>
+</details>
+
+<details class="supported-transfers" open>
+  <summary>Supported transfers</summary>
+  <ul>
+<li>CPU -&gt; CUDA: allocates device memory and performs host-to-device memcpy.</li>
+<li>CUDA -&gt; CPU: allocates host buffer and performs device-to-host memcpy.</li>
+<li>CUDA -&gt; CUDA (different device indices): currently implemented via an
+intermediate CPU round-trip for simplicity.</li>
+</ul>
+</details>
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>device</code>
+            </td>
+            <td>
+                  <code><a class="autorefs autorefs-internal" title="keydnn.Device (keydnn.domain.device._device.Device)" href="#keydnn.Device">Device</a> | <span title="str">str</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Target device. If a string is provided, it is parsed as a <code>Device</code>
+(e.g., "cpu", "cuda:0").</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>copy</code>
+            </td>
+            <td>
+                  <code><span title="bool">bool</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>If True, forces a copy even when the device is unchanged. This is the
+in-place analogue of <code>to(..., copy=True)</code>. Defaults to False.</p>
+              </div>
+            </td>
+            <td>
+                  <code>False</code>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="keydnn.domain._tensor.ITensor">ITensor</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>This tensor (<code>self</code>) after in-place migration.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<details class="note" open>
+  <summary>Notes</summary>
+  <ul>
+<li>This method intentionally <em>does not preserve autograd context</em> across
+device transfers. If this tensor participates in autograd, should
+treat <code>to_()</code> as a graph break:<ul>
+<li><code>ctx</code> is cleared.</li>
+<li><code>requires_grad</code> is left unchanged (you can still accumulate grads
+going forward), but any prior graph history is discarded.</li>
+</ul>
+</li>
+<li>If <code>self.grad</code> exists and is a Tensor-like object with <code>.to(...)</code>,
+this method will attempt to move it to the same device as well.</li>
+</ul>
+</details>
+
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="keydnn.Device" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">keydnn.Device</span>
+
+
+</h2>
+
+
+    <div class="doc doc-contents first">
+
+
+
+        <p>Concrete computation device descriptor.</p>
+<p>This class encapsulates a normalized representation of a computation device,
+including its type (CPU or CUDA) and, for CUDA devices, an optional device
+index (e.g., cuda:0).</p>
+<p>The class performs strict validation of device strings to ensure a small,
+well-defined set of supported device identifiers.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>device</code>
+            </td>
+            <td>
+                  <code><span title="str">str</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Device identifier string. Must be either:
+- "cpu"
+- "cuda:<index>", where <index> is a non-negative integer</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="ValueError">ValueError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>If the provided device string does not match the supported formats.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<details class="note" open>
+  <summary>Notes</summary>
+  <ul>
+<li><code>__slots__</code> is used to prevent dynamic attribute creation and reduce
+  per-instance memory overhead.</li>
+<li>This class is intentionally lightweight and does not allocate or manage
+  any backend resources.</li>
+</ul>
+</details>
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="keydnn.Device.is_cpu" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">is_cpu</span>
+
+
+</h3>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">is_cpu</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">bool</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Check whether this device represents a CPU.</p>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="bool">bool</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>True if the device type is CPU, False otherwise.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="keydnn.Device.is_cuda" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">is_cuda</span>
+
+
+</h3>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">is_cuda</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">bool</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Check whether this device represents a CUDA GPU.</p>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="bool">bool</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>True if the device type is CUDA, False otherwise.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+      <div class="md-progress" data-md-component="progress" role="progressbar"></div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.instant.progress", "navigation.tracking", "navigation.top", "navigation.sections", "navigation.indexes", "content.code.copy", "content.code.annotate", "content.tabs.link", "search.suggest", "search.highlight"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>
