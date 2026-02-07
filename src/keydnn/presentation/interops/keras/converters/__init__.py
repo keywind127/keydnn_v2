@@ -7,9 +7,23 @@ Keras layers into their KeyDNN equivalents.
 
 from .dense import DenseConverter
 from ._base import BaseConverter, KerasInteropError
+from .activations import (
+    ActivationConverter,
+    ReLUConverter,
+    LeakyReLUConverter,
+    SigmoidConverter,
+    TanhConverter,
+    SoftmaxConverter,
+)
 
 __all__ = [
     "BaseConverter",
-    "DenseConverter",
     "KerasInteropError",
+    "DenseConverter",
+    "ActivationConverter",
+    "ReLUConverter",
+    "LeakyReLUConverter",
+    "SigmoidConverter",
+    "TanhConverter",
+    "SoftmaxConverter",
 ]

@@ -15,6 +15,14 @@ from typing import Any, Dict, Optional, Type
 from .context import KerasImportContext
 from .converters._base import BaseConverter, KerasInteropError
 from .converters.dense import DenseConverter
+from .converters.activations import (
+    ActivationConverter,
+    SigmoidConverter,
+    ReLUConverter,
+    LeakyReLUConverter,
+    TanhConverter,
+    SoftmaxConverter,
+)
 
 
 class UnsupportedKerasLayerError(KerasInteropError):
@@ -74,9 +82,18 @@ def build_registry(tf: Any, *, ctx: KerasImportContext) -> LayerRegistry:
     LayerRegistry
         The constructed registry.
     """
-    mapping: Dict[Type[Any], BaseConverter[Any]] = {
+    mapping: Dict[type[Any], BaseConverter[Any]] = {
+        # Core layers
         tf.keras.layers.Dense: DenseConverter(
             allow_non_linear_activation=bool(ctx.allow_non_linear_activation)
         ),
+        # Generic activation wrapper
+        tf.keras.layers.Activation: ActivationConverter(),
+        # Explicit activation layers
+        tf.keras.layers.ReLU: ReLUConverter(),
+        tf.keras.layers.LeakyReLU: LeakyReLUConverter(),
+        tf.keras.layers.Sigmoid: SigmoidConverter(),
+        tf.keras.layers.Tanh: TanhConverter(),
+        tf.keras.layers.Softmax: SoftmaxConverter(),
     }
     return LayerRegistry(mapping=mapping)
