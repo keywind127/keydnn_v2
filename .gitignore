@@ -37,3 +37,4 @@ data/*
 _test1.py
 _test2.py
 cleanup.py
+.venv-keras/
