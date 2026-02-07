@@ -13,8 +13,29 @@ class _FakeDense:  # acts as tf.keras.layers.Dense class
     pass
 
 
+class _FakeActivation:  # acts as tf.keras.layers.Activation class
+    pass
+
+
+class _FakeReLU:  # acts as tf.keras.layers.ReLU class
+    pass
+
+
+class _FakeLeakyReLU:  # acts as tf.keras.layers.LeakyReLU class
+    pass
+
+
+class _FakeSoftmax:  # acts as tf.keras.layers.Softmax class
+    pass
+
+
 class _FakeKerasLayers:
     Dense = _FakeDense
+    Activation = _FakeActivation
+    ReLU = _FakeReLU
+    LeakyReLU = _FakeLeakyReLU
+    Softmax = _FakeSoftmax
+    # Intentionally omit Sigmoid/Tanh to cover optional getattr(...) registration.
 
 
 class _FakeKeras:
