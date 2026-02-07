@@ -89,11 +89,19 @@ def build_registry(tf: Any, *, ctx: KerasImportContext) -> LayerRegistry:
         ),
         # Generic activation wrapper
         tf.keras.layers.Activation: ActivationConverter(),
-        # Explicit activation layers
+        # Explicit activation layers (common across TF/Keras builds)
         tf.keras.layers.ReLU: ReLUConverter(),
         tf.keras.layers.LeakyReLU: LeakyReLUConverter(),
-        tf.keras.layers.Sigmoid: SigmoidConverter(),
-        tf.keras.layers.Tanh: TanhConverter(),
         tf.keras.layers.Softmax: SoftmaxConverter(),
     }
+
+    # Optional explicit activation layers (not present in all TF/Keras builds)
+    SigmoidLayer = getattr(tf.keras.layers, "Sigmoid", None)
+    if SigmoidLayer is not None:
+        mapping[SigmoidLayer] = SigmoidConverter()
+
+    TanhLayer = getattr(tf.keras.layers, "Tanh", None)
+    if TanhLayer is not None:
+        mapping[TanhLayer] = TanhConverter()
+
     return LayerRegistry(mapping=mapping)
