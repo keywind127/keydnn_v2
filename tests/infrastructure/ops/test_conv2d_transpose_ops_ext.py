@@ -12,6 +12,14 @@ from src.keydnn.infrastructure.ops.conv2d_transpose_cpu_ext import (
     conv2d_transpose_forward_cpu_tensor,
     conv2d_transpose_backward_cpu_tensor,
 )
+from src.keydnn.presentation.apis.utils import (
+    set_deterministic,
+    seed,
+)
+
+
+set_deterministic(True)
+seed(123)
 
 
 def _pair(v):

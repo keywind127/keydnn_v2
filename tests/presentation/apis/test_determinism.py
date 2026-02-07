@@ -1,7 +1,7 @@
 import os
 import unittest
 
-from keydnn.presentation.apis.utils.determinism import (
+from src.keydnn.presentation.apis.utils.determinism import (
     set_deterministic,
     get_deterministic,
 )

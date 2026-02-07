@@ -7,7 +7,7 @@ import numpy as np
 
 def _cuda_available() -> bool:
     try:
-        from src.keydnn.infrastructure.native_cuda.python.maxpool2d_ctypes import (
+        from keydnn.infrastructure.native_cuda.python.maxpool2d_ctypes import (
             load_keydnn_cuda_native,
         )
 
@@ -35,11 +35,11 @@ def _copy_param_cpu_to_cuda(p_cpu, p_cuda) -> None:
 @unittest.skipUnless(_cuda_available(), "CUDA native DLL/wrappers not available")
 class TestXORGradParityF32CPUvsCUDA(unittest.TestCase):
     def test_xor_grad_parity_f32(self) -> None:
-        from src.keydnn.infrastructure.models._sequential import Sequential
-        from src.keydnn.infrastructure.fully_connected import Linear
-        from src.keydnn.infrastructure.activations import Sigmoid
-        from src.keydnn.infrastructure.tensor._tensor import Tensor
-        from src.keydnn.domain.device._device import Device
+        from keydnn.infrastructure.models._sequential import Sequential
+        from keydnn.infrastructure.fully_connected import Linear
+        from keydnn.infrastructure.activations import Sigmoid
+        from keydnn.infrastructure.tensor._tensor import Tensor
+        from keydnn.domain.device._device import Device
 
         loss_atol = float(os.environ.get("KEYDNN_TEST_LOSS_ATOL", "1e-4"))
         grad_max_abs_atol = float(os.environ.get("KEYDNN_TEST_GRAD_ATOL", "2e-3"))

@@ -119,12 +119,18 @@ def _get_cuda_utils_wrappers():
             "src.keydnn.infrastructure.native_cuda.python.avgpool2d_ctypes",
             "cudaMemcpyHtoD",
         ),
-        ("keydnn.infrastructure.native_cuda.python.maxpool2d_ctypes", "cudaMemcpyHtoD"),
         (
-            "keydnn.infrastructure.native_cuda.python.global_avgpool2d_ctypes",
+            "src.keydnn.infrastructure.native_cuda.python.maxpool2d_ctypes",
             "cudaMemcpyHtoD",
         ),
-        ("keydnn.infrastructure.native_cuda.python.avgpool2d_ctypes", "cudaMemcpyHtoD"),
+        (
+            "src.keydnn.infrastructure.native_cuda.python.global_avgpool2d_ctypes",
+            "cudaMemcpyHtoD",
+        ),
+        (
+            "src.keydnn.infrastructure.native_cuda.python.avgpool2d_ctypes",
+            "cudaMemcpyHtoD",
+        ),
     )
     cudaMemcpyDtoH = _import_first(
         (
@@ -139,12 +145,18 @@ def _get_cuda_utils_wrappers():
             "src.keydnn.infrastructure.native_cuda.python.avgpool2d_ctypes",
             "cudaMemcpyDtoH",
         ),
-        ("keydnn.infrastructure.native_cuda.python.maxpool2d_ctypes", "cudaMemcpyDtoH"),
         (
-            "keydnn.infrastructure.native_cuda.python.global_avgpool2d_ctypes",
+            "src.keydnn.infrastructure.native_cuda.python.maxpool2d_ctypes",
             "cudaMemcpyDtoH",
         ),
-        ("keydnn.infrastructure.native_cuda.python.avgpool2d_ctypes", "cudaMemcpyDtoH"),
+        (
+            "src.keydnn.infrastructure.native_cuda.python.global_avgpool2d_ctypes",
+            "cudaMemcpyDtoH",
+        ),
+        (
+            "src.keydnn.infrastructure.native_cuda.python.avgpool2d_ctypes",
+            "cudaMemcpyDtoH",
+        ),
     )
     cuda_synchronize = _import_first(
         (
@@ -160,15 +172,15 @@ def _get_cuda_utils_wrappers():
             "cuda_synchronize",
         ),
         (
-            "keydnn.infrastructure.native_cuda.python.global_avgpool2d_ctypes",
+            "src.keydnn.infrastructure.native_cuda.python.global_avgpool2d_ctypes",
             "cuda_synchronize",
         ),
         (
-            "keydnn.infrastructure.native_cuda.python.avgpool2d_ctypes",
+            "src.keydnn.infrastructure.native_cuda.python.avgpool2d_ctypes",
             "cuda_synchronize",
         ),
         (
-            "keydnn.infrastructure.native_cuda.python.maxpool2d_ctypes",
+            "src.keydnn.infrastructure.native_cuda.python.maxpool2d_ctypes",
             "cuda_synchronize",
         ),
     )
@@ -211,7 +223,9 @@ class _CudaArithmeticCtypesBase(unittest.TestCase):
             (
                 "src.keydnn.infrastructure.native_cuda.python.ops.tensor_arithmetic_ctypes",
             ),
-            ("keydnn.infrastructure.native_cuda.python.ops.tensor_arithmetic_ctypes",),
+            (
+                "src.keydnn.infrastructure.native_cuda.python.ops.tensor_arithmetic_ctypes",
+            ),
         )
 
         def _op(name: str):
