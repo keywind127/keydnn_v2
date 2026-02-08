@@ -14,6 +14,11 @@ Core:
 - tf.keras.layers.Flatten
 - tf.keras.layers.Dropout
 
+Pooling (NCHW only):
+- tf.keras.layers.MaxPooling2D
+- tf.keras.layers.AveragePooling2D
+- tf.keras.layers.GlobalAveragePooling2D
+
 Activations:
 - tf.keras.layers.Activation (relu/sigmoid/tanh/softmax)
 - tf.keras.layers.ReLU
@@ -41,6 +46,11 @@ from .converters.activations import (
     LeakyReLUConverter,
     TanhConverter,
     SoftmaxConverter,
+)
+from .converters.pooling import (
+    AveragePooling2DConverter,
+    MaxPooling2DConverter,
+    GlobalAveragePooling2DConverter,
 )
 
 
@@ -136,6 +146,10 @@ def build_registry(tf: Any, *, ctx: KerasImportContext) -> LayerRegistry:
         tf.keras.layers.Conv2D: Conv2DConverter(),
         tf.keras.layers.Flatten: FlattenConverter(),
         tf.keras.layers.Dropout: DropoutConverter(),
+        # Pooling (NCHW only)
+        tf.keras.layers.MaxPooling2D: MaxPooling2DConverter(),
+        tf.keras.layers.AveragePooling2D: AveragePooling2DConverter(),
+        tf.keras.layers.GlobalAveragePooling2D: GlobalAveragePooling2DConverter(),
         # Generic activation wrapper
         tf.keras.layers.Activation: ActivationConverter(),
         # Explicit activation layers (common across TF/Keras builds)

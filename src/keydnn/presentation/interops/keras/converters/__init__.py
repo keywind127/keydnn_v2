@@ -18,6 +18,11 @@ from .activations import (
     TanhConverter,
     SoftmaxConverter,
 )
+from .pooling import (
+    MaxPooling2DConverter,
+    AveragePooling2DConverter,
+    GlobalAveragePooling2DConverter,
+)
 
 __all__ = [
     "BaseConverter",
@@ -32,4 +37,7 @@ __all__ = [
     "FlattenConverter",
     "DropoutConverter",
     "Conv2DConverter",
+    "MaxPooling2DConverter",
+    "AveragePooling2DConverter",
+    "GlobalAveragePooling2DConverter",
 ]
