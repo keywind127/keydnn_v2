@@ -7,6 +7,10 @@ Keras layers into their KeyDNN equivalents.
 
 from .dense import DenseConverter
 from ._base import BaseConverter, KerasInteropError
+from .batchnorm import BatchNormalizationConverter
+from .flatten import FlattenConverter
+from .dropout import DropoutConverter
+from .conv2d import Conv2DConverter
 from .activations import (
     ActivationConverter,
     ReLUConverter,
@@ -14,6 +18,11 @@ from .activations import (
     SigmoidConverter,
     TanhConverter,
     SoftmaxConverter,
+)
+from .pooling import (
+    MaxPooling2DConverter,
+    AveragePooling2DConverter,
+    GlobalAveragePooling2DConverter,
 )
 
 __all__ = [
@@ -26,4 +35,11 @@ __all__ = [
     "SigmoidConverter",
     "TanhConverter",
     "SoftmaxConverter",
+    "FlattenConverter",
+    "DropoutConverter",
+    "Conv2DConverter",
+    "MaxPooling2DConverter",
+    "AveragePooling2DConverter",
+    "GlobalAveragePooling2DConverter",
+    "BatchNormalizationConverter",
 ]
