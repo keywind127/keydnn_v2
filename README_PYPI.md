@@ -11,7 +11,9 @@ It is designed to be both:
 - a **learning-friendly** implementation of modern DL abstractions (Tensor, autograd, modules), and
 - a **performance-oriented sandbox** for building real backends (native CPU kernels, CUDA kernels, vendor libraries).
 
-> ✅ **Status:** **v2.0.0 stable**. The public API is intended to be stable; changes will follow semantic versioning.  
+> 🚧 **Status:** **v2.1.0 (alpha)**.  
+> The v2 public API is largely stable and actively evolving toward a v2.1 release.
+> Breaking changes are avoided when possible and documented when necessary.  
 > 📚 **Documentation:** https://keywind127.github.io/keydnn_v2/  
 > 💻 **Source:** https://github.com/keywind127/keydnn_v2
 
@@ -32,7 +34,7 @@ If CUDA is unavailable, CPU execution remains supported.
 
 - **Windows (CPU):** ✅ supported
 - **Windows (CUDA):** ✅ supported (requires NVIDIA GPU + CUDA runtime; cuBLAS/cuDNN optional)
-- **Linux/macOS:** ❌ not supported in v2.0.0 (v0 has CPU-focused Linux support)
+- **Linux/macOS:** ❌ not yet supported in v2.x (v0 has CPU-focused Linux support)
 
 ---
 
