@@ -1,6 +1,6 @@
 # Layers
 
-This section documents the **neural network layers** provided by KeyDNN’s public API.
+This section documents the **neural network layers** provided by KeyDNN’s public API.  
 All layers are part of the **presentation layer** and are safe to depend on.
 
 Unless otherwise noted, layers:
@@ -26,6 +26,11 @@ Unless otherwise noted, layers:
 
 ## Convolution Layers
 
+> **Note**  
+> KeyDNN provides both `Conv2D` / `Conv2DTranspose` and  
+> `Conv2d` / `Conv2dTranspose`.  
+> These are equivalent and exist for naming compatibility.
+
 ::: keydnn.Conv2D
     options:
       show_root_heading: true
@@ -34,12 +39,20 @@ Unless otherwise noted, layers:
     options:
       show_root_heading: true
 
+::: keydnn.Conv2d
+    options:
+      show_root_heading: true
+
+::: keydnn.Conv2dTranspose
+    options:
+      show_root_heading: true
+
 ---
 
 ## Normalization Layers
 
 > **Note**  
-> KeyDNN provides both `BatchNorm1D` / `BatchNorm2D` and
+> KeyDNN provides both `BatchNorm1D` / `BatchNorm2D` and  
 > `BatchNorm1d` / `BatchNorm2d`.  
 > These are equivalent and exist for naming compatibility.
 
@@ -75,7 +88,15 @@ Unless otherwise noted, layers:
 
 ## Pooling Layers
 
+> **Note**  
+> KeyDNN provides both `*Pool2D` and `*Pool2d` variants.  
+> These are equivalent and exist for naming compatibility.
+
 ::: keydnn.MaxPool2D
+    options:
+      show_root_heading: true
+
+::: keydnn.MaxPool2d
     options:
       show_root_heading: true
 
@@ -83,7 +104,15 @@ Unless otherwise noted, layers:
     options:
       show_root_heading: true
 
+::: keydnn.AvgPool2d
+    options:
+      show_root_heading: true
+
 ::: keydnn.GlobalAvgPool2D
+    options:
+      show_root_heading: true
+
+::: keydnn.GlobalAvgPool2d
     options:
       show_root_heading: true
 
