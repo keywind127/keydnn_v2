@@ -7,6 +7,9 @@ Keras layers into their KeyDNN equivalents.
 
 from .dense import DenseConverter
 from ._base import BaseConverter, KerasInteropError
+from .flatten import FlattenConverter
+from .dropout import DropoutConverter
+from .conv2d import Conv2DConverter
 from .activations import (
     ActivationConverter,
     ReLUConverter,
@@ -26,4 +29,7 @@ __all__ = [
     "SigmoidConverter",
     "TanhConverter",
     "SoftmaxConverter",
+    "FlattenConverter",
+    "DropoutConverter",
+    "Conv2DConverter",
 ]
