@@ -83,6 +83,12 @@ class _Softmax:
     ...
 
 
+class _BatchNormalization:
+    """Fake tf.keras.layers.BatchNormalization class."""
+
+    ...
+
+
 class _FakeLayers:
     """
     Fake `tf.keras.layers` namespace.
@@ -109,6 +115,9 @@ class _FakeLayers:
     Sigmoid = _Sigmoid
     Tanh = _Tanh
     Softmax = _Softmax
+
+    # Batchnorm layer
+    BatchNormalization = _BatchNormalization
 
 
 class _FakeKeras:

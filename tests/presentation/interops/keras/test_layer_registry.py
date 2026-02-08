@@ -53,6 +53,10 @@ class _FakeGlobalAveragePooling2D:
     pass
 
 
+class _FakeBatchNormalization:
+    pass
+
+
 class _FakeKerasLayers:
     Dense = _FakeDense
     Conv2D = _FakeConv2D
@@ -65,6 +69,7 @@ class _FakeKerasLayers:
     ReLU = _FakeReLU
     LeakyReLU = _FakeLeakyReLU
     Softmax = _FakeSoftmax
+    BatchNormalization = _FakeBatchNormalization
 
 
 class _FakeKeras:
