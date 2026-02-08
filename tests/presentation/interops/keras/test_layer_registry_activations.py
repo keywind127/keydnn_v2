@@ -89,6 +89,12 @@ class _BatchNormalization:
     ...
 
 
+class _Conv2DTranspose:
+    """Fake tf.keras.layers.Conv2DTranspose class."""
+
+    ...
+
+
 class _FakeLayers:
     """
     Fake `tf.keras.layers` namespace.
@@ -118,6 +124,9 @@ class _FakeLayers:
 
     # Batchnorm layer
     BatchNormalization = _BatchNormalization
+
+    # Conv2D transpose layer
+    Conv2DTranspose = _Conv2DTranspose
 
 
 class _FakeKeras:

@@ -57,6 +57,10 @@ class _FakeBatchNormalization:
     pass
 
 
+class _FakeConv2DTranspose:
+    pass
+
+
 class _FakeKerasLayers:
     Dense = _FakeDense
     Conv2D = _FakeConv2D
@@ -70,6 +74,7 @@ class _FakeKerasLayers:
     LeakyReLU = _FakeLeakyReLU
     Softmax = _FakeSoftmax
     BatchNormalization = _FakeBatchNormalization
+    Conv2DTranspose = _FakeConv2DTranspose
 
 
 class _FakeKeras:
