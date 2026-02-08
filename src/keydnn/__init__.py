@@ -32,6 +32,11 @@ from .presentation.apis.layers import (
     MaxPool2D,
     AvgPool2D,
     GlobalAvgPool2D,
+    Conv2d,
+    Conv2dTranspose,
+    MaxPool2d,
+    AvgPool2d,
+    GlobalAvgPool2d,
 )
 from .presentation.apis.losses import (
     cce_loss,

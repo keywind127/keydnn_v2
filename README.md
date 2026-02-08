@@ -17,13 +17,14 @@ It is designed to be both:
 - Extensive **unit tests** (CPU↔CUDA parity) and standalone **microbenchmarks** under `scripts/`
 - Keras-style training loop (`Model.fit`) with callbacks (EarlyStopping, ModelCheckpoint) and JSON checkpointing
 
-> **Status: v2.0.0** (stable). Public APIs are intended to be stable within the v2 series.
+> **Status: v2.1.0a1** (alpha). The v2 public API is largely stable and evolving toward v2.1.
+> Breaking changes are avoided when possible and documented when necessary.
 
 > **Docs:** https://keywind127.github.io/keydnn_v2/  
 > **Source:** https://github.com/keywind127/keydnn_v2
 
-> **Documentation:** Module-level API reference will be expanded incrementally.
-> Current docs emphasize examples, architecture, and tested usage patterns.
+> **Documentation:** API reference is being expanded incrementally (mkdocstrings),
+> with an emphasis on examples, architecture, and tested usage patterns.
 
 ---
 
@@ -38,7 +39,7 @@ It is designed to be both:
 
 ## Installation
 
-> **Platform support (v2.0.0):** Windows 10/11 x64 is the supported platform (CPU + CUDA).
+> **Platform support (v2.x):** Windows 10/11 x64 is the supported platform (CPU + CUDA).
 > Linux/macOS may build for CPU-only use, but are not officially supported or CI-validated yet.
 
 ### From PyPI
@@ -60,6 +61,7 @@ pip install -e .
 - CUDA execution requires a compatible NVIDIA GPU and a working CUDA runtime.
 - Some backends may rely on vendor libraries (e.g., cuBLAS / cuDNN) depending on your build configuration.
 - If CUDA native libraries are unavailable, CUDA tests are skipped and CUDA execution paths will raise or fall back where explicitly documented.
+- Use `keydnn.backend.cuda_available()` to gate optional CUDA execution at runtime.
 
 ### CUDA setup (Windows)
 
@@ -105,8 +107,11 @@ print(x.grad.to_numpy())
 
 ```python
 from keydnn.tensors import Tensor, Device
+from keydnn.backend import cuda_available
 
-x = Tensor.rand((1024, 1024), device=Device("cuda:0"), requires_grad=True)
+device = Device("cuda:0") if cuda_available() else Device("cpu")
+
+x = Tensor.rand((1024, 1024), device=device, requires_grad=True)
 y = (x @ x.T).mean()
 y.backward()
 print(y.item())
