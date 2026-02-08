@@ -95,6 +95,12 @@ class _Conv2DTranspose:
     ...
 
 
+class _LayerNormalization:
+    """Fake tf.keras.layers.LayerNormalization class."""
+
+    ...
+
+
 class _FakeLayers:
     """
     Fake `tf.keras.layers` namespace.
@@ -127,6 +133,9 @@ class _FakeLayers:
 
     # Conv2D transpose layer
     Conv2DTranspose = _Conv2DTranspose
+
+    # Layer normalization layer
+    LayerNormalization = _LayerNormalization
 
 
 class _FakeKeras:
