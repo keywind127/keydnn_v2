@@ -26,6 +26,10 @@ Activations:
 - tf.keras.layers.Softmax
 - (optional) tf.keras.layers.Sigmoid
 - (optional) tf.keras.layers.Tanh
+
+Batch Normalization:
+- tf.keras.layers.BatchNorm1D
+- tf.keras.layers.BatchNorm2D
 """
 
 from __future__ import annotations
@@ -35,6 +39,7 @@ from typing import Any, Dict, Optional, Type
 
 from .context import KerasImportContext
 from .converters._base import BaseConverter, KerasInteropError
+from .converters.batchnorm import BatchNormalizationConverter
 from .converters.conv2d import Conv2DConverter
 from .converters.dense import DenseConverter
 from .converters.dropout import DropoutConverter
@@ -156,6 +161,8 @@ def build_registry(tf: Any, *, ctx: KerasImportContext) -> LayerRegistry:
         tf.keras.layers.ReLU: ReLUConverter(),
         tf.keras.layers.LeakyReLU: LeakyReLUConverter(),
         tf.keras.layers.Softmax: SoftmaxConverter(),
+        # Batch normalization layer
+        tf.keras.layers.BatchNormalization: BatchNormalizationConverter(),
     }
 
     # Optional explicit activation layers (not present in all TF/Keras builds)

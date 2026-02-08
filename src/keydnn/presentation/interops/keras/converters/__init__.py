@@ -7,6 +7,7 @@ Keras layers into their KeyDNN equivalents.
 
 from .dense import DenseConverter
 from ._base import BaseConverter, KerasInteropError
+from .batchnorm import BatchNormalizationConverter
 from .flatten import FlattenConverter
 from .dropout import DropoutConverter
 from .conv2d import Conv2DConverter
@@ -40,4 +41,5 @@ __all__ = [
     "MaxPooling2DConverter",
     "AveragePooling2DConverter",
     "GlobalAveragePooling2DConverter",
+    "BatchNormalizationConverter",
 ]
