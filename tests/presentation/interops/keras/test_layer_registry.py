@@ -29,13 +29,42 @@ class _FakeSoftmax:  # acts as tf.keras.layers.Softmax class
     pass
 
 
+class _FakeConv2D:
+    pass
+
+
+class _FakeFlatten:
+    pass
+
+
+class _FakeDropout:
+    pass
+
+
+class _FakeMaxPooling2D:
+    pass
+
+
+class _FakeAveragePooling2D:
+    pass
+
+
+class _FakeGlobalAveragePooling2D:
+    pass
+
+
 class _FakeKerasLayers:
     Dense = _FakeDense
+    Conv2D = _FakeConv2D
+    Flatten = _FakeFlatten
+    Dropout = _FakeDropout
+    MaxPooling2D = _FakeMaxPooling2D
+    AveragePooling2D = _FakeAveragePooling2D
+    GlobalAveragePooling2D = _FakeGlobalAveragePooling2D
     Activation = _FakeActivation
     ReLU = _FakeReLU
     LeakyReLU = _FakeLeakyReLU
     Softmax = _FakeSoftmax
-    # Intentionally omit Sigmoid/Tanh to cover optional getattr(...) registration.
 
 
 class _FakeKeras:
