@@ -41,6 +41,7 @@ from .context import KerasImportContext
 from .converters._base import BaseConverter, KerasInteropError
 from .converters.batchnorm import BatchNormalizationConverter
 from .converters.conv2d_transpose import Conv2DTransposeConverter
+from .converters.layernorm import LayerNormalizationConverter
 from .converters.conv2d import Conv2DConverter
 from .converters.dense import DenseConverter
 from .converters.dropout import DropoutConverter
@@ -166,6 +167,8 @@ def build_registry(tf: Any, *, ctx: KerasImportContext) -> LayerRegistry:
         tf.keras.layers.BatchNormalization: BatchNormalizationConverter(),
         # Conv2D transpose layer
         tf.keras.layers.Conv2DTranspose: Conv2DTransposeConverter(),
+        # Layer normalization layer
+        tf.keras.layers.LayerNormalization: LayerNormalizationConverter(),
     }
 
     # Optional explicit activation layers (not present in all TF/Keras builds)
