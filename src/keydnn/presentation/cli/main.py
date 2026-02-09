@@ -30,6 +30,7 @@ import argparse
 from typing import Sequence
 
 from .commands.test import add_test_subparser
+from .commands.convert import add_convert_subparser
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -50,6 +51,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     add_test_subparser(subparsers)
+    add_convert_subparser(subparsers)
 
     return parser
 
