@@ -27,10 +27,10 @@ Conversion consists of two logical phases:
 Conversion can be performed via:
 
 - Python API:
-    ```python
-    from keydnn import from_keras
-    model = from_keras("model.h5")
-    ```
+  ```python
+  from keydnn import from_keras
+  model = from_keras("model.h5")
+  ```
 
 * CLI:
 
