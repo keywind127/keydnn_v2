@@ -52,7 +52,7 @@ nav:
       - Tensors & Devices: guides/tensors-and-devices.md
       - Training Loop: guides/training-loop.md
       - Determinism: guides/determinism.md
-      - Keras Interoperability: guides/keras-interoperability.md
+      - Keras Interoperability: guides/keras-conversion.md
   - API Reference:
       - Overview: api/index.md
       - Tensors: api/tensors.md
