@@ -32,7 +32,7 @@ kd_model = from_keras(
     strict=True,
     allow_non_linear_activation=False,
 )
-````
+```
 
 ### CLI
 
