@@ -67,3 +67,7 @@ from .presentation.apis.utils.random import (
     seed,
     get_seed,
 )
+
+from .presentation.interops.keras import (
+    from_keras,
+)
