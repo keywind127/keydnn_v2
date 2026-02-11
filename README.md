@@ -17,7 +17,7 @@ It is designed to be both:
 - Extensive **unit tests** (CPU↔CUDA parity) and standalone **microbenchmarks** under `scripts/`
 - Keras-style training loop (`Model.fit`) with callbacks (EarlyStopping, ModelCheckpoint) and JSON checkpointing
 
-> **Status: v2.1.0a1** (alpha). The v2 public API is largely stable and evolving toward v2.1.
+> **Status: v2.1.0a2** (alpha). The v2 public API is largely stable and evolving toward v2.1.
 > Breaking changes are avoided when possible and documented when necessary.
 
 > **Docs:** https://keywind127.github.io/keydnn_v2/  
