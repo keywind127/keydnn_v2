@@ -781,7 +781,7 @@ class Model(Module):
         try:
             # Run one forward pass. We call `self(x)` so we follow the normal
             # call path, but __call__ will allow execution while _building=True.
-            _ = self.forward(x)
+            _ = self.forward(x, skip_norm=True)
         except Exception as e:
             # Keep state as unbuilt on failure.
             self._is_built = False

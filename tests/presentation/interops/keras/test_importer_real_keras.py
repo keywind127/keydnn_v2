@@ -85,6 +85,8 @@ def _as_list(kd_out):
     for attr in ("modules", "layers"):
         if hasattr(kd_out, attr):
             v = getattr(kd_out, attr)
+            if callable(v):
+                v = v()
             if isinstance(v, (list, tuple)):
                 return list(v)
 
@@ -236,6 +238,7 @@ class TestKerasImporterRealKeras(TestCase):
                     data_format="channels_first",
                 ),
                 tf.keras.layers.GlobalAveragePooling2D(data_format="channels_first"),
+                tf.keras.layers.Flatten(),
                 tf.keras.layers.Dense(4, use_bias=True, activation="linear"),
                 tf.keras.layers.Softmax(),
             ]

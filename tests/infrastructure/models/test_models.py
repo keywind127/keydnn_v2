@@ -11,12 +11,12 @@ from src.keydnn.infrastructure.utils._preprocessing import numpy_to_tensor
 
 
 class AddOne(Module):
-    def forward(self, x):
+    def forward(self, x, *args, **kwargs):
         return x + 1
 
 
 class MulTwo(Module):
-    def forward(self, x):
+    def forward(self, x, *args, **kwargs):
         return x * 2
 
 
@@ -27,7 +27,7 @@ class DummyParamModule(Module):
         self.w = Parameter(shape=(1,), device=device)
         self.w.copy_from_numpy(np.array([1.0], dtype=np.float32))
 
-    def forward(self, x):
+    def forward(self, x, *args, **kwargs):
         return x
 
 
@@ -94,12 +94,12 @@ class TestSequential(unittest.TestCase):
 class TestModelPredict(unittest.TestCase):
     def test_predict_runs_forward_or_raises_if_eval_missing(self):
         class Identity(Model):
-            def forward(self, x):
+            def forward(self, x, *args, **kwargs):
                 return x
 
         m = Identity()
 
-        m.forward = lambda x: x
+        m.forward = lambda x, *args, **kwargs: x
 
         dummy_x = numpy_to_tensor(
             np.array([[0.0]], dtype=np.float32),
