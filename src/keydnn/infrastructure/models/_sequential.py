@@ -24,6 +24,7 @@ Notes
 
 from typing import Any, Iterator, List, Tuple, Optional
 
+from ...domain._tensor import ITensor
 from ...domain.device._device import Device
 from ..module._serialization_core import register_module
 from .._module import Module
@@ -128,7 +129,12 @@ class Sequential(Model):
             # Fallback for minimal Module implementations
             setattr(self, layer_name, layer)
 
-    def forward(self, x, skip_norm: bool = False):
+    def forward(
+        self,
+        x: ITensor,
+        *,
+        _skip_norm: bool = False,
+    ) -> ITensor:
         """
         Apply all layers sequentially.
 
@@ -136,6 +142,8 @@ class Sequential(Model):
         ----------
         x : ITensor
             Input tensor to the first layer.
+        _skip_norm : bool, optional
+            Whether to skip normalization layers. Useful during model build / compilation.
 
         Returns
         -------
@@ -156,7 +164,7 @@ class Sequential(Model):
             # during construction of computation graph
             # we do not want to add new data to normalization layers
             # as they might unexpectedly change the mean and variance
-            if skip_norm and isinstance(layer, NORM_LAYERS):
+            if _skip_norm and isinstance(layer, NORM_LAYERS):
                 continue
             out = layer(out)
         return out
