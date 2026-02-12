@@ -61,14 +61,14 @@ def _try_make_sequential(mods: Sequence[Any]) -> Any:
     """
     # Try common locations; keep import local to avoid side effects.
     try:
-        from .....infrastructure.module.containers import Sequential  # type: ignore
+        from ....infrastructure.models import Sequential
 
         return Sequential(list(mods))
     except Exception:
         pass
 
     try:
-        from .....presentation.module.containers import Sequential  # type: ignore
+        from ....presentation.apis.models import Sequential
 
         return Sequential(list(mods))
     except Exception:
