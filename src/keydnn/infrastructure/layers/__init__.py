@@ -12,5 +12,5 @@ __all__ = [
     "BatchNorm1d",
     "BatchNorm2d",
     "LayerNorm",
-    NORM_LAYERS,
+    "NORM_LAYERS",
 ]
