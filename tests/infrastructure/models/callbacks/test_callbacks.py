@@ -69,7 +69,7 @@ class _PassthroughModel(Model):
     Minimal model to exercise Model.fit + callbacks without real parameter updates.
     """
 
-    def forward(self, x: Any) -> Any:
+    def forward(self, x: Any, *args, **kwargs) -> Any:
         return x
 
 

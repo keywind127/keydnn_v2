@@ -329,7 +329,7 @@ class TestModelTrainOnBatchContract(unittest.TestCase):
 
         m = Model()
 
-        m.forward = lambda x: FakePred(0.5)
+        m.forward = lambda x, *args, **kwargs: FakePred(0.5)
 
         opt = FakeOptimizer()
 
@@ -376,7 +376,7 @@ class TestModelFitHistoryContract(unittest.TestCase):
 
         m = Model()
 
-        m.forward = lambda x: x
+        m.forward = lambda x, *args, **kwargs: x
 
         dummy_x = _tensor_from_numpy(
             np.array([[0.0]], dtype=np.float32),

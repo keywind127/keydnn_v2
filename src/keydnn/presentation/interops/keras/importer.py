@@ -63,14 +63,14 @@ def _try_make_sequential(mods: Sequence[Any]) -> Any:
     try:
         from ....infrastructure.models import Sequential
 
-        return Sequential(list(mods))
+        return Sequential(*list(mods))
     except Exception:
         pass
 
     try:
         from ....presentation.apis.models import Sequential
 
-        return Sequential(list(mods))
+        return Sequential(*list(mods))
     except Exception:
         pass
 
@@ -117,6 +117,10 @@ def from_keras(
     KerasInteropError
         If model type or layers are unsupported in the current phase.
     """
+
+    from ....infrastructure._module import Module
+    from ....infrastructure.models import Sequential
+
     tf = _require_tensorflow()
 
     dev = _resolve_device(device)
@@ -148,4 +152,9 @@ def from_keras(
         conv.load_weights(kd, k_layer, ctx)
         kd_layers.append(kd)
 
-    return _try_make_sequential(kd_layers)
+    seq: Sequential | list[Module] = _try_make_sequential(kd_layers)
+
+    if isinstance(seq, Sequential):
+        seq.build(tuple([1, *model.input_shape[1:]]))
+
+    return seq

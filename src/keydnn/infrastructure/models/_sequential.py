@@ -128,7 +128,7 @@ class Sequential(Model):
             # Fallback for minimal Module implementations
             setattr(self, layer_name, layer)
 
-    def forward(self, x):
+    def forward(self, x, skip_norm: bool = False):
         """
         Apply all layers sequentially.
 
@@ -147,8 +147,17 @@ class Sequential(Model):
         This method uses the ordered `_layers` list (not `_modules`) to ensure
         deterministic execution order.
         """
+
+        from ..layers import NORM_LAYERS
+
         out = x
         for layer in self._layers:
+            # NOTE
+            # during construction of computation graph
+            # we do not want to add new data to normalization layers
+            # as they might unexpectedly change the mean and variance
+            if skip_norm and isinstance(layer, NORM_LAYERS):
+                continue
             out = layer(out)
         return out
 

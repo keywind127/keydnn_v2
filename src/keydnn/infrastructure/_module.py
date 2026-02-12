@@ -181,7 +181,7 @@ class Module(IModule):
             child_prefix = f"{base}{child_name}"
             yield from child.named_parameters(child_prefix)
 
-    def forward(self, x):
+    def forward(self, x, skip_norm: bool = False):
         """
         Execute the forward computation of the module.
 

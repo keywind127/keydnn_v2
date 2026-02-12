@@ -197,11 +197,11 @@ if __name__ == "__main__":
     # Convert Keras model -> KeyDNN
     keydnn_model = from_keras(
         keras_model,
-        device="cuda:0",
+        device="cpu",
         allow_non_linear_activation=True,
     )
 
-    keydnn_model = kd.Sequential(*keydnn_model)
+    # keydnn_model = kd.Sequential(*keydnn_model)
 
     print("Model Type:", type(keydnn_model))
 

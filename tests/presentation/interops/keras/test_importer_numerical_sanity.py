@@ -32,6 +32,7 @@ from unittest import TestCase
 import numpy as np
 
 from src.keydnn.domain.device._device import Device
+from src.keydnn.infrastructure._module import Module
 from src.keydnn.presentation.interops.keras.importer import from_keras
 
 
@@ -66,7 +67,7 @@ def _get_tf():
     return tf
 
 
-def _as_list(kd_out):
+def _as_list(kd_out) -> list[Module]:
     """
     Normalize importer output into an ordered list of modules.
 
@@ -86,6 +87,8 @@ def _as_list(kd_out):
     for attr in ("modules", "layers"):
         if hasattr(kd_out, attr):
             v = getattr(kd_out, attr)
+            if callable(v):
+                v = v()
             if isinstance(v, (list, tuple)):
                 return list(v)
 
