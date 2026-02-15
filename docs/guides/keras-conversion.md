@@ -26,17 +26,9 @@ Conversion consists of two logical phases:
 
 Conversion can be performed via:
 
-- Python API:
-  ```python
-  from keydnn import from_keras
-  model = from_keras("model.h5")
-  ```
+- Python API: ```from keydnn import from_keras; model = from_keras("model.h5")```
 
-* CLI:
-
-  ```bash
-  python -m keydnn convert --src model.h5 --dst model.json
-  ```
+* CLI: ```python -m keydnn convert --src model.h5 --dst model.json```
 
 ---
 
