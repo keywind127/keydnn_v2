@@ -349,6 +349,17 @@ if __name__ == "__main__":
     print("acc:", _accuracy_from_pred_np(y_base, pred_np))
 ```
 
+### Keras → KeyDNN model conversion (Sequential)
+
+KeyDNN can convert a supported **Keras Sequential** model into an equivalent KeyDNN module graph,
+preserving weights deterministically.
+
+> Notes:
+>
+> - Conversion currently targets **Keras Sequential** models and a supported layer subset.
+> - Keras fused activations (e.g., `Dense(..., activation="relu")`) may be normalized into explicit KeyDNN activation modules.
+> - For CLI conversion, see: `python -m keydnn convert --src model.h5 --dst model.json`
+
 ---
 
 ## Feature / Backend Support Matrix
