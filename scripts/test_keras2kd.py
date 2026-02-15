@@ -35,7 +35,7 @@ than automated unit testing.
 
 import numpy as np
 
-from tensorflow.keras.layers import Dense, Softmax, Input
+from tensorflow.keras.layers import Dense, Softmax, ReLU, Input
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.optimizers import Adam
 
@@ -65,7 +65,8 @@ def build_keras_model() -> Sequential:
     return Sequential(
         [
             Input(shape=(2,)),
-            Dense(32, activation="relu", name="hidden"),
+            Dense(32, activation="linear", name="hidden"),
+            ReLU(),
             Dense(2, activation="linear", name="output"),
             Softmax(axis=-1),
         ]
@@ -214,7 +215,7 @@ if __name__ == "__main__":
     # This currently reuses Keras predictions.
     # Replace with keydnn_model.forward(...) if performing
     # full forward-parity validation.
-    kd_res: np.ndarray = keras_model.predict(train_x)
+    kd_res: np.ndarray = keydnn_model.predict(kd.numpy_to_tensor(train_x)).to_numpy()
 
     print("Max: {}, Min: {}".format(kd_res.max(), kd_res.min()))
 

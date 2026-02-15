@@ -354,6 +354,52 @@ if __name__ == "__main__":
 KeyDNN can convert a supported **Keras Sequential** model into an equivalent KeyDNN module graph,
 preserving weights deterministically.
 
+```python
+import numpy as np
+
+import keydnn as kd
+from keydnn import from_keras
+
+# Optional dependency: TensorFlow/Keras
+from tensorflow.keras.layers import Dense, Input, Softmax, ReLU
+from tensorflow.keras.models import Sequential
+
+
+def build_keras_model() -> Sequential:
+    # Tip: explicit activation layers are recommended for the cleanest conversion.
+    return Sequential(
+        [
+            Input(shape=(2,)),
+            Dense(32, activation="linear", name="hidden"),
+            ReLU(),
+            Dense(2, activation="linear", name="output"),
+            Softmax(axis=-1),
+        ]
+    )
+
+
+if __name__ == "__main__":
+    keras_model = build_keras_model()
+
+    # Convert Keras -> KeyDNN (strict by default)
+    kd_model = from_keras(keras_model)
+
+    # Run a quick forward pass and compare outputs
+    x_np = np.array([[0.0, 1.0], [1.0, 0.0]], dtype=np.float32)
+
+    y_keras = keras_model.predict(x_np)
+
+    x_kd = kd.numpy_to_tensor(x_np, device=kd.Device("cpu"))
+    y_kd = kd_model(x_kd).to_numpy()
+
+    print("keras:", y_keras)
+    print("keydnn:", y_kd)
+
+    # (Optional) Save the converted KeyDNN model as a JSON checkpoint
+    kd_model.save_json("converted_model.json")
+
+```
+
 > Notes:
 >
 > - Conversion currently targets **Keras Sequential** models and a supported layer subset.
