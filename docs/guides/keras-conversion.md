@@ -49,6 +49,88 @@ The following Keras layers are currently supported by the importer.
 * `data_format="channels_first"` is expected for convolution and pooling layers.
 * Kernel size, stride, padding, and bias must be explicitly defined or inferable.
 
+## ⚠️ Important: Convolution Layers Must Use `channels_first`
+
+Keras defaults to:
+
+```
+data_format="channels_last"  # (N, H, W, C)
+```
+
+However, KeyDNN internally uses **NCHW layout**:
+
+```
+(N, C, H, W)
+```
+
+Therefore, all convolution and pooling layers **must explicitly specify**:
+
+```python
+data_format="channels_first"
+```
+
+### Example (Correct)
+
+```python
+Conv2D(
+    32,
+    kernel_size=3,
+    padding="same",
+    data_format="channels_first",
+)
+```
+
+### Incorrect (Default Keras Behavior)
+
+```python
+Conv2D(32, 3)  # ❌ defaults to channels_last
+```
+
+This will raise:
+
+```
+KerasInteropError: Keras Conv2D with data_format='channels_last' is not supported in Phase 1.
+```
+
+---
+
+### Why Is This Required?
+
+KeyDNN:
+
+- assumes NCHW layout at the tensor level,
+- maps convolution weights directly without layout permutation,
+- does not perform implicit tensor transpositions during import.
+
+Allowing `channels_last` would require automatic graph rewriting and tensor reordering, which violates KeyDNN's design principles:
+
+- **Explicit over implicit**
+- **Deterministic conversion**
+- **No hidden layout transformations**
+
+---
+
+### Recommended Pattern
+
+For CNN models intended for conversion:
+
+```python
+layers.Input(shape=(1, 28, 28)),  # NCHW
+
+Conv2D(..., data_format="channels_first"),
+BatchNormalization(axis=1),
+ReLU(),
+MaxPool2D(..., data_format="channels_first"),
+```
+
+Always ensure:
+
+- Input tensors are `(C, H, W)`
+- `BatchNormalization(axis=1)` for channel dimension
+- All pooling layers also use `channels_first`
+
+---
+
 ### ⚠️ Important: `GlobalAveragePooling2D` Requires Explicit `Flatten`
 
 When converting models that use:
