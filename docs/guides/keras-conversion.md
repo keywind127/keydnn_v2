@@ -49,7 +49,7 @@ The following Keras layers are currently supported by the importer.
 * `data_format="channels_first"` is expected for convolution and pooling layers.
 * Kernel size, stride, padding, and bias must be explicitly defined or inferable.
 
-## ⚠️ Important: Convolution Layers Must Use `channels_first`
+### ⚠️ Important: Convolution Layers Must Use `channels_first`
 
 Keras defaults to:
 
