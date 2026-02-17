@@ -49,6 +49,49 @@ The following Keras layers are currently supported by the importer.
 * `data_format="channels_first"` is expected for convolution and pooling layers.
 * Kernel size, stride, padding, and bias must be explicitly defined or inferable.
 
+### ⚠️ Important: `GlobalAveragePooling2D` Requires Explicit `Flatten`
+
+When converting models that use:
+
+```
+GlobalAveragePooling2D
+```
+
+it is strongly recommended to **explicitly insert a `Flatten` layer immediately after**:
+
+```python
+GlobalAveragePooling2D(data_format="channels_first"),
+Flatten(),
+Dense(...)
+```
+
+### Why?
+
+Although Keras may return a tensor shaped `(N, C)` after global pooling,
+the KeyDNN importer operates under explicit shape semantics and expects
+a clear dimensional transition before `Dense`.
+
+Without an explicit `Flatten`:
+
+- Shape inference may become ambiguous.
+- Conversion may succeed but produce unintended tensor reshaping behavior.
+- Future strict-mode checks may reject the model.
+
+KeyDNN prioritizes **explicit shape transitions** over implicit assumptions.
+
+### Recommended Pattern
+
+```python
+Conv2D(..., data_format="channels_first"),
+BatchNormalization(axis=1),
+ReLU(),
+MaxPool2D(..., data_format="channels_first"),
+
+GlobalAveragePooling2D(data_format="channels_first"),
+Flatten(),  # <-- required for safe conversion
+Dense(64),
+```
+
 ---
 
 ### Dense & Shape Layers
