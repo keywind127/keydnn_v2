@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from typing import Dict, Iterator, Optional, Any
+from typing_extensions import Self
 
 from ..domain._module import IModule
 from ..domain._parameter import IParameter
@@ -60,6 +61,43 @@ class Module(IModule):
         super().__setattr__("_modules", {})  # type: ignore[assignment]
         self._parameters: Dict[str, IParameter]
         self._modules: Dict[str, "Module"]
+        self.training = True
+
+    def train(self) -> Self:
+        """
+        Set this module to training mode and recursively set all child modules
+        to training mode.
+
+        Notes
+        -----
+        - This toggles `self.training = True`.
+        - Modules that behave differently in training (e.g., Dropout, BatchNorm)
+        should read `self.training` during forward/predict to decide behavior.
+        - This method is intended to mirror PyTorch's `Module.train()`.
+        """
+        self.training = True
+        for child in self._modules.values():
+            if isinstance(child, Module):
+                child.train()
+        return self
+
+    def eval(self) -> Self:
+        """
+        Set this module to evaluation (inference) mode and recursively set all
+        child modules to evaluation mode.
+
+        Notes
+        -----
+        - This toggles `self.training = False`.
+        - In eval mode, modules such as Dropout should be disabled, and BatchNorm
+        should use running statistics (if implemented).
+        - This method is intended to mirror PyTorch's `Module.eval()`.
+        """
+        self.training = False
+        for child in self._modules.values():
+            if isinstance(child, Module):
+                child.eval()
+        return self
 
     def __setattr__(self, name: str, value) -> None:
         """
