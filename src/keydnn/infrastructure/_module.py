@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from typing import Dict, Iterator, Optional, Any
+from typing_extensions import Self
 
 from ..domain._module import IModule
 from ..domain._parameter import IParameter
@@ -62,75 +63,41 @@ class Module(IModule):
         self._modules: Dict[str, "Module"]
         self.training = True
 
-    def train(self) -> None:
+    def train(self) -> Self:
         """
-        This function aims to configure all subsequent modules to be train-only.
-        """
+        Set this module to training mode and recursively set all child modules
+        to training mode.
 
-        # Configure the current module to be in train mode
+        Notes
+        -----
+        - This toggles `self.training = True`.
+        - Modules that behave differently in training (e.g., Dropout, BatchNorm)
+        should read `self.training` during forward/predict to decide behavior.
+        - This method is intended to mirror PyTorch's `Module.train()`.
+        """
         self.training = True
+        for child in self._modules.values():
+            if isinstance(child, Module):
+                child.train()
+        return self
 
-        # Iterate over children modules.
-        for layer in self._modules.values():
-
-            # >> Skip if the child is not a Module or it does not have an `train` attribute.
-            if not isinstance(layer, Module):
-                continue
-            if not hasattr(layer, "train"):
-                continue
-            # << ===========================================================================
-
-            # Invoke the child's `train` method to set subsequent layers to train mode as well
-            if callable(layer.train):
-                layer.train()
-                continue
-
-            # Fallback: manually configure the `training` attribute
-
-            # Skip if the child does not have a training attribute
-            if not hasattr(layer, "training"):
-                continue
-
-            # Set the attribute either by setter invocation or attribute override
-            if callable(layer.training):
-                layer.training(True)
-            else:
-                layer.training = True
-
-    def eval(self) -> None:
+    def eval(self) -> Self:
         """
-        This function aims to configure all subsequent modules to be test-only.
-        """
+        Set this module to evaluation (inference) mode and recursively set all
+        child modules to evaluation mode.
 
-        # Configure the current module to be test-only.
+        Notes
+        -----
+        - This toggles `self.training = False`.
+        - In eval mode, modules such as Dropout should be disabled, and BatchNorm
+        should use running statistics (if implemented).
+        - This method is intended to mirror PyTorch's `Module.eval()`.
+        """
         self.training = False
-
-        # Iterate over children modules.
-        for layer in self._modules.values():
-
-            # >> Skip if the child is not a Module or it does not have an `eval` attribute.
-            if not isinstance(layer, Module):
-                continue
-            if not hasattr(layer, "eval"):
-                continue
-            # << ===========================================================================
-
-            # Invoke the child's `eval` method to set subsequent layers to eval mode as well
-            if callable(layer.eval):
-                layer.eval()
-                continue
-
-            # Fallback: manually configure the `training` attribute
-
-            # Skip if the child does not have a training attribute
-            if not hasattr(layer, "training"):
-                continue
-
-            # Set the attribute either by setter invocation or attribute override
-            if callable(layer.training):
-                layer.training(False)
-            else:
-                layer.training = False
+        for child in self._modules.values():
+            if isinstance(child, Module):
+                child.eval()
+        return self
 
     def __setattr__(self, name: str, value) -> None:
         """
