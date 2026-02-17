@@ -175,13 +175,7 @@ def set_keydnn_eval_mode(model: kd.Sequential) -> None:
     """
     Best-effort: put KeyDNN modules into eval mode so BN/Dropout behave like inference.
     """
-    for layer in model.layers():
-        if not hasattr(layer, "training"):
-            continue
-        if callable(layer.training):
-            layer.training(False)
-        else:
-            layer.training = False
+    model.eval()
 
 
 # --------------------------------------------------------------------------------------

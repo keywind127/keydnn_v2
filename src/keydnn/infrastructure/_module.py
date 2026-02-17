@@ -60,6 +60,77 @@ class Module(IModule):
         super().__setattr__("_modules", {})  # type: ignore[assignment]
         self._parameters: Dict[str, IParameter]
         self._modules: Dict[str, "Module"]
+        self.training = True
+
+    def train(self) -> None:
+        """
+        This function aims to configure all subsequent modules to be train-only.
+        """
+
+        # Configure the current module to be in train mode
+        self.training = True
+
+        # Iterate over children modules.
+        for layer in self._modules.values():
+
+            # >> Skip if the child is not a Module or it does not have an `train` attribute.
+            if not isinstance(layer, Module):
+                continue
+            if not hasattr(layer, "train"):
+                continue
+            # << ===========================================================================
+
+            # Invoke the child's `train` method to set subsequent layers to train mode as well
+            if callable(layer.train):
+                layer.train()
+                continue
+
+            # Fallback: manually configure the `training` attribute
+
+            # Skip if the child does not have a training attribute
+            if not hasattr(layer, "training"):
+                continue
+
+            # Set the attribute either by setter invocation or attribute override
+            if callable(layer.training):
+                layer.training(True)
+            else:
+                layer.training = True
+
+    def eval(self) -> None:
+        """
+        This function aims to configure all subsequent modules to be test-only.
+        """
+
+        # Configure the current module to be test-only.
+        self.training = False
+
+        # Iterate over children modules.
+        for layer in self._modules.values():
+
+            # >> Skip if the child is not a Module or it does not have an `eval` attribute.
+            if not isinstance(layer, Module):
+                continue
+            if not hasattr(layer, "eval"):
+                continue
+            # << ===========================================================================
+
+            # Invoke the child's `eval` method to set subsequent layers to eval mode as well
+            if callable(layer.eval):
+                layer.eval()
+                continue
+
+            # Fallback: manually configure the `training` attribute
+
+            # Skip if the child does not have a training attribute
+            if not hasattr(layer, "training"):
+                continue
+
+            # Set the attribute either by setter invocation or attribute override
+            if callable(layer.training):
+                layer.training(False)
+            else:
+                layer.training = False
 
     def __setattr__(self, name: str, value) -> None:
         """
