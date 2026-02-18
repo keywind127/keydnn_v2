@@ -11,8 +11,8 @@ It is designed to be both:
 - a **learning-friendly** implementation of modern DL abstractions (Tensor, autograd, modules), and
 - a **performance-oriented sandbox** for building real backends (native CPU kernels, CUDA kernels, vendor libraries).
 
-> 🚧 **Status:** **v2.1.0 (beta)**.  
-> The v2 public API is largely stable and actively evolving toward a v2.1 release.
+> 🚧 **Status:** **v2.1.0**.  
+> The v2 public API is largely stable and continues to evolve incrementally within the v2.x line.
 > Breaking changes are avoided when possible and documented when necessary.  
 > 📚 **Documentation:** https://keywind127.github.io/keydnn_v2/  
 > 💻 **Source:** https://github.com/keywind127/keydnn_v2

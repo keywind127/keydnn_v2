@@ -21,7 +21,7 @@ long_description = (ROOT / "README_PYPI.md").read_text(encoding="utf-8")
 
 setuptools.setup(
     name="keydnn",
-    version="2.1.0b2",  # PEP 440 compliant
+    version="2.1.0",  # PEP 440 compliant
     author="keywind",
     author_email="watersprayer127@gmail.com",
     description=(
