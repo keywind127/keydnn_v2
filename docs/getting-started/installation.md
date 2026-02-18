@@ -2,7 +2,7 @@
 
 KeyDNN is a lightweight deep learning framework implemented from scratch in Python with a practical CPU/CUDA execution stack.
 
-> **Platform support (v2.0.0):** Windows 10/11 x64 is the supported platform (CPU + CUDA).  
+> **Platform support (v2.1.0):** Windows 10/11 x64 is the supported platform (CPU + CUDA).  
 > Linux/macOS may build for CPU-only use, but are not officially supported or CI-validated yet.
 
 ---
